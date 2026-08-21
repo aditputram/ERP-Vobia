@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Production & QC · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">OPERATION · PRODUCTION</p><h1>Quality Control</h1><p>QC dilakukan setelah PO dirilis. QC Passed belum menambah stock; inventory baru bertambah ketika gudang mencatat inbound fisik.</p></div>
+  <span class="status-chip"><span></span> Partial QC didukung</span>
+</header>
+<section class="dashboard-grid">
+  <article class="panel">
+    <div class="panel-header"><div><p class="eyebrow">RECORD QC</p><h2>Inspected, Passed, Failed</h2></div></div>
+    <form method="post" class="stack-form">{% csrf_token %}{{ qc_form.as_p }}<button class="primary-button" type="submit">Simpan QC</button></form>
+  </article>
+  <article class="panel span-two">
+    <div class="panel-header"><div><p class="eyebrow">QC HISTORY</p><h2>Pemeriksaan yang sudah dicatat</h2></div><span class="pill">Actual ERP only</span></div>
+    {% if qc_records %}<div class="table-wrap"><table><thead><tr><th>QC Date</th><th>No. PO</th><th>SKU</th><th>Inspected</th><th>Passed</th><th>Failed</th><th>Disposition</th><th>Checked By</th></tr></thead><tbody>
+    {% for row in qc_records %}<tr><td>{{ row.inspected_at|date:"d M Y H:i" }}</td><td>{{ row.po_line.po.po_number }}</td><td><span class="code-label">{{ row.po_line.sku.sku }}</span></td><td>{{ row.qty_inspected|floatformat:"0g" }}</td><td>{{ row.qty_passed|floatformat:"0g" }}</td><td>{{ row.qty_failed|floatformat:"0g" }}</td><td>{{ row.get_failed_disposition_display|default:"—" }}</td><td>{{ row.recorded_by.username }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty-state">Belum ada QC aktual. Data QC percobaan pada Vobia MD tidak dibawa ke ERP.</div>{% endif %}
+  </article>
+</section>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% load static %}
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Setup Awal · Vobia ERP</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body class="auth-page">
+    <main class="auth-layout">
+        <section class="auth-story">
+            <div class="brand auth-brand">
+                <span class="brand-mark">V</span>
+                <span><strong>VOBIA</strong><small>ERP</small></span>
+            </div>
+            <div>
+                <p class="eyebrow light">ONE-TIME LOCAL SETUP</p>
+                <h1>Buat akses pertama dengan aman.</h1>
+                <p>Password diketik langsung di browser lokal, diubah menjadi hash, dan tidak pernah disimpan di source code atau dokumentasi.</p>
+            </div>
+            <div class="auth-principles"><span>Localhost only</span><span>One time only</span><span>Hashed password</span></div>
+        </section>
+
+        <section class="auth-panel">
+            <form class="auth-card" method="post" novalidate>
+                {% csrf_token %}
+                <div>
+                    <p class="eyebrow">INITIAL SUPERADMIN</p>
+                    <h2>Aktifkan vobiasuperadmin</h2>
+                    <p class="muted">Buat password yang panjang, unik, dan tidak dipakai di akun lain.</p>
+                </div>
+                {% if form.non_field_errors %}<div class="form-alert">{{ form.non_field_errors|striptags }}</div>{% endif %}
+                <label for="id_password1">Password baru</label>
+                {{ form.password1 }}
+                {% for error in form.password1.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                <label for="id_password2">Ulangi password</label>
+                {{ form.password2 }}
+                {% for error in form.password2.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                <button class="primary-button wide" type="submit">Buat akun &amp; masuk</button>
+                <p class="security-note">Halaman ini otomatis nonaktif setelah akun berhasil dibuat.</p>
+            </form>
+        </section>
+    </main>
+</body>
+</html>
+

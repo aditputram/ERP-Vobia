@@ -1,0 +1,57 @@
+<header class="page-header">
+  <div><p class="eyebrow">MERCHANDISING</p><h1>Projection &amp; Incoming Plan</h1><p>Preview rule per Status, Category, atau Product. Hanya nilai yang Adit approve yang mengalir ke PPIC.</p></div>
+  <span class="status-chip"><span></span> Planning, bukan stock actual</span>
+</header>
+
+<section class="dashboard-grid">
+  <article class="panel">
+    <div class="panel-header"><div><p class="eyebrow">01 · SCENARIO</p><h2>Buat periode planning</h2></div></div>
+    <form method="post" class="stack-form">
+      {% csrf_token %}<input type="hidden" name="form_name" value="scenario">
+      {{ scenario_form.as_p }}
+      <button class="primary-button" type="submit">Buat scenario</button>
+    </form>
+  </article>
+  <article class="panel span-two">
+    <div class="panel-header"><div><p class="eyebrow">02 · PROJECTION BUILDER</p><h2>Filter dan metode per kelompok produk</h2></div></div>
+    <form method="post" class="stack-form">
+      {% csrf_token %}<input type="hidden" name="form_name" value="builder">
+      {% if builder_form.non_field_errors %}<div class="form-alert">{{ builder_form.non_field_errors }}</div>{% endif %}
+      <div class="form-grid">{{ builder_form.as_p }}</div>
+      <div class="header-actions">
+        <button class="secondary-button" name="action" value="preview" type="submit">Preview dulu</button>
+        {% if preview_rows and not preview_errors %}<button class="primary-button" name="action" value="apply" type="submit">Apply rule</button>{% endif %}
+      </div>
+    </form>
+  </article>
+</section>
+
+{% if preview_errors %}
+<section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">BLOCKER</p><h2>Preview belum dapat diterapkan</h2></div></div>
+  <div class="issue-list">{% for error in preview_errors %}<div class="issue-row error"><span>ERROR</span><div><strong>{{ error }}</strong></div></div>{% endfor %}</div>
+</section>
+{% endif %}
+{% if preview_rows %}
+<section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">PREVIEW</p><h2>{{ preview_rows|length|floatformat:"0g" }} SKU terdampak</h2></div><span class="pill">Belum tersimpan</span></div>
+  <div class="table-wrap"><table><thead><tr><th>SKU</th><th>Baseline</th><th>Beginning</th><th>System recommendation</th></tr></thead><tbody>
+  {% for row in preview_rows %}<tr><td><span class="code-label">{{ row.sku.sku }}</span></td><td>{{ row.baseline_qty|floatformat:"2g" }}</td><td>{{ row.beginning_qty|floatformat:"2g" }}</td><td><strong>{{ row.recommendation|floatformat:"2g" }}</strong></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">APPROVAL</p><h2>Sales Projection</h2></div><span class="pill">Whole units only</span></div>
+  {% if projections %}<div class="table-wrap"><table><thead><tr><th>Month</th><th>SKU</th><th>System</th><th>Final</th><th>Status</th><th>Action</th></tr></thead><tbody>
+  {% for row in projections %}<tr><td>{{ row.month|date:"M Y" }}</td><td><span class="code-label">{{ row.sku.sku }}</span></td><td>{{ row.system_recommendation|floatformat:"2g" }}</td><td>{% if row.final_approved_qty != None %}{{ row.final_approved_qty|floatformat:"0g" }}{% else %}—{% endif %}</td><td><span class="status-badge {% if row.approval_status == 'APPROVED' %}ready{% endif %}">{{ row.get_approval_status_display }}</span></td><td>
+    {% if row.approval_status == 'DRAFT' %}<form method="post" action="{% url 'merchandising:approve_projection' row.id %}" class="inline-form">{% csrf_token %}<input name="final_qty" type="number" min="0" step="1" value="{{ row.system_recommendation|floatformat:0 }}" required><button class="primary-button compact" type="submit">Approve</button></form>
+    {% else %}<form method="post" action="{% url 'merchandising:make_incoming' row.id %}" class="inline-form">{% csrf_token %}<input name="prior_ending_qty" type="number" step="1" min="0" value="{{ row.beginning_qty|floatformat:0 }}" required><input name="target_stock_ratio" type="number" step="0.01" min="0.01" placeholder="SR optional"><button class="secondary-button compact" type="submit">Create Incoming</button></form>{% endif %}
+  </td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty-state">Projection akan muncul setelah rule di-apply.</div>{% endif %}
+</section>
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">INCOMING</p><h2>Incoming Plan → PPIC</h2></div></div>
+  {% if incoming_plans %}<div class="table-wrap"><table><thead><tr><th>Month</th><th>SKU</th><th>Minimum</th><th>Recommended</th><th>Final</th><th>Status</th><th>Action</th></tr></thead><tbody>
+  {% for row in incoming_plans %}<tr><td>{{ row.month|date:"M Y" }}</td><td><span class="code-label">{{ row.sku.sku }}</span></td><td>{{ row.minimum_incoming|floatformat:"0g" }}</td><td>{{ row.recommended_incoming|floatformat:"0g" }}</td><td>{% if row.final_approved_incoming != None %}{{ row.final_approved_incoming|floatformat:"0g" }}{% else %}—{% endif %}</td><td><span class="status-badge {% if row.approval_status == 'APPROVED' %}ready{% endif %}">{{ row.get_approval_status_display }}</span></td><td>{% if row.approval_status == 'DRAFT' %}<form method="post" action="{% url 'merchandising:approve_incoming' row.id %}" class="inline-form">{% csrf_token %}<input name="final_incoming" type="number" min="{{ row.minimum_incoming|floatformat:"0u" }}" step="1" value="{{ row.recommended_incoming|floatformat:"0u" }}" required><button class="primary-button compact" type="submit">Approve → PPIC</button></form>{% else %}<span class="muted">Synced otomatis</span>{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty-state">Belum ada Incoming Plan.</div>{% endif %}
+</section>

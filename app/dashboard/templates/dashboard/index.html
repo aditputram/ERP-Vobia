@@ -1,0 +1,84 @@
+{% load static %}
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Pilih Modul · Vobia ERP</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260820-16">
+</head>
+<body class="module-hub-page">
+    <header class="module-topbar">
+        <a class="brand module-brand" href="{% url 'dashboard:index' %}">
+            <img class="brand-logo" src="{% static 'img/logo-vobia.png' %}" alt="Vobia">
+        </a>
+        <div class="module-user">
+            <span class="module-user-copy"><small>SUPER ADMIN</small><strong>{{ request.user.username }}</strong></span>
+            <span class="user-avatar">{{ request.user.username|slice:":1"|upper }}</span>
+            <form method="post" action="{% url 'accounts:logout' %}">
+                {% csrf_token %}
+                <button class="module-logout" type="submit">Keluar</button>
+            </form>
+        </div>
+    </header>
+
+    <main class="module-hub">
+        {% if messages %}
+            <div class="messages module-messages">
+                {% for message in messages %}<div class="message {{ message.tags }}">{{ message }}</div>{% endfor %}
+            </div>
+        {% endif %}
+
+        <section class="module-hero">
+            <div>
+                <p class="eyebrow">VOBIA BUSINESS SYSTEM</p>
+                <h1>Pilih modul kerja.</h1>
+                <p>Setiap divisi memiliki ruang kerja sendiri, tetapi tetap terhubung dalam satu data dan audit trail Vobia.</p>
+            </div>
+            <div class="module-hero-note">
+                <span>01</span>
+                <div><strong>Mulai dari Sales</strong><small>Sales sedang menjadi fokus implementasi dan parallel run.</small></div>
+            </div>
+        </section>
+
+        <section class="module-grid" aria-label="Daftar modul ERP">
+            {% for module in modules %}
+                <article class="module-card module-{{ module.accent }} {% if not module.available %}coming-soon{% endif %}">
+                    <div class="module-card-top">
+                        <span class="module-icon" aria-hidden="true">
+                            {% if module.slug == "sales" %}
+                                <svg viewBox="0 0 32 32"><path d="M5 24V13m7 11V8m7 16V16m7 8V5"/><path d="m4 10 8-5 7 7 9-9"/></svg>
+                            {% elif module.slug == "operation" %}
+                                <svg viewBox="0 0 32 32"><path d="M5 9h22v16H5z"/><path d="M10 9V5h12v4M5 15h22M12 20h8"/></svg>
+                            {% elif module.slug == "rnd" %}
+                                <svg viewBox="0 0 32 32"><path d="M12 4h8M14 4v8L7 24a3 3 0 0 0 3 4h12a3 3 0 0 0 3-4l-7-12V4"/><path d="M10 21h12"/></svg>
+                            {% elif module.slug == "marketing" %}
+                                <svg viewBox="0 0 32 32"><path d="m5 18 18-8v16L5 18Z"/><path d="M23 14h4m-4-8 2-3m-2 15 3 3M8 19l2 9h5l-2-7"/></svg>
+                            {% elif module.slug == "finance" %}
+                                <svg viewBox="0 0 32 32"><path d="M5 11h22M7 11v14m6-14v14m6-14v14m6-14v14M4 26h24M16 4 4 10h24L16 4Z"/></svg>
+                            {% else %}
+                                <svg viewBox="0 0 32 32"><circle cx="16" cy="10" r="5"/><path d="M7 28c0-6 4-10 9-10s9 4 9 10M5 11a4 4 0 0 0 0 8m22-8a4 4 0 0 1 0 8"/></svg>
+                            {% endif %}
+                        </span>
+                        <span class="module-status">{{ module.status }}</span>
+                    </div>
+                    <div class="module-card-copy">
+                        <p>{{ module.eyebrow }}</p>
+                        <h2>{{ module.name }}</h2>
+                        <span>{{ module.description }}</span>
+                    </div>
+                    <a class="module-card-action" href="{% url 'dashboard:enter_module' module.slug %}">
+                        {% if module.available %}Buka modul <span>→</span>{% else %}Lihat status <span>→</span>{% endif %}
+                    </a>
+                </article>
+            {% endfor %}
+        </section>
+    </main>
+
+    <footer class="module-footer">
+        <span>VOBIA ERP · PRIVATE SYSTEM</span>
+        <span>Asia/Jakarta · Single-user MVP</span>
+    </footer>
+</body>
+</html>

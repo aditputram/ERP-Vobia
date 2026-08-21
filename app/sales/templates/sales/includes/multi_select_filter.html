@@ -1,0 +1,9 @@
+<div class="filter-field multi-select-field" data-multi-select data-all-label="{{ all_label }}">
+  <span class="filter-label">{{ label }}</span>
+  <button class="multi-select-trigger" type="button" aria-expanded="false"><span data-filter-summary>{% if selected|length == 1 %}{{ selected.0 }}{% elif selected %}{{ selected|length }} selected{% else %}{{ all_label }}{% endif %}</span><span aria-hidden="true">⌄</span></button>
+  <div class="multi-select-menu" data-filter-menu hidden>
+    <label class="multi-select-search">Search {{ label }}<input type="search" placeholder="{{ search_placeholder }}" autocomplete="off" data-filter-search></label>
+    <div class="multi-select-toolbar"><span data-filter-result-count>{{ options|length }} pilihan</span><button type="button" data-filter-clear>Clear All</button></div>
+    <div class="multi-select-options">{% for item in options %}<label class="multi-select-option"><input type="checkbox" name="{{ name }}" value="{{ item }}" {% if item in selected %}checked{% endif %}><span>{{ item }}</span></label>{% empty %}<div class="empty-state">Belum ada pilihan.</div>{% endfor %}</div>
+  </div>
+</div>

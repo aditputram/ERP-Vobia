@@ -1,0 +1,56 @@
+<script>
+(() => {
+  document.querySelectorAll('[data-multi-select]').forEach(root => {
+    const trigger = root.querySelector('.multi-select-trigger');
+    const menu = root.querySelector('[data-filter-menu]');
+    const search = root.querySelector('[data-filter-search]');
+    const summary = root.querySelector('[data-filter-summary]');
+    const resultCount = root.querySelector('[data-filter-result-count]');
+    const options = [...root.querySelectorAll('.multi-select-option')];
+    const checks = options.map(option => option.querySelector('input[type="checkbox"]'));
+    const updateSummary = () => {
+      const selected = checks.filter(check => check.checked);
+      summary.textContent = selected.length === 0 ? root.dataset.allLabel : (selected.length === 1 ? selected[0].value : `${selected.length} selected`);
+    };
+    const filterOptions = () => {
+      const keyword = search.value.trim().toLocaleLowerCase('id');
+      let visible = 0;
+      options.forEach(option => {
+        const match = option.textContent.toLocaleLowerCase('id').includes(keyword);
+        option.hidden = !match;
+        if (match) visible += 1;
+      });
+      resultCount.textContent = `${visible} pilihan`;
+    };
+    const closeMenu = () => {
+      const wasOpen = !menu.hidden;
+      menu.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+      if (wasOpen && root.dataset.dirty === 'true') {
+        root.dataset.dirty = 'false';
+        root.closest('form').dispatchEvent(new CustomEvent('filters:auto-submit'));
+      }
+    };
+    trigger.addEventListener('click', () => {
+      if (!menu.hidden) return closeMenu();
+      menu.hidden = false;
+      trigger.setAttribute('aria-expanded', 'true');
+      search.focus();
+      filterOptions();
+    });
+    search.addEventListener('input', filterOptions);
+    checks.forEach(check => check.addEventListener('change', () => {
+      root.dataset.dirty = 'true';
+      updateSummary();
+    }));
+    root.querySelector('[data-filter-clear]').addEventListener('click', () => {
+      checks.forEach(check => { check.checked = false; });
+      root.dataset.dirty = 'true';
+      updateSummary();
+    });
+    document.addEventListener('click', event => { if (!root.contains(event.target)) closeMenu(); });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenu(); });
+    updateSummary();
+  });
+})();
+</script>

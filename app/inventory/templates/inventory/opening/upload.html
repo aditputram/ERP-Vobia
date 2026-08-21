@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Upload FIFO Opening · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">RAW CUTOVER EXPORT</p><h1>Upload FIFO Opening</h1><p>Export tab FIFO Opening dari Vobia MD 2026 sebagai .xlsx atau .csv. Raw file disimpan sebagai evidence.</p></div></header>
+<section class="dashboard-grid"><article class="panel span-two"><form method="post" enctype="multipart/form-data" class="stack-form">{% csrf_token %}{{ form.as_p }}<button class="primary-button" type="submit">Parse dan buat preview</button></form></article><aside class="panel"><p class="eyebrow">VALIDATION</p><h2>Yang diperiksa</h2><ul class="check-list"><li>✓ Seluruh SKU Master muncul tepat sekali.</li><li>✓ Cutover Date wajib 1 Agustus 2026.</li><li>✓ Qty wajib bilangan bulat; negatif dipertahankan.</li><li>✓ Frozen Unit COGS wajib nonnegative.</li><li>✓ Commit atomic dan snapshot immutable.</li></ul></aside></section>
+{% endblock %}

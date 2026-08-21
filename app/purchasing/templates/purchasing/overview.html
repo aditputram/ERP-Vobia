@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}PPIC & Purchase Order · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">PPIC &amp; PURCHASING</p><h1>Requirement → Review → Create PO</h1><p>Approved Incoming membentuk requirement. Review tidak menyimpan data; Draft PO baru dibuat setelah konfirmasi.</p></div><div class="header-actions"><a class="secondary-button" href="{% url 'purchasing:tracking' %}">Buka PO Tracking</a><span class="status-chip"><span></span> PO format otomatis</span></div></header>
+
+<section class="dashboard-grid">
+  <article class="panel span-two">
+    <div class="panel-header"><div><p class="eyebrow">REVIEW PO</p><h2>Requirement yang belum dialokasikan</h2></div></div>
+    <form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="form_name" value="requirement_po">
+      {{ header_form.as_p }}
+      {% if requirements %}<div class="table-wrap"><table><thead><tr><th>Pilih</th><th>Need Month</th><th>SKU</th><th>Approved</th><th>Ordered</th><th>Remaining</th><th>PO Qty</th></tr></thead><tbody>
+      {% for row in requirements %}<tr><td><input type="checkbox" name="requirements" value="{{ row.id }}" {% if row.ui_selected %}checked{% endif %}></td><td>{{ row.need_month|date:"M Y" }}</td><td><span class="code-label">{{ row.sku.sku }}</span><small class="table-subtext">{{ row.sku.product_variant.product.name }}</small></td><td>{{ row.approved_qty|floatformat:"0g" }}</td><td>{{ row.ordered_qty|floatformat:"0g" }}</td><td>{{ row.remaining_qty|floatformat:"0g" }}</td><td><input class="table-input" type="number" name="qty_{{ row.id }}" min="1" max="{{ row.remaining_qty|floatformat:"0u" }}" step="1" value="{{ row.ui_quantity|floatformat:"0u" }}"></td></tr>{% endfor %}
+      </tbody></table></div>
+      {% if po_preview %}
+      <section class="approval-panel">
+        <div class="panel-header"><div><p class="eyebrow">REVIEW RESULT · BELUM TERSIMPAN</p><h2>Konfirmasi Draft PO</h2></div><span class="status-badge parsing">Preview only</span></div>
+        <dl class="quality-list">
+          <div><dt>Supplier</dt><dd>{{ po_preview.supplier.name }}</dd></div>
+          <div><dt>Need Month</dt><dd>{{ po_preview.need_month|date:"M Y" }}</dd></div>
+          <div><dt>Required Arrival</dt><dd>{{ po_preview.required_arrival|date:"d M Y" }}</dd></div>
+          <div><dt>Total Qty</dt><dd>{{ po_preview.total_qty|floatformat:"0g" }}</dd></div>
+          <div><dt>Estimasi COGS saat ini</dt><dd>Rp {{ po_preview.total_cogs|floatformat:"0g" }}</dd></div>
+        </dl>
+        <div class="table-wrap"><table><thead><tr><th>SKU</th><th>Qty</th><th>Current COGS</th><th>Line Value</th></tr></thead><tbody>
+          {% for line in po_preview.lines %}<tr><td><span class="code-label">{{ line.sku.sku }}</span></td><td>{{ line.qty|floatformat:"0g" }}</td><td>Rp {{ line.cogs_snapshot|floatformat:"0g" }}</td><td>Rp {{ line.line_value|floatformat:"0g" }}</td></tr>{% endfor %}
+        </tbody></table></div>
+        <p class="muted">Saat tombol di bawah ditekan, sistem memvalidasi ulang requirement dan COGS. Nomor PO serta snapshot COGS final baru dibekukan ketika Draft di-Release.</p>
+        <button class="primary-button" type="submit" name="action" value="create">Konfirmasi &amp; Create Draft PO</button>
+      </section>
+      {% else %}
+      <button class="primary-button" type="submit" name="action" value="review">Review PO</button>
+      {% endif %}
+      {% else %}<div class="empty-state">Tidak ada PPIC Requirement yang masih tersisa.</div>{% endif %}
+    </form>
+  </article>
+  <article class="panel">
+    <div class="panel-header"><div><p class="eyebrow">MANUAL</p><h2>PO produk baru</h2></div></div>
+    <p class="muted">SKU wajib sudah tersedia di Master Data. Source disimpan sebagai Manual – New Product.</p>
+    <form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="form_name" value="manual_po">{{ manual_form.as_p }}<button class="secondary-button" type="submit">Create Draft Manual PO</button></form>
+  </article>
+</section>
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">PO HISTORY</p><h2>Purchase Order</h2></div><a class="row-link" href="{% url 'purchasing:tracking' %}">Lihat tracking lengkap →</a></div>
+  {% if pos %}<div class="table-wrap"><table><thead><tr><th>No. PO</th><th>Supplier</th><th>Need Month</th><th>Required Arrival</th><th>Status</th><th>Qty</th><th>Remaining</th><th>Aging</th><th></th></tr></thead><tbody>
+  {% for po in pos %}<tr><td><strong>{{ po.po_number|default:"Draft – belum bernomor" }}</strong></td><td>{{ po.supplier.name }}</td><td>{{ po.need_month|date:"M Y" }}</td><td>{{ po.required_arrival|date:"d M Y"|default:"—" }}</td><td><span class="status-badge {% if po.status == 'RELEASED' %}ready{% endif %}">{{ po.get_status_display }}</span></td><td>{{ po.total_qty|floatformat:"0g" }}</td><td>{% if po.aging_snapshot %}{{ po.aging_snapshot.po_remaining_qty|floatformat:"0g" }}{% else %}—{% endif %}</td><td>{% if po.aging_snapshot %}{{ po.aging_snapshot.age_days|floatformat:"0g" }} days · {{ po.aging_snapshot.status }}{% else %}—{% endif %}</td><td><a class="row-link" href="{% url 'purchasing:po_detail' po.id %}">Buka</a></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty-state">Belum ada PO.</div>{% endif %}
+</section>
+
+<section class="panel section-gap narrow-panel">
+  <div class="panel-header"><div><p class="eyebrow">MASTER</p><h2>Tambah supplier</h2></div></div>
+  <form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="form_name" value="supplier">{{ supplier_form.as_p }}<button class="secondary-button" type="submit">Simpan supplier</button></form>
+</section>
+{% endblock %}

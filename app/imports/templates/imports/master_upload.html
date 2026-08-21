@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Upload Bank Data · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">CANONICAL SOURCE</p>
+        <h1>Upload Bank Data</h1>
+        <p>Gunakan export tab VOBIA dari Bank Data All Source 26. File ini hanya diparsing ke staging sampai preview disetujui.</p>
+    </div>
+</header>
+
+<section class="upload-layout">
+    <article class="panel upload-panel">
+        <form method="post" enctype="multipart/form-data" class="upload-form">
+            {% csrf_token %}
+            <label class="drop-zone" for="id_file">
+                <span class="upload-icon">↑</span>
+                <strong>Pilih file .xlsx atau .csv</strong>
+                <small>Maksimum 25 MB. File identik akan ditolak berdasarkan SHA-256 checksum.</small>
+                {{ form.file }}
+            </label>
+            {% if form.file.errors %}<div class="form-alert">{{ form.file.errors|striptags }}</div>{% endif %}
+            <button class="primary-button wide" type="submit">Parse dan buat preview</button>
+        </form>
+    </article>
+
+    <aside class="panel contract-panel">
+        <p class="eyebrow">IMPORT CONTRACT</p>
+        <h2>Kontrol yang dijalankan</h2>
+        <ul class="check-list">
+            <li>13 header canonical diverifikasi berdasarkan nama.</li>
+            <li>SKU duplicate dan field wajib menjadi blocking issue.</li>
+            <li>COGS/Retail kosong tetap terlihat sebagai warning.</li>
+            <li>Kode Shopee/TikTok disimpan sebagai text.</li>
+            <li>File asli dan checksum tidak dihapus setelah upload.</li>
+            <li>Commit berjalan atomik: seluruh batch sukses atau rollback.</li>
+        </ul>
+    </aside>
+</section>
+{% endblock %}
+

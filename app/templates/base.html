@@ -1,0 +1,91 @@
+{% load static %}
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>{% block title %}Vobia ERP{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260821-11">
+    <script src="{% static 'js/app.js' %}?v=20260821-2" defer></script>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <a class="brand" href="{% url 'dashboard:index' %}" title="Kembali ke pemilihan modul">
+                <img class="brand-logo" src="{% static 'img/logo-vobia.png' %}" alt="Vobia">
+            </a>
+
+            <a class="module-switcher" href="{% url 'dashboard:index' %}">
+                <span>{% if request.session.active_module == 'operation' %}Operation{% else %}Sales{% endif %}</span>
+                <small>Ganti modul</small>
+            </a>
+
+            <nav class="navigation" aria-label="Navigasi utama">
+                {% if request.session.active_module == 'operation' %}
+                <span class="nav-label">OPERATION</span>
+                <a class="nav-item {% if request.resolver_match.namespace == 'merchandising' %}active{% endif %}" href="{% url 'merchandising:dashboard' %}"><span>Merchandising</span></a>
+                {% if request.resolver_match.namespace == 'merchandising' %}
+                <div class="nav-subitems">
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'overview' or request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'merchandising:dashboard' %}">Dashboard</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'projection' %}active{% endif %}" href="{% url 'merchandising:projection' %}">Projection</a>
+                </div>
+                {% endif %}
+                <a class="nav-item {% if request.resolver_match.namespace == 'purchasing' %}active{% endif %}" href="{% url 'purchasing:overview' %}"><span>PPIC</span></a>
+                {% if request.resolver_match.namespace == 'purchasing' %}
+                <div class="nav-subitems">
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'overview' %}active{% endif %}" href="{% url 'purchasing:overview' %}">Requirement &amp; Create PO</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'tracking' %}active{% endif %}" href="{% url 'purchasing:tracking' %}">PO Tracking</a>
+                </div>
+                {% endif %}
+                <a class="nav-item {% if request.resolver_match.url_name == 'production' %}active{% endif %}" href="{% url 'inventory:production' %}"><span>Production</span></a>
+                <a class="nav-item {% if request.resolver_match.namespace == 'inventory' and request.resolver_match.url_name != 'production' %}active{% endif %}" href="{% url 'inventory:overview' %}"><span>Warehouse</span></a>
+                {% if request.resolver_match.namespace == 'inventory' and request.resolver_match.url_name != 'production' %}
+                <div class="nav-subitems">
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'overview' %}active{% endif %}" href="{% url 'inventory:overview' %}">Inventory Summary</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'turnover' %}active{% endif %}" href="{% url 'inventory:turnover' %}">Inventory Turnover</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'inbound' %}active{% endif %}" href="{% url 'inventory:inbound' %}">Inbound</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'return_log' %}active{% endif %}" href="{% url 'inventory:return_log' %}">Return Log</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'outbound' %}active{% endif %}" href="{% url 'inventory:outbound' %}">Outbound</a>
+                </div>
+                {% endif %}
+                {% else %}
+                <span class="nav-label">SALES</span>
+                <a class="nav-item {% if request.resolver_match.url_name == 'dashboard' and request.resolver_match.namespace == 'sales' %}active{% endif %}" href="{% url 'sales:dashboard' %}">
+                    <span>Dashboard</span>
+                </a>
+                <a class="nav-item {% if request.resolver_match.url_name == 'product_performance' %}active{% endif %}" href="{% url 'sales:product_performance' %}"><span>Product Performance</span></a>
+                <a class="nav-item {% if request.resolver_match.url_name == 'pareto' %}active{% endif %}" href="{% url 'sales:pareto' %}"><span>Pareto Analysis</span></a>
+                <a class="nav-item {% if request.resolver_match.url_name == 'transactions' %}active{% endif %}" href="{% url 'sales:transactions' %}"><span>Transaction</span></a>
+                <a class="nav-item {% if request.resolver_match.namespace == 'imports' and '/sales/' in request.path or request.resolver_match.namespace == 'traffic' %}active{% endif %}" href="{% url 'imports:sales_list' %}"><span>Data Import</span></a>
+                {% endif %}
+                <span class="nav-label">SYSTEM</span>
+                <a class="nav-item {% if request.resolver_match.namespace == 'master_data' %}active{% endif %}" href="{% url 'master_data:overview' %}"><span>Master Data</span></a>
+                <a class="nav-item {% if request.resolver_match.namespace == 'reconciliation' %}active{% endif %}" href="{% url 'reconciliation:overview' %}"><span>Reconciliation</span></a>
+                <a class="nav-item {% if request.resolver_match.url_name == 'guide' %}active{% endif %}" href="{% url 'dashboard:guide' %}"><span>Panduan &amp; UAT</span></a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <span class="user-avatar">{{ request.user.username|slice:":1"|upper }}</span>
+                <div class="user-meta">
+                    <strong>{{ request.user.username }}</strong>
+                    <a href="{% url 'accounts:password_change' %}">Ganti password</a>
+                </div>
+                <form method="post" action="{% url 'accounts:logout' %}">
+                    {% csrf_token %}
+                    <button class="text-button" type="submit">Keluar</button>
+                </form>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            {% if messages %}
+                <div class="messages">
+                    {% for message in messages %}<div class="message {{ message.tags }}">{{ message }}</div>{% endfor %}
+                </div>
+            {% endif %}
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+</html>

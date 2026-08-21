@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}PO Tracking · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">PPIC · PO TRACKING</p><h1>Monitor progres Purchase Order</h1><p>Tracking diturunkan dari PO, QC, dan inbound canonical ERP. Data percobaan pada Vobia MD tidak dimigrasikan.</p></div>
+  <a class="secondary-button" href="{% url 'purchasing:overview' %}">Requirement &amp; Create PO</a>
+</header>
+<section class="panel">
+  <div class="panel-header"><div><p class="eyebrow">CANONICAL TRACKING</p><h2>PO Qty → QC Passed → Received</h2></div><span class="pill">Tanpa COGS</span></div>
+  {% if rows %}<div class="table-wrap"><table><thead><tr><th>No. PO</th><th>Supplier</th><th>Need Month</th><th>Required Arrival</th><th>SKU</th><th>PO Qty</th><th>Received</th><th>Outstanding</th><th>Schedule</th><th>QC Passed</th><th>Status</th></tr></thead><tbody>
+  {% for row in rows %}<tr><td><a class="row-link" href="{% url 'purchasing:po_detail' row.po.id %}">{{ row.po.po_number|default:"Draft" }}</a></td><td>{{ row.po.supplier.name }}</td><td>{{ row.po.need_month|date:"M Y" }}</td><td>{{ row.po.required_arrival|date:"d M Y"|default:"—" }}</td><td><span class="code-label">{{ row.line.sku.sku }}</span></td><td>{{ row.line.ordered_qty|floatformat:"0g" }}</td><td>{{ row.received|floatformat:"0g" }}</td><td>{{ row.outstanding|floatformat:"0g" }}</td><td><span class="status-badge {% if row.schedule_status == 'Risk Late' or row.schedule_status == 'Late' %}blocked{% elif row.schedule_status == 'On Track' or row.schedule_status == 'On Time' %}ready{% endif %}">{{ row.schedule_status }}</span></td><td>{{ row.qc_passed|floatformat:"0g" }}</td><td>{{ row.progress_status }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty-state">Belum ada PO aktual. PO pertama akan muncul setelah Final Approved Incoming → PPIC → Review → Create PO.</div>{% endif %}
+</section>
+{% endblock %}

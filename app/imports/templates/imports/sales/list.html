@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Sales Data Import · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div><p class="eyebrow">SALES · DATA IMPORT</p><h1>Transaction &amp; Traffic Import</h1><p>Upload file mentah transaksi dan traffic di area Sales ini. Semua import melewati staging, validation, review, dan approval.</p></div>
+    <div class="header-actions"><a class="secondary-button" href="{% url 'traffic:overview' %}">Upload Traffic</a><a class="primary-button" href="{% url 'imports:sales_upload' %}">Upload Transaction</a></div>
+</header>
+<section class="dashboard-grid"><article class="panel"><p class="eyebrow">TRANSACTION</p><h2>Shopee &amp; TikTok</h2><p class="muted">Raw order export, status reconciliation, immutable financial snapshot.</p><a class="secondary-button" href="{% url 'imports:sales_upload' %}">Upload transaction</a></article><article class="panel"><p class="eyebrow">PRODUCT TRAFFIC</p><h2>Shopee &amp; TikTok Traffic</h2><p class="muted">Views, clicks, dan visitors di level product untuk Product Performance.</p><a class="secondary-button" href="{% url 'traffic:overview' %}">Upload traffic</a></article><article class="panel"><p class="eyebrow">MASTER</p><h2>Master Product</h2><p class="muted">Bank Data canonical untuk SKU dan marketplace product mapping.</p><a class="secondary-button" href="{% url 'imports:master_list' %}">Master import history</a></article></section>
+<section class="panel">
+    <div class="panel-header"><div><p class="eyebrow">IMPORT REQUIREMENT</p><h2>Periode Transaksi yang harus di-update</h2></div><span class="pill">Cutoff sampai kemarin</span></div>
+    {% if requirement_summary %}<div class="table-wrap"><table class="requirement-summary-table"><thead><tr><th>Marketplace</th><th>Periode transaksi</th></tr></thead><tbody>
+    {% for row in requirement_summary %}<tr><td><strong>{{ row.source }}</strong></td><td><strong>{{ row.period_start|date:"j F Y" }} – {{ row.period_end|date:"j F Y" }}</strong></td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty-state">Semua marketplace sudah lengkap sampai kemarin dan tidak ada status nonfinal.</div>{% endif %}
+    <div class="requirement-detail"><div class="panel-header"><div><p class="eyebrow">DETAIL KEBUTUHAN IMPORT</p><h2>Alasan dan status yang masih menggantung</h2></div></div>
+    {% if requirements %}<div class="table-wrap"><table><thead><tr><th>Source</th><th>Periode export</th><th>Alasan</th><th>Nonfinal</th><th>Status menggantung</th><th>Last import</th><th>Last cutoff</th></tr></thead><tbody>
+    {% for row in requirements %}<tr><td><strong>{{ row.source }}</strong></td><td>{{ row.period_start|date:"d M Y" }} – {{ row.period_end|date:"d M Y" }}</td><td>{{ row.reason }}</td><td>{{ row.nonfinal_count|floatformat:"0g" }}</td><td>{{ row.nonfinal_statuses }}</td><td>{{ row.last_successful_import|date:"d M Y H:i"|default:"Belum pernah" }}</td><td>{{ row.last_cutoff|date:"d M Y"|default:"—" }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="muted">Tidak ada detail tambahan.</p>{% endif %}</div>
+</section>
+<section class="dashboard-grid section-gap">
+  <article class="panel span-two">
+    <div class="panel-header"><div><p class="eyebrow">IMPORT HISTORY</p><h2>Batch terbaru</h2></div></div>
+    {% if batches %}<div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Source</th><th>File</th><th>Periode</th><th>Status</th><th>New</th><th>Status Update</th><th>Blocking</th><th></th></tr></thead><tbody>
+    {% for batch in batches %}<tr><td>{{ batch.created_at|date:"d M Y, H:i" }}</td><td><strong>{{ batch.source }}</strong></td><td>{{ batch.raw_file.original_filename }}</td><td>{{ batch.data_start|date:"d M"|default:"-" }} – {{ batch.data_end|date:"d M Y"|default:"-" }}</td><td><span class="status-badge {{ batch.status|lower }}">{{ batch.get_status_display }}</span></td><td>{{ batch.new_rows|floatformat:"0g" }}</td><td>{{ batch.status_update_rows|floatformat:"0g" }}</td><td>{{ batch.blocking_issue_count|floatformat:"0g" }}</td><td><a class="row-link" href="{% url 'imports:sales_detail' batch.id %}">Review →</a></td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty-state">Belum ada file Sales yang diunggah.</div>{% endif %}
+  </article>
+  <article class="panel">
+    <div class="panel-header"><div><p class="eyebrow">NON-MARKETPLACE</p><h2>Input transaksi manual</h2></div></div>
+    <form method="post" class="stack-form">{% csrf_token %}{{ manual_form.as_p }}<button class="primary-button" type="submit">Post transaksi</button></form>
+  </article>
+</section>
+{% comment %}Legacy standalone history replaced by combined layout above.{% endcomment %}
+{% comment %}
+<section class="panel">
+    <div class="panel-header"><div><p class="eyebrow">IMPORT HISTORY</p><h2>Batch terbaru</h2></div></div>
+    {% if batches %}<div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Source</th><th>File</th><th>Periode</th><th>Status</th><th>New</th><th>Status Update</th><th>Blocking</th><th></th></tr></thead><tbody>
+    {% for batch in batches %}<tr><td>{{ batch.created_at|date:"d M Y, H:i" }}</td><td><strong>{{ batch.source }}</strong></td><td>{{ batch.raw_file.original_filename }}</td><td>{{ batch.data_start|date:"d M"|default:"-" }} – {{ batch.data_end|date:"d M Y"|default:"-" }}</td><td><span class="status-badge {{ batch.status|lower }}">{{ batch.get_status_display }}</span></td><td>{{ batch.new_rows }}</td><td>{{ batch.status_update_rows }}</td><td>{{ batch.blocking_issue_count }}</td><td><a class="row-link" href="{% url 'imports:sales_detail' batch.id %}">Review →</a></td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty-state">Belum ada file Sales yang diunggah.</div>{% endif %}
+</section>
+{% endcomment %}
+{% endblock %}

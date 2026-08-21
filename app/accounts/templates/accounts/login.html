@@ -1,0 +1,55 @@
+{% load static %}
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Masuk · Vobia ERP</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body class="auth-page">
+    <main class="auth-layout">
+        <section class="auth-story">
+            <div class="brand auth-brand">
+                <span class="brand-mark">V</span>
+                <span><strong>VOBIA</strong><small>ERP</small></span>
+            </div>
+            <div>
+                <p class="eyebrow light">PRIVATE OPERATIONS SYSTEM</p>
+                <h1>Satu alur yang bisa ditelusuri, dari sales hingga inventory.</h1>
+                <p>Fondasi ERP Vobia menerjemahkan proses yang sudah teruji di Sales dan Operation tanpa mengubah histori.</p>
+            </div>
+            <div class="auth-principles">
+                <span>Immutable history</span>
+                <span>Auditable movement</span>
+                <span>Asia/Jakarta</span>
+            </div>
+        </section>
+
+        <section class="auth-panel">
+            <form class="auth-card" method="post" novalidate>
+                {% csrf_token %}
+                <div>
+                    <p class="eyebrow">SECURE ACCESS</p>
+                    <h2>Masuk ke Vobia ERP</h2>
+                    <p class="muted">Gunakan username dan password lokal yang telah disiapkan.</p>
+                </div>
+
+                {% if form.non_field_errors %}
+                    <div class="form-alert">{{ form.non_field_errors|striptags }}</div>
+                {% endif %}
+
+                <label for="id_username">Username</label>
+                <input id="id_username" name="username" type="text" autocomplete="username" value="{{ form.username.value|default:'' }}" autofocus required>
+
+                <label for="id_password">Password</label>
+                <input id="id_password" name="password" type="password" autocomplete="current-password" required>
+
+                <button class="primary-button wide" type="submit">Masuk</button>
+                <p class="security-note">Login dikunci sementara setelah 5 percobaan gagal.</p>
+            </form>
+        </section>
+    </main>
+</body>
+</html>
+

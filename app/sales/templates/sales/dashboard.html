@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Sales Dashboard · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">SALES · DASHBOARD</p><h1>{{ date_from|date:"d M Y" }} – {{ date_to|date:"d M Y" }}</h1><p>Selamat datang, Adit. Dashboard mengikuti periode pilihan; data transaksi terakhir tersedia sampai {{ latest|date:"d F Y" }}.{% if includes_historical %} Data sebelum 1 Agustus adalah historical snapshot report dan tidak mem-posting ulang inventory.{% endif %}</p></div>
+  <form method="get" class="report-filter compact-filter" data-auto-submit><label>Dari Tanggal<input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}"></label><label>Sampai Tanggal<input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}"></label><a class="secondary-button compact" href="{% url 'sales:dashboard' %}">Reset</a></form>
+</header>
+<section class="metric-grid">
+  <article class="metric-card"><span>Total Gross Sales</span><strong class="metric-money">Rp {{ totals.gross|floatformat:"0g" }}</strong><small>{{ totals.qty|floatformat:"0g" }} pcs</small></article>
+  <article class="metric-card"><span>Total Net Sales</span><strong class="metric-money">Rp {{ totals.net|floatformat:"0g" }}</strong><small>{{ totals.orders|floatformat:"0g" }} order unik</small></article>
+  <article class="metric-card"><span>GPM</span><strong class="metric-money">Rp {{ totals.gpm|floatformat:"0g" }}</strong><small>Net Sales − COGS</small></article>
+  <article class="metric-card"><span>GPM Rate</span><strong>{% if totals.gpm_rate_pct != None %}{{ totals.gpm_rate_pct|floatformat:"2g" }}%{% else %}—{% endif %}</strong><small>GPM ÷ Gross Sales</small></article>
+</section>
+<section class="metric-grid">
+  <article class="metric-card"><span>Total Discount</span><strong class="metric-money">Rp {{ totals.discount|floatformat:"0g" }}</strong><small>{% if totals.discount_rate_pct != None %}{{ totals.discount_rate_pct|floatformat:"2g" }}%{% else %}—{% endif %}</small></article>
+  <article class="metric-card"><span>AOV</span><strong class="metric-money">Rp {{ totals.aov|floatformat:"0g" }}</strong><small>Net Sales ÷ order unik</small></article>
+  <article class="metric-card"><span>Total COGS</span><strong class="metric-money">Rp {{ totals.cogs|floatformat:"0g" }}</strong><small>immutable snapshot</small></article>
+  <article class="metric-card {% if legacy_exceptions %}danger-card{% endif %}"><span>Legacy Data Exception</span><strong>{{ legacy_exceptions|floatformat:"0g" }}</strong><small>SKU lama tanpa current master</small></article>
+</section>
+<section class="dashboard-grid dashboard-sales-grid section-gap">
+  <article class="panel trend-panel"><div class="panel-header"><div><p class="eyebrow">PERIOD TREND</p><h2>Daily Gross Sales</h2></div><a class="row-link" href="{% url 'sales:product_performance' %}">Product Performance →</a></div>
+    <div class="bar-chart daily-trend">{% for row in daily %}<div class="bar-row"><span>{{ row.label }}</span><div><i style="width:{{ row.bar|floatformat:"2u" }}%"></i></div><strong>Rp {{ row.gross|floatformat:"0g" }}</strong></div>{% empty %}<div class="empty-state">Belum ada Sales.</div>{% endfor %}</div>
+  </article>
+  <article class="panel monthly-sales-panel"><div class="panel-header"><div><p class="eyebrow">MONTHLY SALES · MAX 12</p><h2>Monthly Gross Sales</h2><small>{{ monthly_period_label }}<br>angka dalam Rp miliar</small></div></div>
+    <div class="monthly-chart-wrap"><div class="monthly-chart">{% for row in monthly_gross %}<div class="monthly-bar-item"><div class="monthly-bar-track" title="{{ row.label }}: Rp {{ row.gross|floatformat:'0g' }}"><i style="height:{{ row.bar|floatformat:'2u' }}%"></i></div><strong>{{ row.label }}</strong><span>{{ row.gross_billion|floatformat:"2g" }}</span></div>{% empty %}<div class="empty-state">Belum ada Sales.</div>{% endfor %}</div>
+      {% if monthly_gross %}<div class="monthly-growth-divider" aria-hidden="true"></div><div class="monthly-growth-row" aria-label="Growth Gross Sales bulanan">{% for row in monthly_gross %}<span class="growth-{{ row.growth_class }}">{% if row.growth_pct != None %}{% if row.growth_pct > 0 %}+{% endif %}{{ row.growth_pct|floatformat:"2g" }}%{% else %}—{% endif %}</span>{% endfor %}</div>{% endif %}
+    </div>
+  </article>
+  <article class="panel monthly-sales-panel mtd-sales-panel"><div class="panel-header"><div><p class="eyebrow">MTD SALES · CUTOFF SAMA</p><h2>MTD Gross Sales</h2><small>Tanggal 1–{{ mtd_cutoff_day }} setiap bulan · {{ monthly_period_label }}<br>angka dalam Rp miliar</small></div></div>
+    <div class="monthly-chart-wrap"><div class="monthly-chart">{% for row in mtd_gross %}<div class="monthly-bar-item"><div class="monthly-bar-track" title="{{ row.label }} MTD 1–{{ mtd_cutoff_day }}: Rp {{ row.gross|floatformat:'0g' }}"><i style="height:{{ row.bar|floatformat:'2u' }}%"></i></div><strong>{{ row.label }}</strong><span>{{ row.gross_billion|floatformat:"2g" }}</span></div>{% empty %}<div class="empty-state">Belum ada Sales.</div>{% endfor %}</div>
+      {% if mtd_gross %}<div class="monthly-growth-divider" aria-hidden="true"></div><div class="monthly-growth-row" aria-label="Growth MTD Gross Sales bulanan">{% for row in mtd_gross %}<span class="growth-{{ row.growth_class }}">{% if row.growth_pct != None %}{% if row.growth_pct > 0 %}+{% endif %}{{ row.growth_pct|floatformat:"2g" }}%{% else %}—{% endif %}</span>{% endfor %}</div>{% endif %}
+    </div>
+  </article>
+  <article class="panel span-three"><div class="panel-header"><div><p class="eyebrow">ORDER STATUS</p><h2>Status periode</h2></div></div><dl class="quality-list">{% for row in status_rows %}<div><dt>{{ row.order__current_status }}</dt><dd>{{ row.orders|floatformat:"0g" }}</dd></div>{% empty %}<div class="empty-state">Tidak ada order.</div>{% endfor %}</dl></article>
+  <article class="panel span-three"><div class="panel-header"><div><p class="eyebrow">SOURCE MIX</p><h2>Sales per source</h2></div><a class="row-link" href="{% url 'sales:transactions' %}">Lihat transaksi →</a></div>
+    <div class="table-wrap"><table><thead><tr><th>Source</th><th>Group</th><th>Order</th><th>Qty</th><th>Net Sales</th></tr></thead><tbody>{% for row in source_rows %}<tr><td><strong>{{ row.order__source_label }}</strong></td><td>{{ row.source_group }}</td><td>{{ row.orders|floatformat:"0g" }}</td><td>{{ row.qty|floatformat:"0g" }}</td><td>Rp {{ row.net|floatformat:"0g" }}</td></tr>{% empty %}<tr><td colspan="5">Tidak ada data.</td></tr>{% endfor %}</tbody></table></div>
+  </article>
+</section>
+{% endblock %}

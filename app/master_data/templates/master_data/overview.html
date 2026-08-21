@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Master Data · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">CANONICAL DATA</p>
+        <h1>Master Data</h1>
+        <p>Sumber canonical tetap Bank Data All Source 26. Belum ada sinkronisasi otomatis pada tahap ini.</p>
+    </div>
+    <div class="header-actions">
+        <a class="secondary-button" href="{% url 'imports:master_list' %}">Riwayat import</a>
+        <a class="primary-button" href="{% url 'imports:master_upload' %}">Import Bank Data</a>
+    </div>
+</header>
+
+<section class="metric-grid five">
+    <article class="metric-card"><span>Product</span><strong>{{ counts.products|floatformat:"0g" }}</strong></article>
+    <article class="metric-card"><span>SKU</span><strong>{{ counts.skus|floatformat:"0g" }}</strong></article>
+    <article class="metric-card"><span>Category</span><strong>{{ counts.categories|floatformat:"0g" }}</strong></article>
+    <article class="metric-card"><span>Supplier</span><strong>{{ counts.suppliers|floatformat:"0g" }}</strong></article>
+    <article class="metric-card"><span>Warehouse</span><strong>{{ counts.warehouses|floatformat:"0g" }}</strong></article>
+</section>
+
+<section class="dashboard-grid">
+    <article class="panel span-two">
+        <div class="panel-header"><div><p class="eyebrow">SKU PREVIEW</p><h2>SKU terbaru</h2></div></div>
+        {% if recent_skus %}
+        <div class="table-wrap"><table><thead><tr><th>SKU</th><th>Product</th><th>Status</th><th>Category</th><th>Retail</th><th>COGS</th></tr></thead><tbody>
+        {% for item in recent_skus %}<tr><td><strong>{{ item.sku }}</strong></td><td>{{ item.product_variant.product.name }}</td><td>{{ item.product_variant.product.status.name }}</td><td>{{ item.product_variant.product.category.name }}</td><td>{% if item.current_retail_price != None %}Rp {{ item.current_retail_price|floatformat:"0g" }}{% else %}Missing{% endif %}</td><td>{% if item.current_master_cogs != None %}Rp {{ item.current_master_cogs|floatformat:"0g" }}{% else %}Missing{% endif %}</td></tr>{% endfor %}
+        </tbody></table></div>
+        {% else %}<div class="empty-state">Master Product belum diimpor. Tahap berikutnya akan menambahkan upload, preview, validasi, dan approval.</div>{% endif %}
+    </article>
+
+    <article class="panel">
+        <div class="panel-header"><div><p class="eyebrow">QUALITY FLAGS</p><h2>Kelengkapan SKU</h2></div></div>
+        <dl class="quality-list">
+            <div><dt>COGS kosong</dt><dd>{{ sku_quality.missing_cogs|floatformat:"0g" }}</dd></div>
+            <div><dt>Retail Price kosong</dt><dd>{{ sku_quality.missing_retail|floatformat:"0g" }}</dd></div>
+            <div><dt>Keduanya kosong</dt><dd>{{ sku_quality.missing_both|floatformat:"0g" }}</dd></div>
+            <div><dt>SKU inactive</dt><dd>{{ sku_quality.inactive|floatformat:"0g" }}</dd></div>
+        </dl>
+    </article>
+</section>
+{% endblock %}

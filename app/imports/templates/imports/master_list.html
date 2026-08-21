@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Master Import · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">RAW FILE → STAGING → APPROVAL</p>
+        <h1>Master Product Import</h1>
+        <p>Setiap file disimpan privat beserta checksum. Tidak ada data yang masuk ke Master Product sebelum Adit melakukan approval.</p>
+    </div>
+    <div class="header-actions">
+        <a class="secondary-button" href="{% url 'imports:sales_list' %}">Sales Import</a>
+        <a class="primary-button" href="{% url 'imports:master_upload' %}">Upload Bank Data</a>
+    </div>
+</header>
+
+<section class="panel">
+    <div class="panel-header">
+        <div><p class="eyebrow">IMPORT HISTORY</p><h2>Batch terbaru</h2></div>
+    </div>
+    {% if batches %}
+    <div class="table-wrap"><table>
+        <thead><tr><th>Waktu</th><th>File</th><th>Status</th><th>Rows</th><th>New</th><th>Changed</th><th>Blocking</th><th></th></tr></thead>
+        <tbody>
+        {% for batch in batches %}
+        <tr>
+            <td>{{ batch.created_at|date:"d M Y, H:i" }}</td>
+            <td><strong>{{ batch.raw_file.original_filename }}</strong><small class="table-subtext">{{ batch.raw_file.byte_size|filesizeformat }}</small></td>
+            <td><span class="status-badge {{ batch.status|lower }}">{{ batch.get_status_display }}</span></td>
+            <td>{{ batch.total_rows|floatformat:"0g" }}</td><td>{{ batch.new_rows|floatformat:"0g" }}</td><td>{{ batch.changed_rows|floatformat:"0g" }}</td><td>{{ batch.blocking_issue_count|floatformat:"0g" }}</td>
+            <td><a class="row-link" href="{% url 'imports:master_detail' batch.id %}">Review →</a></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}<div class="empty-state">Belum ada file Master Product yang diunggah.</div>{% endif %}
+</section>
+{% endblock %}

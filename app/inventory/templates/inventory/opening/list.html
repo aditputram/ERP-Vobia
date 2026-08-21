@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}FIFO Opening Import · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">INVENTORY CUTOVER</p><h1>FIFO Opening Import</h1><p>Baseline immutable per SKU pada 1 Agustus 2026.</p></div><a class="primary-button" href="{% url 'inventory:opening_upload' %}">Upload FIFO Opening</a></header>
+<section class="panel"><div class="panel-header"><div><p class="eyebrow">IMPORT HISTORY</p><h2>Batch opening</h2></div></div>{% if batches %}<div class="table-wrap"><table><thead><tr><th>Created</th><th>File</th><th>Rows</th><th>Blocking</th><th>Status</th></tr></thead><tbody>{% for batch in batches %}<tr><td><a class="row-link" href="{% url 'inventory:opening_detail' batch.id %}">{{ batch.created_at|date:"d M Y, H:i" }}</a></td><td>{{ batch.raw_file.original_filename }}</td><td>{{ batch.total_rows|floatformat:"0g" }}</td><td>{{ batch.blocking_issue_count|floatformat:"0g" }}</td><td><span class="status-badge {{ batch.status|lower }}">{{ batch.get_status_display }}</span></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">Belum ada FIFO Opening yang diunggah.</div>{% endif %}</section>
+{% endblock %}

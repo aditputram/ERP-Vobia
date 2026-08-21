@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Upload Sales · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">RAW MARKETPLACE EXPORT</p><h1>Upload transaksi Sales</h1><p>Pilih marketplace yang sesuai dengan file. Parser memakai header sumber terverifikasi dan tidak membaca alamat atau data penerima ke staging.</p></div></header>
+<section class="upload-layout">
+    <article class="panel upload-panel"><form method="post" enctype="multipart/form-data" class="upload-form">{% csrf_token %}
+        <label for="id_source">Marketplace</label>{{ form.source }}{% for error in form.source.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+        <label class="drop-zone" for="id_file"><span class="upload-icon">↑</span><strong>Pilih export Shopee atau TikTok</strong><small>Format .xlsx/.csv, maksimum 25 MB. Pastikan pilihan marketplace sesuai isi file.</small>{{ form.file }}</label>
+        {% if form.file.errors %}<div class="form-alert">{{ form.file.errors|striptags }}</div>{% endif %}
+        <button class="primary-button wide" type="submit">Parse dan buat preview</button>
+    </form></article>
+    <aside class="panel contract-panel"><p class="eyebrow">SALES CONTROLS</p><h2>Yang diperiksa</h2><ul class="check-list"><li>Duplicate Source + Order + SKU.</li><li>Status batal murni versus Retur dari shipped time.</li><li>SKU harus ada di Master Product.</li><li>Qty serta harga net tidak boleh negatif.</li><li>Snapshot Retail Price dan COGS tidak boleh berubah diam-diam.</li><li>TikTok seller discount dibagi Qty pada perhitungan harga per unit.</li></ul></aside>
+</section>
+{% endblock %}
+

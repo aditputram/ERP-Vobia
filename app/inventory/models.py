@@ -94,9 +94,7 @@ class FIFOOpeningImportIssue(models.Model):
 
 class QCInspection(models.Model):
     class Disposition(models.TextChoices):
-        WAITING = "WAITING_DECISION", "Waiting Decision"
         REWORK = "REWORK", "Rework"
-        REPLACEMENT = "REPLACEMENT_REQUESTED", "Replacement Requested"
         REJECTED = "REJECTED", "Rejected"
         ACCEPTED_EXCEPTION = "ACCEPTED_WITH_EXCEPTION", "Accepted with Exception"
 
@@ -131,9 +129,127 @@ class QCInspection(models.Model):
             raise ValidationError({"failed_disposition": "Disposition wajib untuk Qty Failed."})
 
 
+class QCFollowUp(models.Model):
+    class Status(models.TextChoices):
+        AWAITING_REWORK = "AWAITING_REWORK", "Menunggu Rework"
+        READY_RE_QC = "READY_RE_QC", "Menunggu Re-QC"
+        REJECTED = "REJECTED", "Rejected"
+        ACCEPTED_EXCEPTION = "ACCEPTED_EXCEPTION", "Accepted with Exception"
+        RESOLVED = "RESOLVED", "Lolos Re-QC"
+
+    class DeliveryStatus(models.TextChoices):
+        NOT_SHIPPED = "NOT_SHIPPED", "Belum Dikirim"
+        IN_TRANSIT = "IN_TRANSIT", "Sedang Dikirim"
+        INBOUND = "INBOUND", "Inbound"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_inspection = models.OneToOneField(
+        QCInspection,
+        on_delete=models.PROTECT,
+        related_name="follow_up",
+    )
+    po_line = models.ForeignKey(
+        "purchasing.PurchaseOrderLine",
+        on_delete=models.PROTECT,
+        related_name="qc_follow_ups",
+    )
+    status = models.CharField(max_length=30, choices=Status.choices)
+    original_failed_qty = models.DecimalField(max_digits=18, decimal_places=4)
+    open_qty = models.DecimalField(max_digits=18, decimal_places=4)
+    resolved_passed_qty = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    rework_cycle = models.PositiveIntegerField(default=0)
+    delivery_status = models.CharField(
+        max_length=20,
+        choices=DeliveryStatus.choices,
+        default=DeliveryStatus.NOT_SHIPPED,
+    )
+    delivery_updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="updated_rejected_deliveries",
+    )
+    delivery_updated_at = models.DateTimeField(null=True, blank=True)
+    delivery_activity = models.ForeignKey(
+        "production.ProductionActivity",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="rejected_follow_ups",
+    )
+    received_date = models.DateField(null=True, blank=True)
+    received_warehouse = models.ForeignKey(
+        "master_data.Warehouse",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="received_rejected_goods",
+    )
+    received_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="received_rejected_goods",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+        constraints = [
+            models.CheckConstraint(condition=Q(original_failed_qty__gt=0), name="inventory_qc_followup_original_positive"),
+            models.CheckConstraint(condition=Q(open_qty__gte=0), name="inventory_qc_followup_open_nonnegative"),
+            models.CheckConstraint(condition=Q(resolved_passed_qty__gte=0), name="inventory_qc_followup_passed_nonnegative"),
+        ]
+
+
+class QCFollowUpEvent(models.Model):
+    class EventType(models.TextChoices):
+        CREATED = "CREATED", "QC Follow-up Dibuat"
+        REWORK_COMPLETED = "REWORK_COMPLETED", "Rework Selesai"
+        RE_QC = "RE_QC", "Re-QC"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    follow_up = models.ForeignKey(QCFollowUp, on_delete=models.PROTECT, related_name="events")
+    event_type = models.CharField(max_length=30, choices=EventType.choices)
+    activity_date = models.DateField()
+    qty_inspected = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    qty_passed = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    qty_failed = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    failed_disposition = models.CharField(max_length=30, blank=True)
+    notes = models.TextField(blank=True)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        constraints = [
+            models.CheckConstraint(condition=Q(qty_inspected__gte=0), name="inventory_qc_followup_event_inspected_nonnegative"),
+            models.CheckConstraint(condition=Q(qty_passed__gte=0), name="inventory_qc_followup_event_passed_nonnegative"),
+            models.CheckConstraint(condition=Q(qty_failed__gte=0), name="inventory_qc_followup_event_failed_nonnegative"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and QCFollowUpEvent.objects.filter(pk=self.pk).exists():
+            raise ValidationError("QC Follow-up event bersifat append-only dan tidak boleh diubah.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("QC Follow-up event bersifat append-only dan tidak boleh dihapus.")
+
+
 class InboundReceipt(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     po_line = models.ForeignKey("purchasing.PurchaseOrderLine", on_delete=models.PROTECT, related_name="inbound_receipts")
+    delivery_activity = models.ForeignKey(
+        "production.ProductionActivity",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="inbound_receipts",
+    )
     inbound_date = models.DateField()
     received_qty = models.DecimalField(max_digits=18, decimal_places=4)
     warehouse = models.ForeignKey("master_data.Warehouse", on_delete=models.PROTECT, related_name="inbound_receipts")
@@ -159,6 +275,7 @@ class InventoryMovement(models.Model):
         INCOMING = "INCOMING", "Incoming"
         SALES_OUT = "SALES_OUT", "Sales Out"
         RETURN_IN = "RETURN_IN", "Return In"
+        REJECTED_IN = "REJECTED_IN", "Rejected Goods In"
         ADJUSTMENT_IN = "ADJUSTMENT_IN", "Adjustment In"
         ADJUSTMENT_OUT = "ADJUSTMENT_OUT", "Adjustment Out"
 

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Production Plan · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">PRODUCTION · PLANNING GATE</p><h1>Production Plan</h1><p>Lengkapi seluruh target PO sebelum aktivitas produksi dimulai. Hanya plan Active yang masuk Production Monitoring.</p></div>
+  <div class="header-actions"><a class="secondary-button" href="{% url 'production:monitoring' %}">Buka Monitoring</a></div>
+</header>
+
+<section class="panel">
+  <div class="panel-header"><div><p class="eyebrow">PILIH PO</p><h2>PO Released yang perlu direncanakan</h2><p>PO dengan Production Plan Active otomatis keluar dari pilihan ini.</p></div><span class="pill">{{ planning_rows|length }} PO</span></div>
+  <form method="get" class="inventory-filter-grid production-plan-selector" data-preserve-scroll>
+    <label>Purchase Order<select name="production_order" data-auto-submit><option value="">Pilih PO...</option>{% if selected and plan.status == 'ACTIVE' %}<option selected disabled>{{ selected.po.po_number }} · Production Plan Active</option>{% endif %}{% for row in planning_rows %}<option value="{{ row.id }}" {% if selected.id == row.id %}selected{% endif %}>{{ row.po.po_number }} · {{ row.po.supplier.name }}</option>{% endfor %}</select></label>
+    <button class="primary-button" type="submit">Buka Plan</button>
+  </form>
+</section>
+
+{% if selected %}
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">{% if plan.status == 'ACTIVE' %}REVISI PRODUCTION PLAN{% else %}{{ selected.po.po_number }}{% endif %}</p><h2>{% if plan.status == 'ACTIVE' %}Revisi Production Plan · {{ selected.po.po_number }}{% else %}Target produksi {{ selected.po.supplier.name }}{% endif %}</h2><p>{{ selected.po.lines.count }} SKU · Need Month {{ selected.po.need_month|date:"F Y" }}</p></div><span class="status-badge {% if plan.status == 'ACTIVE' %}ready{% endif %}">{{ plan.get_status_display|default:"Draft baru" }}</span></div>
+  <form method="post" class="stack-form" data-single-submit data-dirty-submit>{% csrf_token %}<input type="hidden" name="production_order" value="{{ selected.id }}">
+    {{ plan_form.non_field_errors }}
+    <div class="production-plan-grid">
+      <div class="production-plan-field full"><label>{{ plan_form.target_material_purchase_date.label }}</label>{{ plan_form.target_material_purchase_date }}{{ plan_form.target_material_purchase_date.errors }}</div>
+      <div class="production-plan-field full"><label>{{ plan_form.target_trial_date.label }}</label>{{ plan_form.target_trial_date }}{{ plan_form.target_trial_date.errors }}</div>
+      <div class="production-plan-pair"><strong>Cut · Potong</strong><label>{{ plan_form.target_cut_start_date.label }}{{ plan_form.target_cut_start_date }}</label><label>{{ plan_form.target_cut_end_date.label }}{{ plan_form.target_cut_end_date }}</label>{{ plan_form.target_cut_start_date.errors }}{{ plan_form.target_cut_end_date.errors }}</div>
+      <div class="production-plan-pair"><strong>Make · Jahit</strong><label>{{ plan_form.target_make_start_date.label }}{{ plan_form.target_make_start_date }}</label><label>{{ plan_form.target_make_end_date.label }}{{ plan_form.target_make_end_date }}</label>{{ plan_form.target_make_start_date.errors }}{{ plan_form.target_make_end_date.errors }}</div>
+      <div class="production-plan-pair"><strong>Trim · Finishing</strong><label>{{ plan_form.target_trim_start_date.label }}{{ plan_form.target_trim_start_date }}</label><label>{{ plan_form.target_trim_end_date.label }}{{ plan_form.target_trim_end_date }}</label>{{ plan_form.target_trim_start_date.errors }}{{ plan_form.target_trim_end_date.errors }}</div>
+      <div class="production-plan-pair"><strong>Quality Control</strong><label>{{ plan_form.target_qc_start_date.label }}{{ plan_form.target_qc_start_date }}</label><label>{{ plan_form.target_qc_end_date.label }}{{ plan_form.target_qc_end_date }}</label>{{ plan_form.target_qc_start_date.errors }}{{ plan_form.target_qc_end_date.errors }}</div>
+      <div class="production-plan-field full"><label>{{ plan_form.target_inbound_date.label }}</label>{{ plan_form.target_inbound_date }}{{ plan_form.target_inbound_date.errors }}</div>
+      <div class="production-plan-field wide"><label>{{ plan_form.notes.label }}</label>{{ plan_form.notes }}{{ plan_form.notes.errors }}</div>
+      {% if plan.status == 'ACTIVE' %}<div class="production-plan-field wide"><label>{{ plan_form.change_reason.label }}</label>{{ plan_form.change_reason }}{{ plan_form.change_reason.errors }}<small>Plan Active tidak ditimpa diam-diam; alasan perubahan masuk audit trail.</small></div>{% endif %}
+    </div>
+    <div class="header-actions">{% if plan.status == 'ACTIVE' %}<button class="primary-button" name="action" value="revise" type="submit" data-dirty-submit-button data-loading-label="Menyimpan Revisi...">Simpan Revisi Production Plan</button>{% else %}<button class="secondary-button" name="action" value="save" type="submit" data-dirty-submit-button data-loading-label="Menyimpan Draft...">Simpan Draft</button><button class="primary-button" name="action" value="activate" type="submit" data-loading-label="Mengaktifkan Plan...">Aktifkan Production Plan</button>{% endif %}</div>
+  </form>
+</section>
+{% endif %}
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">PLAN LIBRARY</p><h2>Status per Purchase Order</h2></div></div>
+  <div class="table-wrap"><table><thead><tr><th>No. PO</th><th>Vendor</th><th>Qty</th><th>Need Month</th><th>Status Plan</th><th>Target Inbound</th><th></th></tr></thead><tbody>
+    {% for row in rows %}<tr><td><strong>{{ row.po.po_number }}</strong></td><td>{{ row.po.supplier.name }}</td><td>{{ row.po.lines.count }} SKU</td><td>{{ row.po.need_month|date:"F Y" }}</td><td>{% if row.plan %}<span class="status-badge {% if row.plan.status == 'ACTIVE' %}ready{% endif %}">{{ row.plan.get_status_display }}</span>{% else %}<span class="status-badge">Belum dibuat</span>{% endif %}</td><td>{{ row.plan.target_inbound_date|date:"d M Y"|default:"—" }}</td><td><a class="row-link" href="?production_order={{ row.id }}">{% if row.plan.status == 'ACTIVE' %}Revisi Production Plan{% elif row.plan %}Edit Plan{% else %}Buat Plan{% endif %} →</a></td></tr>
+    {% empty %}<tr><td colspan="7"><div class="empty-state">Belum ada PO Released.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

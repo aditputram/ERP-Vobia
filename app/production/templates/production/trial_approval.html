@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Trial Approval · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">PRODUCTION · APPROVAL GATE</p><h1>Trial Approval</h1><p>Mass production tidak dapat dimulai sebelum Trial Produksi berstatus Approved.</p></div></header>
+<section class="panel inventory-filter"><form method="get" class="inventory-filter-grid"><label>Status Trial<select name="status">{% for value, label in statuses %}<option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label><button class="primary-button" type="submit">Terapkan</button><a class="secondary-button" href="{% url 'production:trial_approval' %}">Menunggu Approval</a></form></section>
+<section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">{{ trials|length }} TRIAL</p><h2>Antrean dan histori trial</h2></div></div><div class="table-wrap"><table><thead><tr><th>No. PO</th><th>Vendor</th><th>Revision</th><th>Trial Production Approved</th><th>Status</th><th>Submitted By</th><th>Decision</th><th></th></tr></thead><tbody>
+{% for trial in trials %}<tr><td><strong>{{ trial.production_order.po.po_number }}</strong></td><td>{{ trial.production_order.po.supplier.name }}</td><td>R{{ trial.revision }}</td><td>{{ trial.trial_date|date:"d M Y"|default:"—" }}</td><td><span class="status-badge {% if trial.status == 'APPROVED' %}ready{% elif trial.status == 'REVISION_REQUIRED' %}blocked{% else %}parsing{% endif %}">{{ trial.get_status_display }}</span></td><td>{{ trial.submitted_by.username|default:"—" }}</td><td>{{ trial.decision_notes|default:"—" }}</td><td><a class="row-link" href="{% url 'production:detail' trial.production_order.id %}#trial">Review →</a></td></tr>{% empty %}<tr><td colspan="8"><div class="empty-state">Tidak ada Trial pada status ini.</div></td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

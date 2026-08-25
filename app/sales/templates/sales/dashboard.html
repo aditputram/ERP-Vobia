@@ -3,8 +3,16 @@
 {% block content %}
 <header class="page-header">
   <div><p class="eyebrow">SALES · DASHBOARD</p><h1>{{ date_from|date:"d M Y" }} – {{ date_to|date:"d M Y" }}</h1><p>Selamat datang, Adit. Dashboard mengikuti periode pilihan; data transaksi terakhir tersedia sampai {{ latest|date:"d F Y" }}.{% if includes_historical %} Data sebelum 1 Agustus adalah historical snapshot report dan tidak mem-posting ulang inventory.{% endif %}</p></div>
-  <form method="get" class="report-filter compact-filter" data-auto-submit><label>Dari Tanggal<input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}"></label><label>Sampai Tanggal<input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}"></label><a class="secondary-button compact" href="{% url 'sales:dashboard' %}">Reset</a></form>
 </header>
+<form method="get" class="panel report-filter dashboard-period-filter" data-auto-submit data-source-cascade data-dashboard-period-filter>
+  <label>Period Type<select name="period_type" data-period-type><option value="custom" {% if period_type == 'custom' %}selected{% endif %}>Custom Date</option><option value="month" {% if period_type == 'month' %}selected{% endif %}>Bulan</option><option value="quarter" {% if period_type == 'quarter' %}selected{% endif %}>Quarter</option><option value="semester" {% if period_type == 'semester' %}selected{% endif %}>Semester</option><option value="year" {% if period_type == 'year' %}selected{% endif %}>Tahun</option></select></label>
+  <label data-period-field {% if period_type == 'custom' %}hidden{% endif %}>Period{% for type, options in period_options.items %}<select name="period" data-period-options="{{ type }}" {% if period_type != type %}hidden disabled{% endif %}>{% for item in options %}<option value="{{ item.value }}" {% if period_type == type %}{% if period_value == item.value %}selected{% endif %}{% elif forloop.last %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select>{% endfor %}</label>
+  <label data-custom-date-field {% if period_type != 'custom' %}hidden{% endif %}>Dari Tanggal<input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}" {% if period_type != 'custom' %}disabled{% endif %}></label>
+  <label data-custom-date-field {% if period_type != 'custom' %}hidden{% endif %}>Sampai Tanggal<input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}" {% if period_type != 'custom' %}disabled{% endif %}></label>
+  {% include "sales/includes/multi_select_filter.html" with label="Source Group" name="source_group" options=source_groups selected=selected_source_groups all_label="All Source Groups" search_placeholder="Ketik source group..." %}
+  {% include "sales/includes/cascading_source_filter.html" with label="Source" options=source_options selected=selected_sources all_label="All Sources" search_placeholder="Ketik source..." %}
+  <a class="secondary-button" href="{% url 'sales:dashboard' %}">Reset</a>
+</form>
 <section class="metric-grid">
   <article class="metric-card"><span>Total Gross Sales</span><strong class="metric-money">Rp {{ totals.gross|floatformat:"0g" }}</strong><small>{{ totals.qty|floatformat:"0g" }} pcs</small></article>
   <article class="metric-card"><span>Total Net Sales</span><strong class="metric-money">Rp {{ totals.net|floatformat:"0g" }}</strong><small>{{ totals.orders|floatformat:"0g" }} order unik</small></article>
@@ -18,8 +26,8 @@
   <article class="metric-card {% if legacy_exceptions %}danger-card{% endif %}"><span>Legacy Data Exception</span><strong>{{ legacy_exceptions|floatformat:"0g" }}</strong><small>SKU lama tanpa current master</small></article>
 </section>
 <section class="dashboard-grid dashboard-sales-grid section-gap">
-  <article class="panel trend-panel"><div class="panel-header"><div><p class="eyebrow">PERIOD TREND</p><h2>Daily Gross Sales</h2></div><a class="row-link" href="{% url 'sales:product_performance' %}">Product Performance →</a></div>
-    <div class="bar-chart daily-trend">{% for row in daily %}<div class="bar-row"><span>{{ row.label }}</span><div><i style="width:{{ row.bar|floatformat:"2u" }}%"></i></div><strong>Rp {{ row.gross|floatformat:"0g" }}</strong></div>{% empty %}<div class="empty-state">Belum ada Sales.</div>{% endfor %}</div>
+  <article class="panel trend-panel"><div class="panel-header"><div><p class="eyebrow">PERIOD TREND</p><h2>{{ period_trend_title }}</h2></div><a class="row-link" href="{% url 'sales:product_performance' %}">Product Performance →</a></div>
+    <div class="bar-chart period-trend" data-period-trend data-grain="{{ period_trend_grain }}" data-max-visible-rows="25">{% for row in period_trend %}<div class="bar-row"><span>{{ row.label }}</span><div><i style="width:{{ row.bar|floatformat:"2u" }}%"></i></div><strong>Rp {{ row.gross|floatformat:"0g" }}</strong></div>{% empty %}<div class="empty-state">Belum ada Sales.</div>{% endfor %}</div>
   </article>
   <article class="panel monthly-sales-panel"><div class="panel-header"><div><p class="eyebrow">MONTHLY SALES · MAX 12</p><h2>Monthly Gross Sales</h2><small>{{ monthly_period_label }}<br>angka dalam Rp miliar</small></div></div>
     <div class="monthly-chart-wrap"><div class="monthly-chart">{% for row in monthly_gross %}<div class="monthly-bar-item"><div class="monthly-bar-track" title="{{ row.label }}: Rp {{ row.gross|floatformat:'0g' }}"><i style="height:{{ row.bar|floatformat:'2u' }}%"></i></div><strong>{{ row.label }}</strong><span>{{ row.gross_billion|floatformat:"2g" }}</span></div>{% empty %}<div class="empty-state">Belum ada Sales.</div>{% endfor %}</div>
@@ -36,4 +44,30 @@
     <div class="table-wrap"><table><thead><tr><th>Source</th><th>Group</th><th>Order</th><th>Qty</th><th>Net Sales</th></tr></thead><tbody>{% for row in source_rows %}<tr><td><strong>{{ row.order__source_label }}</strong></td><td>{{ row.source_group }}</td><td>{{ row.orders|floatformat:"0g" }}</td><td>{{ row.qty|floatformat:"0g" }}</td><td>Rp {{ row.net|floatformat:"0g" }}</td></tr>{% empty %}<tr><td colspan="5">Tidak ada data.</td></tr>{% endfor %}</tbody></table></div>
   </article>
 </section>
+{% include "includes/multi_select_script.html" %}
+<script>
+(() => {
+  const form = document.querySelector('[data-dashboard-period-filter]');
+  if (!form) return;
+  const typeSelect = form.querySelector('[data-period-type]');
+  const periodField = form.querySelector('[data-period-field]');
+  const periodSelects = [...form.querySelectorAll('[data-period-options]')];
+  const customDateFields = [...form.querySelectorAll('[data-custom-date-field]')];
+  const syncPeriodFields = () => {
+    const isCustom = typeSelect.value === 'custom';
+    periodField.hidden = isCustom;
+    periodSelects.forEach(select => {
+      const active = !isCustom && select.dataset.periodOptions === typeSelect.value;
+      select.hidden = !active;
+      select.disabled = !active;
+    });
+    customDateFields.forEach(field => {
+      field.hidden = !isCustom;
+      field.querySelector('input').disabled = !isCustom;
+    });
+  };
+  typeSelect.addEventListener('change', syncPeriodFields);
+  syncPeriodFields();
+})();
+</script>
 {% endblock %}

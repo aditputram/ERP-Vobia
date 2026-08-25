@@ -6,13 +6,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
     <title>Pilih Modul · Vobia ERP</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260820-16">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260824-07">
 </head>
 <body class="module-hub-page">
     <header class="module-topbar">
         <a class="brand module-brand" href="{% url 'dashboard:index' %}">
             <img class="brand-logo" src="{% static 'img/logo-vobia.png' %}" alt="Vobia">
+            <span class="module-brand-legacy">Play For Legacy</span>
         </a>
+        <div class="module-space-brand" aria-label="Vobia Space">
+            <span class="module-space-wordmark">VOBIA SPACE</span>
+            <span class="module-space-tagline">Vobia Business Connected</span>
+            <span class="module-space-tagline">Tempat Untuk Bekerja, Berkarya dan Tertawa</span>
+        </div>
         <div class="module-user">
             <span class="module-user-copy"><small>SUPER ADMIN</small><strong>{{ request.user.username }}</strong></span>
             <span class="user-avatar">{{ request.user.username|slice:":1"|upper }}</span>
@@ -30,21 +36,12 @@
             </div>
         {% endif %}
 
-        <section class="module-hero">
-            <div>
-                <p class="eyebrow">VOBIA BUSINESS SYSTEM</p>
-                <h1>Pilih modul kerja.</h1>
-                <p>Setiap divisi memiliki ruang kerja sendiri, tetapi tetap terhubung dalam satu data dan audit trail Vobia.</p>
-            </div>
-            <div class="module-hero-note">
-                <span>01</span>
-                <div><strong>Mulai dari Sales</strong><small>Sales sedang menjadi fokus implementasi dan parallel run.</small></div>
-            </div>
-        </section>
-
         <section class="module-grid" aria-label="Daftar modul ERP">
             {% for module in modules %}
-                <article class="module-card module-{{ module.accent }} {% if not module.available %}coming-soon{% endif %}">
+                <article
+                    class="module-card module-{{ module.accent }} {% if not module.available %}coming-soon{% endif %}"
+                    style="--module-image: url('{% static module.image %}'); --module-position: {{ module.image_position }};"
+                >
                     <div class="module-card-top">
                         <span class="module-icon" aria-hidden="true">
                             {% if module.slug == "sales" %}

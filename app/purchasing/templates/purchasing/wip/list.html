@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}PO WIP Migration · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">PPIC · PO WIP MIGRATION</p>
+    <h1>Outstanding PO per 31 July 2026</h1>
+    <p>Upload, staging, validation, review, lalu approval. Migrasi PO tidak menambah stock; physical Inbound tetap dicatat Warehouse.</p>
+  </div>
+  <a class="primary-button" href="{% url 'purchasing:po_wip_upload' %}">Upload PO WIP</a>
+</header>
+
+<aside class="historical-audit-notice">
+  <div>
+    <p class="eyebrow">APPROVED MIGRATION ASSUMPTION</p>
+    <h2>PO Date 31 July · Supplier Vobia Vendor · No ETA</h2>
+    <p>PO Qty dan QC Passed memakai WIP; Received sebelum cutoff nol. COGS memakai proposed master snapshot yang ditampilkan saat review.</p>
+  </div>
+  <span>NO STOCK POSTING</span>
+</aside>
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">IMPORT HISTORY</p><h2>Batch PO WIP</h2></div></div>
+  {% if batches %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Uploaded</th><th>File</th><th>Status</th><th>PO</th><th>Line</th><th>Outstanding</th><th>Issue</th><th></th></tr></thead>
+    <tbody>{% for batch in batches %}<tr>
+      <td>{{ batch.created_at|date:"d M Y H:i" }}</td>
+      <td><strong>{{ batch.raw_file.original_filename }}</strong><small class="table-subtext">{{ batch.raw_file.checksum_sha256|slice:":12" }}…</small></td>
+      <td><span class="status-badge {% if batch.status == 'COMMITTED' or batch.status == 'READY' %}ready{% elif batch.status == 'BLOCKED' %}blocked{% else %}parsing{% endif %}">{{ batch.get_status_display }}</span></td>
+      <td>{{ batch.po_count|floatformat:"0g" }}</td><td>{{ batch.total_rows|floatformat:"0g" }}</td><td>{{ batch.total_outstanding_qty|floatformat:"0g" }} pcs</td>
+      <td>{{ batch.blocking_issue_count|floatformat:"0g" }} blocking · {{ batch.warning_count|floatformat:"0g" }} warning</td>
+      <td><a class="row-link" href="{% url 'purchasing:po_wip_detail' batch.id %}">Buka</a></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<div class="empty-state">Belum ada batch PO WIP.</div>{% endif %}
+</section>
+{% endblock %}

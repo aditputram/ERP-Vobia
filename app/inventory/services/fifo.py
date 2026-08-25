@@ -16,12 +16,134 @@ from inventory.models import (
     InventoryException,
     InventoryMovement,
     PhysicalReturnReceipt,
+    QCFollowUp,
+    QCFollowUpEvent,
     QCInspection,
 )
 from purchasing.models import PurchaseOrder
 
 
 CUTOVER_DATE = date(2026, 7, 31)
+
+
+def qc_approved_qty(po_line):
+    """Return sellable QC quantity, including units that pass Re-QC."""
+    initial_passed = po_line.qc_passed_before_cutover_qty + (
+        po_line.qc_inspections.aggregate(total=Sum("qty_passed"))["total"] or Decimal("0")
+    )
+    re_qc_passed = po_line.qc_follow_ups.aggregate(total=Sum("resolved_passed_qty"))["total"] or Decimal("0")
+    return initial_passed + re_qc_passed
+
+
+def ensure_qc_follow_up(inspection):
+    if inspection.qty_failed <= 0 or not inspection.failed_disposition:
+        return None
+    status_map = {
+        QCInspection.Disposition.REWORK: QCFollowUp.Status.AWAITING_REWORK,
+        QCInspection.Disposition.REJECTED: QCFollowUp.Status.REJECTED,
+        QCInspection.Disposition.ACCEPTED_EXCEPTION: QCFollowUp.Status.ACCEPTED_EXCEPTION,
+    }
+    follow_up, created = QCFollowUp.objects.get_or_create(
+        source_inspection=inspection,
+        defaults={
+            "po_line": inspection.po_line,
+            "status": status_map[inspection.failed_disposition],
+            "original_failed_qty": inspection.qty_failed,
+            "open_qty": inspection.qty_failed,
+        },
+    )
+    if created:
+        QCFollowUpEvent.objects.create(
+            follow_up=follow_up,
+            event_type=QCFollowUpEvent.EventType.CREATED,
+            activity_date=timezone.localtime(inspection.inspected_at).date(),
+            qty_inspected=inspection.qty_inspected,
+            qty_passed=inspection.qty_passed,
+            qty_failed=inspection.qty_failed,
+            failed_disposition=inspection.failed_disposition,
+            notes=inspection.notes,
+            actor=inspection.recorded_by,
+        )
+    return follow_up
+
+
+@transaction.atomic
+def complete_qc_rework(*, follow_up, activity_date, notes, actor):
+    follow_up = QCFollowUp.objects.select_for_update().get(pk=follow_up.pk)
+    if follow_up.status != QCFollowUp.Status.AWAITING_REWORK:
+        raise ValidationError("Hanya barang berstatus Menunggu Rework yang dapat diselesaikan.")
+    follow_up.status = QCFollowUp.Status.READY_RE_QC
+    follow_up.rework_cycle += 1
+    follow_up.save(update_fields=("status", "rework_cycle", "updated_at"))
+    event = QCFollowUpEvent.objects.create(
+        follow_up=follow_up,
+        event_type=QCFollowUpEvent.EventType.REWORK_COMPLETED,
+        activity_date=activity_date,
+        qty_inspected=follow_up.open_qty,
+        notes=(notes or "").strip(),
+        actor=actor,
+    )
+    record_audit(
+        actor=actor,
+        action="qc_rework_completed",
+        entity_type="inventory.qcfollowup",
+        entity_id=follow_up.id,
+        after_values={"status": follow_up.status, "open_qty": str(follow_up.open_qty)},
+    )
+    return event
+
+
+@transaction.atomic
+def record_re_qc(*, follow_up, activity_date, qty_passed, failed_disposition, notes, actor):
+    follow_up = QCFollowUp.objects.select_for_update().select_related("po_line__sku").get(pk=follow_up.pk)
+    if follow_up.status != QCFollowUp.Status.READY_RE_QC:
+        raise ValidationError("Re-QC hanya dapat dicatat setelah Rework Selesai.")
+    inspected = Decimal(follow_up.open_qty)
+    passed = Decimal(qty_passed)
+    if passed != passed.to_integral_value() or passed < 0 or passed > inspected:
+        raise ValidationError(f"Qty Lolos Re-QC harus antara 0 dan {inspected:.0f} pcs.")
+    failed = inspected - passed
+    if failed > 0 and failed_disposition not in {
+        QCInspection.Disposition.REWORK,
+        QCInspection.Disposition.REJECTED,
+    }:
+        raise ValidationError("Barang gagal Re-QC wajib diputuskan Rework atau Rejected.")
+    before = {"status": follow_up.status, "open_qty": str(follow_up.open_qty)}
+    follow_up.resolved_passed_qty += passed
+    follow_up.open_qty = failed
+    if failed == 0:
+        follow_up.status = QCFollowUp.Status.RESOLVED
+        failed_disposition = ""
+    elif failed_disposition == QCInspection.Disposition.REWORK:
+        follow_up.status = QCFollowUp.Status.AWAITING_REWORK
+    else:
+        follow_up.status = QCFollowUp.Status.REJECTED
+    follow_up.save(update_fields=("resolved_passed_qty", "open_qty", "status", "updated_at"))
+    event = QCFollowUpEvent.objects.create(
+        follow_up=follow_up,
+        event_type=QCFollowUpEvent.EventType.RE_QC,
+        activity_date=activity_date,
+        qty_inspected=inspected,
+        qty_passed=passed,
+        qty_failed=failed,
+        failed_disposition=failed_disposition,
+        notes=(notes or "").strip(),
+        actor=actor,
+    )
+    record_audit(
+        actor=actor,
+        action="qc_reinspection_recorded",
+        entity_type="inventory.qcfollowup",
+        entity_id=follow_up.id,
+        before_values=before,
+        after_values={
+            "status": follow_up.status,
+            "inspected": str(inspected),
+            "passed": str(passed),
+            "failed": str(failed),
+        },
+    )
+    return event
 
 
 @transaction.atomic
@@ -172,15 +294,38 @@ def post_sales_out(sales_line, actor):
 def record_qc(*, po_line, inspected_at, qty_inspected, qty_passed, qty_failed, actor, disposition="", notes=""):
     if po_line.po.status != PurchaseOrder.Status.RELEASED:
         raise ValidationError("QC hanya boleh dicatat untuk PO Released.")
+    from production.models import ProductionStage
+    from production.services import ensure_production_order, qc_is_open, qc_line_availability
+
+    production_order = ensure_production_order(po_line.po, actor=actor)
+    if not qc_is_open(production_order):
+        raise ValidationError("QC menunggu Qty output Trim yang belum pernah diperiksa.")
     if inspected_at.date() <= CUTOVER_DATE:
         raise ValidationError("QC operasional ERP dimulai 1 August 2026; histori sampai 31 July hanya melalui PO WIP migration.")
     quantities = [Decimal(qty_inspected), Decimal(qty_passed), Decimal(qty_failed)]
-    existing = (
-        po_line.qc_passed_before_cutover_qty
-        + (po_line.qc_inspections.aggregate(total=Sum("qty_inspected"))["total"] or Decimal("0"))
+    if quantities[1] + quantities[2] != quantities[0]:
+        raise ValidationError("Qty QC Passed + Qty QC Failed harus sama dengan Qty Inspected.")
+    trim_completed = production_order.stages.get(stage=ProductionStage.Stage.TRIM).completed_qty
+    po_inspected = sum(
+        (
+            line.qc_passed_before_cutover_qty
+            + (line.qc_inspections.aggregate(total=Sum("qty_inspected"))["total"] or Decimal("0"))
+            for line in po_line.po.lines.all()
+        ),
+        Decimal("0"),
     )
-    if existing + quantities[0] > po_line.ordered_qty:
-        raise ValidationError("Cumulative Qty Inspected tidak boleh melebihi PO Qty.")
+    if po_inspected + quantities[0] > trim_completed:
+        raise ValidationError(
+            f"Cumulative Qty Inspected tidak boleh melebihi output Trim ({trim_completed:.0f} pcs)."
+        )
+    line_availability = qc_line_availability(production_order, po_line)
+    line_limit = line_availability["trim_qty"] or Decimal(po_line.ordered_qty)
+    line_inspected = line_availability["inspected_qty"]
+    if line_inspected + quantities[0] > line_limit:
+        raise ValidationError(
+            f"Cumulative Qty Inspected tidak boleh melebihi output Trim SKU "
+            f"({line_limit:.0f} pcs)."
+        )
     qc = QCInspection(
         po_line=po_line,
         inspected_at=inspected_at,
@@ -193,6 +338,7 @@ def record_qc(*, po_line, inspected_at, qty_inspected, qty_passed, qty_failed, a
     )
     qc.full_clean()
     qc.save()
+    ensure_qc_follow_up(qc)
     record_audit(
         actor=actor,
         action="qc_recorded",
@@ -204,16 +350,47 @@ def record_qc(*, po_line, inspected_at, qty_inspected, qty_passed, qty_failed, a
 
 
 @transaction.atomic
-def record_inbound(*, po_line, inbound_date, received_qty, warehouse, reference, actor, notes=""):
+def record_inbound(
+    *,
+    po_line,
+    inbound_date,
+    received_qty,
+    warehouse,
+    reference,
+    actor,
+    notes="",
+    delivery_activity=None,
+):
     if po_line.po.status != PurchaseOrder.Status.RELEASED:
         raise ValidationError("Inbound hanya boleh dicatat untuk PO Released.")
     if inbound_date <= CUTOVER_DATE:
         raise ValidationError("Inbound operasional ERP dimulai 1 August 2026; receipt sampai 31 July sudah terserap ke FIFO Opening.")
     received_qty = Decimal(received_qty)
-    passed = (
-        po_line.qc_passed_before_cutover_qty
-        + (po_line.qc_inspections.aggregate(total=Sum("qty_passed"))["total"] or Decimal("0"))
-    )
+    if delivery_activity is not None:
+        if (
+            delivery_activity.activity_type != "WAREHOUSE_DELIVERY"
+            or delivery_activity.entry_kind != "ACTIVITY"
+            or delivery_activity.po_line_id != po_line.id
+        ):
+            raise ValidationError("Pengiriman Production tidak sesuai dengan SKU yang diterima.")
+        if inbound_date < delivery_activity.activity_date:
+            raise ValidationError(
+                f"Tanggal Diterima minimal {delivery_activity.activity_date:%d/%m/%Y}, "
+                "sama dengan Tanggal Kirim."
+            )
+        effective = (
+            delivery_activity.correction_entries.filter(entry_kind="CORRECTION")
+            .order_by("-occurred_at")
+            .first()
+            or delivery_activity
+        )
+        received_for_delivery = (
+            delivery_activity.inbound_receipts.aggregate(total=Sum("received_qty"))["total"]
+            or Decimal("0")
+        )
+        if received_for_delivery + received_qty > Decimal(effective.quantity or 0):
+            raise ValidationError("Qty diterima tidak boleh melebihi sisa Qty Delivering.")
+    passed = qc_approved_qty(po_line)
     already_received = (
         po_line.received_before_cutover_qty
         + (po_line.inbound_receipts.aggregate(total=Sum("received_qty"))["total"] or Decimal("0"))
@@ -231,6 +408,7 @@ def record_inbound(*, po_line, inbound_date, received_qty, warehouse, reference,
         retail_price_snapshot=po_line.sku.current_retail_price,
         notes=notes,
         recorded_by=actor,
+        delivery_activity=delivery_activity,
     )
     receipt.full_clean()
     receipt.save()
@@ -268,6 +446,112 @@ def record_inbound(*, po_line, inbound_date, received_qty, warehouse, reference,
         after_values={"movement_key": movement_key, "quantity": str(received_qty)},
     )
     return receipt, movement
+
+
+@transaction.atomic
+def receive_rejected_goods_delivery(*, delivery_activity, inbound_date, received_qty, warehouse, actor, notes=""):
+    from production.models import ProductionActivity
+
+    delivery_activity = ProductionActivity.objects.select_for_update().select_related(
+        "delivery_order",
+        "po_line__sku",
+    ).get(pk=delivery_activity.pk)
+    if delivery_activity.activity_type != ProductionActivity.ActivityType.REJECTED_WAREHOUSE_DELIVERY:
+        raise ValidationError("Pengiriman ini bukan Rejected Goods.")
+    if warehouse.code != "REJECT":
+        raise ValidationError("Rejected Goods hanya dapat diterima di Reject Warehouse.")
+    if inbound_date < delivery_activity.activity_date:
+        raise ValidationError(
+            f"Tanggal Diterima minimal {delivery_activity.activity_date:%d/%m/%Y}, sama dengan Tanggal Kirim."
+        )
+    follow_ups = list(
+        QCFollowUp.objects.select_for_update().filter(
+            delivery_activity=delivery_activity,
+            status=QCFollowUp.Status.REJECTED,
+        )
+    )
+    if not follow_ups or any(row.delivery_status == QCFollowUp.DeliveryStatus.INBOUND for row in follow_ups):
+        raise ValidationError("Rejected Goods ini sudah diterima atau tidak lagi tersedia.")
+    expected = sum((row.open_qty for row in follow_ups), Decimal("0"))
+    received_qty = Decimal(received_qty)
+    if received_qty != expected:
+        raise ValidationError(f"Quantity Received harus sama dengan Qty Delivering ({expected:.0f} pcs).")
+    QCFollowUp.objects.filter(pk__in=[row.pk for row in follow_ups]).update(
+        delivery_status=QCFollowUp.DeliveryStatus.INBOUND,
+        delivery_updated_by=actor,
+        delivery_updated_at=timezone.now(),
+        received_date=inbound_date,
+        received_warehouse=warehouse,
+        received_by=actor,
+    )
+    InventoryMovement.objects.create(
+        movement_key=f"REJECTED|{delivery_activity.delivery_order.number}|{delivery_activity.po_line.sku.sku}|{delivery_activity.id}",
+        movement_date=inbound_date,
+        movement_type=InventoryMovement.MovementType.REJECTED_IN,
+        direction=InventoryMovement.Direction.IN,
+        sku=delivery_activity.po_line.sku,
+        warehouse=warehouse,
+        quantity=received_qty,
+        allocated_cost=Decimal("0"),
+        source_reference=delivery_activity.delivery_order.number,
+        reason="Rejected Goods diterima fisik; non-sellable dan tanpa FIFO.",
+        evidence_reference=delivery_activity.delivery_order.number,
+        posted_by=actor,
+    )
+    record_audit(
+        actor=actor,
+        action="rejected_goods_received",
+        entity_type="production.productionactivity",
+        entity_id=delivery_activity.id,
+        after_values={
+            "delivery_order": delivery_activity.delivery_order.number,
+            "sku": delivery_activity.po_line.sku.sku,
+            "received_qty": str(received_qty),
+            "received_date": str(inbound_date),
+            "warehouse": warehouse.name,
+            "stock_effect": "NONE",
+            "notes": (notes or "").strip(),
+        },
+    )
+    return follow_ups
+
+
+@transaction.atomic
+def undo_unallocated_inbound(*, receipt, actor, reason):
+    receipt = InboundReceipt.objects.select_for_update().select_related(
+        "delivery_activity__delivery_order",
+        "po_line__sku",
+        "warehouse",
+    ).get(pk=receipt.pk)
+    try:
+        movement = receipt.movement
+        layer = movement.created_fifo_layer
+    except (InventoryMovement.DoesNotExist, FIFOLayer.DoesNotExist) as exc:
+        raise ValidationError("Receipt tidak memiliki movement dan FIFO layer yang lengkap.") from exc
+    if layer.allocations.exists() or layer.remaining_qty != layer.original_qty:
+        raise ValidationError("Receipt tidak dapat di-undo karena FIFO layer sudah terpakai.")
+
+    receipt_id = receipt.id
+    snapshot = {
+        "delivery_order": receipt.delivery_activity.delivery_order.number if receipt.delivery_activity else "",
+        "sku": receipt.po_line.sku.sku,
+        "quantity": str(receipt.received_qty),
+        "inbound_date": str(receipt.inbound_date),
+        "warehouse": receipt.warehouse.name,
+        "movement_key": movement.movement_key,
+    }
+    FIFOLayer.objects.filter(pk=layer.pk).delete()
+    InventoryMovement.objects.filter(pk=movement.pk).delete()
+    InboundReceipt.objects.filter(pk=receipt.pk).delete()
+    record_audit(
+        actor=actor,
+        action="inbound_receipt_undone",
+        entity_type="inventory.inboundreceipt",
+        entity_id=receipt_id,
+        reason=reason,
+        before_values=snapshot,
+    )
+    return snapshot
 
 
 @transaction.atomic

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
@@ -5,15 +7,16 @@ from django.core.paginator import Paginator
 from django.http import HttpResponseNotAllowed
 from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
-from master_data.models import Category, ProductStatus, SKU
+from master_data.models import Category, Product, ProductStatus, SKU, Warehouse
 from purchasing.models import PurchaseOrder, PurchaseOrderLine
 
 from imports.services.storage import DuplicateRawFile
 
-from .forms import AdjustmentForm, FIFOOpeningImportUploadForm, InboundForm, OpeningForm, QCForm, ReturnForm, WarehouseForm
+from .forms import AdjustmentForm, DeliveryReceiveForm, FIFOOpeningImportUploadForm, InboundForm, OpeningForm, QCForm, ReturnForm, WarehouseForm
 from .models import (
     ExpectedReturn,
     FIFOLayer,
@@ -26,30 +29,15 @@ from .models import (
     QCInspection,
 )
 from .services.aging import po_aging_snapshot, refresh_po_close
-from .services.fifo import CUTOVER_DATE, inventory_balance, post_adjustment, post_opening, record_inbound, record_physical_return, record_qc
+from .services.fifo import CUTOVER_DATE, inventory_balance, post_adjustment, post_opening, qc_approved_qty, receive_rejected_goods_delivery, record_inbound, record_physical_return, record_qc
 from .services.opening_import import approve_opening_import, create_opening_import
-from .services.reporting import filtered_skus, inventory_parent_summary_rows, inventory_summary_rows, movement_ledger_rows
+from .services.reporting import filtered_skus, inventory_parent_summary_rows, inventory_summary_rows, movement_ledger_rows, parent_movement_ledger_rows
+from production.models import ProductionActivity
 
 
 @login_required
 def production(request):
-    form = QCForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
-        try:
-            record_qc(actor=request.user, **form.cleaned_data)
-        except ValidationError as exc:
-            form.add_error(None, exc)
-        else:
-            messages.success(request, "QC berhasil dicatat. Stock belum bertambah sampai inbound fisik.")
-            return redirect("inventory:production")
-    return render(
-        request,
-        "inventory/production.html",
-        {
-            "qc_form": form,
-            "qc_records": QCInspection.objects.select_related("po_line__po", "po_line__sku", "recorded_by")[:200],
-        },
-    )
+    return redirect("production:dashboard")
 
 
 @login_required
@@ -83,6 +71,15 @@ def overview(request):
     status = request.GET.get("status", "")
     category = request.GET.get("category", "")
     stock_status = request.GET.get("stock_status", "")
+    warehouses = list(Warehouse.objects.filter(is_active=True, code__in=("MAIN", "REJECT")).order_by("name"))
+    warehouse_map = {str(row.id): row for row in warehouses}
+    main_warehouse = next((row for row in warehouses if row.code == "MAIN"), None)
+    warehouse_value = request.GET.get("warehouse")
+    selected_warehouse = (
+        None
+        if "warehouse" in request.GET and warehouse_value == ""
+        else warehouse_map.get(warehouse_value, main_warehouse)
+    )
     sku_type = request.GET.get("sku_type", "sku")
     if sku_type not in {"sku", "parent"}:
         sku_type = "sku"
@@ -99,11 +96,14 @@ def overview(request):
     if as_of_date < CUTOVER_DATE:
         as_of_date = CUTOVER_DATE
         date_filter_error = "Riwayat Warehouse ERP tersedia mulai FIFO cutover 31 July 2026."
-    elif as_of_date > today:
-        as_of_date = today
-        date_filter_error = "Tanggal masa depan tidak dapat dipilih; posisi stok dikembalikan ke hari ini."
     skus = filtered_skus(query=query, status=status, category=category)
-    balances = inventory_summary_rows(skus, as_of_date=as_of_date)
+    balances = inventory_summary_rows(skus, as_of_date=as_of_date, warehouse=selected_warehouse)
+    if selected_warehouse:
+        balances = [
+            row
+            for row in balances
+            if any(row[field] for field in ("opening_qty", "incoming_qty", "outgoing_qty", "fifo_qty"))
+        ]
     if sku_type == "parent":
         balances = inventory_parent_summary_rows(balances)
     if stock_status:
@@ -127,9 +127,10 @@ def overview(request):
             "selected_status": status,
             "selected_category": category,
             "selected_stock_status": stock_status,
+            "warehouses": warehouses,
+            "selected_warehouse": selected_warehouse,
             "sku_type": sku_type,
             "as_of_date": as_of_date,
-            "today": today,
             "cutover_date": CUTOVER_DATE,
             "date_filter_error": date_filter_error,
             "product_statuses": ProductStatus.objects.filter(is_active=True),
@@ -145,32 +146,232 @@ def overview(request):
 @login_required
 def turnover(request):
     query = request.GET.get("q", "").strip()
+    sku_type = request.GET.get("sku_type", "sku")
+    if sku_type not in {"sku", "parent"}:
+        sku_type = "sku"
+    products = list(Product.objects.filter(is_active=True, variants__skus__is_active=True).distinct())
+    product_options = [{"value": str(row.id), "label": row.name} for row in products]
+    valid_product_ids = {row["value"] for row in product_options}
+    selected_products = [value for value in request.GET.getlist("product") if value in valid_product_ids]
+    size_queryset = SKU.objects.filter(is_active=True).exclude(size="")
+    if selected_products:
+        size_queryset = size_queryset.filter(product_variant__product_id__in=selected_products)
+    size_values = list(size_queryset.values_list("size", flat=True).distinct().order_by("size"))
+    selected_sizes = [value for value in request.GET.getlist("size") if value in size_values]
     movement_type = request.GET.get("movement_type", "")
-    date_from = request.GET.get("date_from") or None
-    date_to = request.GET.get("date_to") or None
-    skus = filtered_skus(query=query)
-    rows = movement_ledger_rows(
-        skus,
-        date_from=date_from,
-        date_to=date_to,
-        movement_type=movement_type if movement_type in InventoryMovement.MovementType.values else "",
+    warehouses = list(Warehouse.objects.filter(is_active=True, code__in=("MAIN", "REJECT")).order_by("name"))
+    warehouse_map = {str(row.id): row for row in warehouses}
+    main_warehouse = next((row for row in warehouses if row.code == "MAIN"), None)
+    warehouse_value = request.GET.get("warehouse")
+    selected_warehouse = (
+        None
+        if "warehouse" in request.GET and warehouse_value == ""
+        else warehouse_map.get(warehouse_value, main_warehouse)
     )
+    date_from_value = request.GET.get("date_from", "")
+    date_to_value = request.GET.get("date_to", "")
+    date_from = parse_date(date_from_value) if date_from_value else None
+    date_to = parse_date(date_to_value) if date_to_value else None
+    skus = filtered_skus(query=query, product=selected_products, size=selected_sizes)
+    valid_movement_type = movement_type if movement_type in InventoryMovement.MovementType.values else ""
+    if sku_type == "parent":
+        rows = parent_movement_ledger_rows(
+            movement_ledger_rows(skus, date_to=date_to, warehouse=selected_warehouse)
+        )
+        if date_from:
+            rows = [row for row in rows if row["date"] >= date_from]
+        if valid_movement_type:
+            rows = [row for row in rows if row["type"] == valid_movement_type]
+    else:
+        rows = movement_ledger_rows(
+            skus,
+            date_from=date_from,
+            date_to=date_to,
+            movement_type=valid_movement_type,
+            warehouse=selected_warehouse,
+        )
     page = Paginator(rows, 100).get_page(request.GET.get("page"))
     return render(request, "inventory/turnover.html", {
         "page": page,
         "query": query,
+        "sku_type": sku_type,
+        "selected_products": selected_products,
+        "selected_sizes": selected_sizes,
+        "product_options": product_options,
+        "size_options": [{"value": value, "label": value} for value in size_values],
         "movement_type": movement_type,
-        "date_from": date_from,
-        "date_to": date_to,
+        "date_from": date_from_value,
+        "date_to": date_to_value,
         "movement_types": InventoryMovement.MovementType.choices,
+        "warehouses": warehouses,
+        "selected_warehouse": selected_warehouse,
         "total_rows": len(rows),
     })
 
 
 @login_required
 def inbound(request):
-    form = InboundForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
+    delivery_rows = []
+    deliveries = ProductionActivity.objects.filter(
+        entry_kind=ProductionActivity.EntryKind.ACTIVITY,
+        activity_type__in=(
+            ProductionActivity.ActivityType.WAREHOUSE_DELIVERY,
+            ProductionActivity.ActivityType.REJECTED_WAREHOUSE_DELIVERY,
+        ),
+    ).select_related(
+        "production_order__po__supplier",
+        "po_line__sku__product_variant__product",
+        "actor",
+        "delivery_order",
+    ).prefetch_related(
+        "correction_entries",
+        "inbound_receipts",
+        "rejected_follow_ups__received_warehouse",
+    ).order_by("-activity_date", "-occurred_at")
+    for delivery in deliveries:
+        effective = max(delivery.correction_entries.all(), key=lambda row: row.occurred_at, default=delivery)
+        shipped = effective.quantity or 0
+        is_rejected = delivery.activity_type == ProductionActivity.ActivityType.REJECTED_WAREHOUSE_DELIVERY
+        rejected_follow_ups = list(delivery.rejected_follow_ups.all())
+        received = (
+            sum(
+                (row.open_qty for row in rejected_follow_ups if row.delivery_status == "INBOUND"),
+                Decimal("0"),
+            )
+            if is_rejected
+            else sum((receipt.received_qty for receipt in delivery.inbound_receipts.all()), 0)
+        )
+        remaining = max(shipped - received, 0)
+        latest_receipt = (
+            None
+            if is_rejected
+            else max(delivery.inbound_receipts.all(), key=lambda receipt: receipt.created_at, default=None)
+        )
+        rejected_receipt = next((row for row in rejected_follow_ups if row.received_date), None)
+        delivery_rows.append(
+            {
+                "delivery": delivery,
+                "is_rejected": is_rejected,
+                "kind_label": "Rejected Goods" if is_rejected else "QC Passed",
+                "shipped": shipped,
+                "received": received,
+                "remaining": remaining,
+                "latest_receipt": latest_receipt,
+                "received_date": rejected_receipt.received_date if rejected_receipt else getattr(latest_receipt, "inbound_date", None),
+                "received_warehouse": rejected_receipt.received_warehouse if rejected_receipt else getattr(latest_receipt, "warehouse", None),
+            }
+        )
+
+    selected_delivery_id = request.POST.get("delivery_activity", "")
+    selected_delivery = next(
+        (
+            row
+            for row in delivery_rows
+            if row["remaining"] and str(row["delivery"].id) == selected_delivery_id
+        ),
+        None,
+    )
+    is_delivery_receive = request.method == "POST" and request.POST.get("form_name") == "delivery_receive"
+    delivery_form = None
+    if selected_delivery:
+        delivery_form = DeliveryReceiveForm(
+            request.POST if is_delivery_receive else None,
+            max_qty=selected_delivery["remaining"],
+            min_date=selected_delivery["delivery"].activity_date,
+            initial={"delivery_activity": selected_delivery["delivery"].id},
+            default_warehouse_code="REJECT" if selected_delivery["is_rejected"] else "MAIN",
+        )
+    if is_delivery_receive and selected_delivery and delivery_form.is_valid():
+        values = delivery_form.cleaned_data.copy()
+        values.pop("delivery_activity")
+        try:
+            if selected_delivery["is_rejected"]:
+                receive_rejected_goods_delivery(
+                    delivery_activity=selected_delivery["delivery"],
+                    actor=request.user,
+                    **values,
+                )
+            else:
+                values["reference"] = (
+                    f"{selected_delivery['delivery'].delivery_order.number}/"
+                    f"{selected_delivery['delivery'].id}/"
+                    f"{selected_delivery['delivery'].inbound_receipts.count() + 1:03d}"
+                )
+                record_inbound(
+                    po_line=selected_delivery["delivery"].po_line,
+                    delivery_activity=selected_delivery["delivery"],
+                    actor=request.user,
+                    **values,
+                )
+        except ValidationError as exc:
+            delivery_form.add_error(None, exc)
+        else:
+            messages.success(
+                request,
+                "Rejected Goods diterima tanpa menambah stock/FIFO."
+                if selected_delivery["is_rejected"]
+                else "Pengiriman diterima; Delivering berkurang dan Inbound bertambah.",
+            )
+            delivery_order_id = selected_delivery["delivery"].delivery_order_id
+            return redirect(
+                f"{reverse('inventory:inbound')}?delivery_order={delivery_order_id}"
+                f"#delivery-order-{delivery_order_id}"
+            )
+
+    delivery_order_map = {}
+    open_delivery_order_id = request.GET.get("delivery_order", "")
+    for row in delivery_rows:
+        delivery = row["delivery"]
+        row["receive_form"] = None
+        if row["remaining"]:
+            row["receive_form"] = (
+                delivery_form
+                if selected_delivery and delivery.id == selected_delivery["delivery"].id
+                else DeliveryReceiveForm(
+                    max_qty=row["remaining"],
+                    min_date=delivery.activity_date,
+                    initial={"delivery_activity": delivery.id},
+                    default_warehouse_code="REJECT" if row["is_rejected"] else "MAIN",
+                )
+            )
+            row["receive_form_id"] = f"delivery-receive-{delivery.id}"
+            for field in row["receive_form"].fields.values():
+                field.widget.attrs["form"] = row["receive_form_id"]
+        key = str(delivery.delivery_order_id)
+        group = delivery_order_map.setdefault(
+            key,
+            {
+                "delivery_order": delivery.delivery_order,
+                "production_order": delivery.production_order,
+                "delivery_date": delivery.activity_date,
+                "received_date": None,
+                "actor": delivery.actor,
+                "kind_label": row["kind_label"],
+                "rows": [],
+                "shipped": 0,
+                "received": 0,
+                "remaining": 0,
+                "open": key == open_delivery_order_id,
+            },
+        )
+        group["rows"].append(row)
+        group["shipped"] += row["shipped"]
+        group["received"] += row["received"]
+        group["remaining"] += row["remaining"]
+        if row["received_date"] and (
+            group["received_date"] is None
+            or row["received_date"] > group["received_date"]
+        ):
+            group["received_date"] = row["received_date"]
+        if selected_delivery and delivery.id == selected_delivery["delivery"].id:
+            group["open"] = True
+    delivery_orders = [group for group in delivery_order_map.values() if group["remaining"]]
+    completed_delivery_orders = [
+        group for group in delivery_order_map.values() if not group["remaining"] and group["received"]
+    ]
+
+    form = InboundForm(request.POST if request.method == "POST" and not is_delivery_receive else None)
+    if request.method == "POST" and not is_delivery_receive and form.is_valid():
         try:
             record_inbound(actor=request.user, **form.cleaned_data)
         except ValidationError as exc:
@@ -183,14 +384,33 @@ def inbound(request):
         "po", "po__supplier", "sku"
     ).prefetch_related("qc_inspections", "inbound_receipts")
     for line in lines:
-        qc_passed = line.qc_passed_before_cutover_qty + sum((row.qty_passed for row in line.qc_inspections.all()), 0)
+        qc_passed = qc_approved_qty(line)
         received = line.received_before_cutover_qty + sum((row.received_qty for row in line.inbound_receipts.all()), 0)
         outstanding_qty = max(line.ordered_qty - received, 0)
         eligible_qty = max(qc_passed - received, 0)
         if outstanding_qty:
             outstanding.append({"line": line, "qc_passed": qc_passed, "received": received, "outstanding": outstanding_qty, "eligible": eligible_qty})
-    receipts = InboundReceipt.objects.select_related("po_line__po", "po_line__sku", "warehouse", "recorded_by").order_by("-inbound_date", "-created_at")[:300]
-    return render(request, "inventory/inbound.html", {"form": form, "outstanding": outstanding, "receipts": receipts})
+    receipts = InboundReceipt.objects.select_related(
+        "po_line__po",
+        "po_line__sku",
+        "warehouse",
+        "recorded_by",
+        "delivery_activity__delivery_order",
+    ).order_by("-inbound_date", "-created_at")[:300]
+    return render(
+        request,
+        "inventory/inbound.html",
+        {
+            "form": form,
+            "delivery_rows": delivery_rows,
+            "delivery_orders": delivery_orders,
+            "completed_delivery_orders": completed_delivery_orders,
+            "selected_delivery": selected_delivery,
+            "delivery_form": delivery_form,
+            "outstanding": outstanding,
+            "receipts": receipts,
+        },
+    )
 
 
 @login_required

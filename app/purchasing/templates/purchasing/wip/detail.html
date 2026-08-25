@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Review PO WIP · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">PPIC · PO WIP REVIEW</p><h1>{{ batch.raw_file.original_filename }}</h1><p>Checksum {{ batch.raw_file.checksum_sha256 }} · parser {{ batch.parser_version }}</p></div>
+  <div class="header-actions"><a class="secondary-button" href="{% url 'purchasing:po_wip_list' %}">Riwayat batch</a><span class="status-badge {% if batch.status == 'COMMITTED' or batch.status == 'READY' %}ready{% elif batch.status == 'BLOCKED' %}blocked{% else %}parsing{% endif %}">{{ batch.get_status_display }}</span></div>
+</header>
+
+<section class="dashboard-grid import-summary-grid">
+  <article class="panel span-two">
+    <div class="panel-header"><div><p class="eyebrow">QUALITY PROFILE</p><h2>Migration preview</h2></div></div>
+    <dl class="quality-grid">
+      <div><dt>Purchase Order</dt><dd>{{ batch.po_count|floatformat:"0g" }}</dd></div>
+      <div><dt>PO + SKU line</dt><dd>{{ batch.total_rows|floatformat:"0g" }}</dd></div>
+      <div><dt>Outstanding</dt><dd>{{ batch.total_outstanding_qty|floatformat:"0g" }} pcs</dd></div>
+      <div><dt>Proposed COGS value</dt><dd>Rp {{ batch.quality_summary.total_proposed_cogs_value|floatformat:"0g" }}</dd></div>
+      <div><dt>Blocking</dt><dd>{{ batch.blocking_issue_count|floatformat:"0g" }}</dd></div>
+      <div><dt>Warning</dt><dd>{{ batch.warning_count|floatformat:"0g" }}</dd></div>
+    </dl>
+  </article>
+  <article class="panel approval-panel">
+    <p class="eyebrow">APPROVAL GATE</p>
+    {% if batch.status == 'COMMITTED' %}<h2>Sudah di-commit</h2><p class="muted">Approved oleh {{ batch.approved_by.username }}. PO sudah Released, tetapi stock belum bertambah sebelum physical Inbound.</p>
+    {% elif batch.can_approve %}<h2>Siap di-commit</h2><p class="muted">Approval membekukan COGS snapshot dan membuat PO WIP Released. Tidak membuat stock movement.</p>
+      <form method="post" action="{% url 'purchasing:po_wip_approve' batch.id %}">{% csrf_token %}<button class="primary-button wide" type="submit">Approve &amp; Commit PO WIP</button></form>
+    {% else %}<h2>Commit diblokir</h2><button class="primary-button wide" disabled>Ada blocking issue</button>{% endif %}
+  </article>
+</section>
+
+<aside class="historical-audit-notice section-gap">
+  <div><p class="eyebrow">MIGRATION ASSUMPTIONS</p><h2>31 July 2026 · Vobia Vendor · No ETA</h2><p>PO Qty = WIP; Received before cutover = 0; QC Passed before cutover = WIP; COGS = proposed current master snapshot. Need Month tetap dibaca dari No. PO.</p></div><span>REVIEW REQUIRED</span>
+</aside>
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">VALIDATION</p><h2>Issue</h2></div></div>
+  {% if issues %}<div class="table-wrap"><table><thead><tr><th>Severity</th><th>Row</th><th>Code</th><th>Field</th><th>Message</th></tr></thead><tbody>{% for issue in issues %}<tr><td><span class="status-badge {% if issue.is_blocking %}blocked{% else %}parsing{% endif %}">{{ issue.severity }}</span></td><td>{{ issue.staged_row.row_number|default:"Batch" }}</td><td>{{ issue.code }}</td><td>{{ issue.field_name|default:"—" }}</td><td>{{ issue.message }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">Tidak ada issue.</div>{% endif %}
+</section>
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">STAGING</p><h2>PO WIP line</h2></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Row</th><th>No. PO</th><th>Parent SKU</th><th>SKU</th><th>Product source</th><th>WIP / PO Qty</th><th>QC Passed</th><th>Received</th><th>Proposed COGS</th><th>Action</th></tr></thead><tbody>
+    {% for row in page %}<tr><td>{{ row.row_number }}</td><td><strong>{{ row.po_number }}</strong></td><td>{{ row.parent_sku }}</td><td><span class="code-label">{{ row.sku_text }}</span></td><td>{{ row.product_name_source }}<small class="table-subtext">Master: {{ row.sku.product_variant.product.name|default:"—" }}</small></td><td>{{ row.outstanding_qty|floatformat:"0g" }}</td><td>{{ row.outstanding_qty|floatformat:"0g" }}</td><td>0</td><td>Rp {{ row.proposed_cogs_snapshot|floatformat:"0g" }}</td><td><span class="status-badge {% if row.proposed_action == 'NEW' %}ready{% else %}blocked{% endif %}">{{ row.get_proposed_action_display }}</span></td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if page.paginator.num_pages > 1 %}<div class="pagination"><span>Halaman {{ page.number }} dari {{ page.paginator.num_pages }}</span><div>{% if page.has_previous %}<a class="secondary-button" href="?page={{ page.previous_page_number }}">Sebelumnya</a>{% endif %}{% if page.has_next %}<a class="secondary-button" href="?page={{ page.next_page_number }}">Berikutnya</a>{% endif %}</div></div>{% endif %}
+</section>
+{% endblock %}

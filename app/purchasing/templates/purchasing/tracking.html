@@ -1,14 +1,30 @@
 {% extends "base.html" %}
-{% block title %}PO Tracking · Vobia ERP{% endblock %}
+{% block title %}Purchase Order · Vobia ERP{% endblock %}
 {% block content %}
 <header class="page-header">
-  <div><p class="eyebrow">PPIC · PO TRACKING</p><h1>Monitor progres Purchase Order</h1><p>Tracking diturunkan dari PO, QC, dan inbound canonical ERP. Data percobaan pada Vobia MD tidak dimigrasikan.</p></div>
-  <a class="secondary-button" href="{% url 'purchasing:overview' %}">Requirement &amp; Create PO</a>
+  <div><p class="eyebrow">PPIC · PURCHASE ORDER</p><h1>Daftar dan Tracking Purchase Order</h1><p>Menggabungkan daftar sheet Purchase Order dan PO Tracking Vobia MD 2026. Progres diturunkan dari PO, QC, dan inbound canonical ERP.</p></div>
+  <div class="header-actions"><a class="secondary-button" href="{% url 'purchasing:po_wip_list' %}">PO WIP Migration</a><a class="primary-button" href="{% url 'purchasing:generator' %}">Buka PO Generator</a></div>
 </header>
+<form method="get" class="panel inventory-filter section-gap" data-auto-submit>
+  <div class="inventory-filter-grid">
+    <label class="inventory-search-field">Search No. PO / SKU<input type="search" name="q" value="{{ selected.query }}" placeholder="Contoh PO-VOB-06/26-081 atau SKU" autocomplete="off" data-auto-search></label>
+    <label>Need Month<select name="need_month"><option value="">All Months</option>{% for month in need_month_options %}<option value="{{ month|date:'Y-m' }}" {% if selected.need_month == month|date:'Y-m' %}selected{% endif %}>{{ month|date:"F Y" }}</option>{% endfor %}</select></label>
+    <label>Vendor<select name="supplier"><option value="">All Vendors</option>{% for vendor in supplier_options %}<option value="{{ vendor.id }}" {% if selected.supplier == vendor.id|stringformat:'s' %}selected{% endif %}>{{ vendor.name }}</option>{% endfor %}</select></label>
+    <label>PO Status<select name="po_status"><option value="">All PO Status</option>{% for value,label in po_status_options %}<option value="{{ value }}" {% if selected.po_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Schedule<select name="schedule_status"><option value="">All Schedule</option>{% for value in schedule_status_options %}<option value="{{ value }}" {% if selected.schedule_status == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+    <a class="secondary-button" href="{% url 'purchasing:purchase_orders' %}">Reset</a>
+  </div>
+</form>
+<section class="metric-grid section-gap">
+  <article class="metric-card"><span>Purchase Order</span><strong>{{ po_count|floatformat:"0g" }}</strong><small>canonical PO</small></article>
+  <article class="metric-card"><span>SKU line</span><strong>{{ line_count|floatformat:"0g" }}</strong><small>detail di dalam PO</small></article>
+  <article class="metric-card"><span>Total PO Qty</span><strong>{{ total_po_qty|floatformat:"0g" }} pcs</strong><small>ordered quantity</small></article>
+  <article class="metric-card"><span>Outstanding</span><strong>{{ total_outstanding|floatformat:"0g" }} pcs</strong><small>belum diterima</small></article>
+</section>
 <section class="panel">
   <div class="panel-header"><div><p class="eyebrow">CANONICAL TRACKING</p><h2>PO Qty → QC Passed → Received</h2></div><span class="pill">Tanpa COGS</span></div>
-  {% if rows %}<div class="table-wrap"><table><thead><tr><th>No. PO</th><th>Supplier</th><th>Need Month</th><th>Required Arrival</th><th>SKU</th><th>PO Qty</th><th>Received</th><th>Outstanding</th><th>Schedule</th><th>QC Passed</th><th>Status</th></tr></thead><tbody>
-  {% for row in rows %}<tr><td><a class="row-link" href="{% url 'purchasing:po_detail' row.po.id %}">{{ row.po.po_number|default:"Draft" }}</a></td><td>{{ row.po.supplier.name }}</td><td>{{ row.po.need_month|date:"M Y" }}</td><td>{{ row.po.required_arrival|date:"d M Y"|default:"—" }}</td><td><span class="code-label">{{ row.line.sku.sku }}</span></td><td>{{ row.line.ordered_qty|floatformat:"0g" }}</td><td>{{ row.received|floatformat:"0g" }}</td><td>{{ row.outstanding|floatformat:"0g" }}</td><td><span class="status-badge {% if row.schedule_status == 'Risk Late' or row.schedule_status == 'Late' %}blocked{% elif row.schedule_status == 'On Track' or row.schedule_status == 'On Time' %}ready{% endif %}">{{ row.schedule_status }}</span></td><td>{{ row.qc_passed|floatformat:"0g" }}</td><td>{{ row.progress_status }}</td></tr>{% endfor %}
+  {% if rows %}<div class="table-wrap"><table><thead><tr><th>No. PO</th><th>Supplier</th><th>Need Month</th><th>Required Arrival</th><th>Jumlah SKU</th><th>PO Qty</th><th>Production</th><th>Received</th><th>Outstanding</th><th>Schedule</th><th>QC Passed</th><th>Status</th><th></th></tr></thead><tbody>
+  {% for row in rows %}<tr><td><a class="row-link" href="{% url 'purchasing:po_detail' row.po.id %}">{{ row.po }}</a></td><td>{{ row.po.supplier.name }}</td><td>{{ row.po.need_month|date:"M Y" }}</td><td>{{ row.po.required_arrival|date:"d M Y"|default:"—" }}</td><td>{{ row.line_count|floatformat:"0g" }}</td><td>{{ row.total_qty|floatformat:"0g" }}</td><td>{{ row.production_status }}</td><td>{{ row.received|floatformat:"0g" }}</td><td>{{ row.outstanding|floatformat:"0g" }}</td><td><span class="status-badge {% if row.schedule_status == 'Risk Late' or row.schedule_status == 'Late' %}blocked{% elif row.schedule_status == 'On Track' or row.schedule_status == 'On Time' %}ready{% endif %}">{{ row.schedule_status }}</span></td><td>{% if row.qc_passed != None %}{{ row.qc_passed|floatformat:"0g" }}{% else %}—{% endif %}</td><td>{{ row.progress_status }}</td><td><a class="secondary-button compact-button" href="{% url 'purchasing:po_detail' row.po.id %}">Lihat detail</a></td></tr>{% endfor %}
   </tbody></table></div>{% else %}<div class="empty-state">Belum ada PO aktual. PO pertama akan muncul setelah Final Approved Incoming → PPIC → Review → Create PO.</div>{% endif %}
 </section>
 {% endblock %}

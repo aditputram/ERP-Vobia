@@ -1,16 +1,20 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Case, CharField, Count, F, Q, Sum, Value, When
 from django.db.models.functions import TruncMonth
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils.formats import date_format
 
 from traffic.models import TrafficProductMetric
 
+from .forms import ManualSaleForm
 from .models import SalesOrderLine
+from .services.manual import create_manual_sale
 
 
 MONTH_NAMES = [
@@ -28,6 +32,36 @@ def _date(value, fallback):
 
 def _source_group(source):
     return "Marketplace" if source in {"Shopee", "Tiktok"} else "Other"
+
+
+def _apply_source_filters(queryset, sources, source_groups):
+    if sources:
+        queryset = queryset.filter(order__source_label__in=sources)
+    if source_groups:
+        group_filter = Q()
+        if "Marketplace" in source_groups:
+            group_filter |= Q(order__source__in=["Shopee", "Tiktok"])
+        if "Other" in source_groups:
+            group_filter |= Q(order__source="Other")
+        queryset = queryset.filter(group_filter)
+    return queryset
+
+
+def _source_options(queryset, source_groups=()):
+    filtered = _apply_source_filters(queryset, (), source_groups)
+    rows = (
+        filtered.exclude(order__source_label="")
+        .order_by("order__source_label")
+        .values("order__source", "order__source_label")
+        .distinct()
+    )
+    return [
+        {
+            "value": row["order__source_label"],
+            "group": _source_group(row["order__source"]),
+        }
+        for row in rows
+    ]
 
 
 def _shift_month(month, offset):
@@ -76,22 +110,27 @@ def _pareto_period_bounds(period_type, period_value):
     return date(year, 1, 1), date(year, 12, 31)
 
 
-def _line_filters(request, queryset=None):
-    qs = queryset or SalesOrderLine.objects.filter(is_counted=True)
+def _line_filters(
+    request,
+    queryset=None,
+    *,
+    product_statuses=None,
+    categories=None,
+    products=None,
+):
+    qs = queryset if queryset is not None else SalesOrderLine.objects.filter(is_counted=True)
     sources = [item for item in request.GET.getlist("source") if item]
     source_groups = [item for item in request.GET.getlist("source_group") if item]
-    categories = [item for item in request.GET.getlist("category") if item]
+    if product_statuses is None:
+        product_statuses = [item for item in request.GET.getlist("product_status") if item]
+    if categories is None:
+        categories = [item for item in request.GET.getlist("category") if item]
     subcategory = request.GET.get("subcategory", "")
-    products = [item for item in request.GET.getlist("product") if item]
-    if sources:
-        qs = qs.filter(order__source_label__in=sources)
-    if source_groups:
-        group_filter = Q()
-        if "Marketplace" in source_groups:
-            group_filter |= Q(order__source__in=["Shopee", "Tiktok"])
-        if "Other" in source_groups:
-            group_filter |= Q(order__source="Other")
-        qs = qs.filter(group_filter)
+    if products is None:
+        products = [item for item in request.GET.getlist("product") if item]
+    qs = _apply_source_filters(qs, sources, source_groups)
+    if product_statuses:
+        qs = qs.filter(product_status_snapshot__in=product_statuses)
     if categories:
         qs = qs.filter(category_snapshot__in=categories)
     if subcategory:
@@ -101,10 +140,58 @@ def _line_filters(request, queryset=None):
     return qs
 
 
+def _snapshot_values(queryset, field):
+    return tuple(
+        queryset.exclude(**{field: ""})
+        .exclude(**{f"{field}__isnull": True})
+        .order_by(field)
+        .values_list(field, flat=True)
+        .distinct()
+    )
+
+
+def _valid_multi_values(request, name, options):
+    allowed = set(options)
+    return [value for value in request.GET.getlist(name) if value and value in allowed]
+
+
+def _product_performance_filter_state(request):
+    lines = SalesOrderLine.objects.filter(is_counted=True)
+
+    product_status_options = _snapshot_values(lines, "product_status_snapshot")
+    selected_product_statuses = _valid_multi_values(
+        request, "product_status", product_status_options
+    )
+
+    category_lines = lines
+    if selected_product_statuses:
+        category_lines = category_lines.filter(
+            product_status_snapshot__in=selected_product_statuses
+        )
+    category_options = _snapshot_values(category_lines, "category_snapshot")
+    selected_categories = _valid_multi_values(request, "category", category_options)
+
+    product_lines = category_lines
+    if selected_categories:
+        product_lines = product_lines.filter(category_snapshot__in=selected_categories)
+    product_options = _snapshot_values(product_lines, "product_name_snapshot")
+    selected_products = _valid_multi_values(request, "product", product_options)
+
+    return {
+        "product_statuses": product_status_options,
+        "categories": category_options,
+        "products": product_options,
+        "selected_product_statuses": selected_product_statuses,
+        "selected_categories": selected_categories,
+        "selected_products": selected_products,
+    }
+
+
 def _filter_options():
     lines = SalesOrderLine.objects.filter(is_counted=True)
     return {
         "sources": lines.order_by().values_list("order__source_label", flat=True).distinct(),
+        "product_statuses": lines.exclude(product_status_snapshot="").order_by().values_list("product_status_snapshot", flat=True).distinct(),
         "categories": lines.exclude(category_snapshot="").order_by().values_list("category_snapshot", flat=True).distinct(),
         "subcategories": lines.exclude(subcategory_snapshot="").order_by().values_list("subcategory_snapshot", flat=True).distinct(),
         "products": lines.exclude(product_name_snapshot="").order_by().values_list("product_name_snapshot", flat=True).distinct(),
@@ -163,49 +250,113 @@ def _monthly_gross_chart(lines, monthly_start, monthly_end):
     return chart
 
 
+def _dashboard_period_trend(lines, start, end, grain):
+    if grain == "month":
+        aggregates = {
+            row["period"]: row
+            for row in lines.annotate(period=TruncMonth("order__order_date"))
+            .values("period")
+            .annotate(
+                qty=Sum("quantity"),
+                net=Sum("total_net_sales"),
+                gross=Sum("total_gross_sales"),
+                orders=Count("order_id", distinct=True),
+            )
+            .order_by("period")
+        }
+        rows = []
+        current = start.replace(day=1)
+        final = end.replace(day=1)
+        while current <= final:
+            aggregate = aggregates.get(current, {})
+            rows.append({
+                "month": current,
+                "label": date_format(current, "M Y"),
+                "qty": aggregate.get("qty") or 0,
+                "net": aggregate.get("net") or 0,
+                "gross": aggregate.get("gross") or 0,
+                "orders": aggregate.get("orders") or 0,
+            })
+            current = _shift_month(current, 1)
+    else:
+        aggregates = {
+            row["period"]: row
+            for row in lines.annotate(period=F("order__order_date"))
+            .values("period")
+            .annotate(
+                qty=Sum("quantity"),
+                net=Sum("total_net_sales"),
+                gross=Sum("total_gross_sales"),
+                orders=Count("order_id", distinct=True),
+            )
+            .order_by("period")
+        }
+        rows = []
+        current = start
+        while current <= end:
+            aggregate = aggregates.get(current, {})
+            rows.append({
+                "day": current,
+                "label": date_format(current, "d M Y" if start.year != end.year else "d M"),
+                "qty": aggregate.get("qty") or 0,
+                "net": aggregate.get("net") or 0,
+                "gross": aggregate.get("gross") or 0,
+                "orders": aggregate.get("orders") or 0,
+            })
+            current += timedelta(days=1)
+
+    max_gross = max((row["gross"] for row in rows), default=0)
+    for row in rows:
+        row["bar"] = float((row["gross"] or 0) / max_gross * 100) if max_gross else 0
+    return rows
+
+
 @login_required
 def dashboard(request):
     all_lines = SalesOrderLine.objects.filter(is_counted=True)
     latest = all_lines.order_by("-order__order_date").values_list("order__order_date", flat=True).first() or date.today()
     earliest = all_lines.order_by("order__order_date").values_list("order__order_date", flat=True).first() or latest
-    start = _date(request.GET.get("date_from"), latest.replace(day=1))
-    end = _date(request.GET.get("date_to"), latest)
-    if start > end:
-        start, end = end, start
-    lines = SalesOrderLine.objects.filter(is_counted=True, order__order_date__range=(start, end))
+    period_options = _pareto_period_options(earliest, latest)
+    period_type = request.GET.get("period_type", "custom")
+    if period_type not in {*period_options, "custom"}:
+        period_type = "custom"
+    if period_type == "custom":
+        period_value = ""
+        start = _date(request.GET.get("date_from"), latest.replace(day=1))
+        end = _date(request.GET.get("date_to"), latest)
+        if start > end:
+            start, end = end, start
+        period_trend_grain = "day"
+    else:
+        valid_periods = {item["value"] for item in period_options[period_type]}
+        period_value = request.GET.get("period", "")
+        if period_value not in valid_periods:
+            period_value = period_options[period_type][-1]["value"]
+        start, end = _pareto_period_bounds(period_type, period_value)
+        period_trend_grain = "day" if period_type == "month" else "month"
+    source_groups = [
+        item for item in request.GET.getlist("source_group")
+        if item in {"Marketplace", "Other"}
+    ]
+    source_options = _source_options(all_lines, source_groups)
+    allowed_sources = {item["value"] for item in source_options}
+    sources = [
+        item for item in request.GET.getlist("source")
+        if item and item in allowed_sources
+    ]
+    filtered_all_lines = _apply_source_filters(all_lines, sources, source_groups)
+    lines = filtered_all_lines.filter(order__order_date__range=(start, end))
     totals = _totals(lines)
     status_rows = list(lines.values("order__current_status").annotate(orders=Count("order_id", distinct=True)).order_by("-orders"))
     source_rows = []
-    for row in lines.values("order__source_label").annotate(qty=Sum("quantity"), net=Sum("total_net_sales"), orders=Count("order_id", distinct=True)).order_by("-net"):
-        row["source_group"] = _source_group(row["order__source_label"])
+    for row in lines.values("order__source", "order__source_label").annotate(qty=Sum("quantity"), net=Sum("total_net_sales"), orders=Count("order_id", distinct=True)).order_by("-net"):
+        row["source_group"] = _source_group(row["order__source"])
         source_rows.append(row)
-    daily_aggregates = {
-        row["day"]: row
-        for row in lines.annotate(day=F("order__order_date"))
-        .values("day")
-        .annotate(qty=Sum("quantity"), net=Sum("total_net_sales"), gross=Sum("total_gross_sales"), orders=Count("order_id", distinct=True))
-        .order_by("day")
-    }
-    daily = []
-    current_day = start
-    while current_day <= end:
-        aggregate = daily_aggregates.get(current_day, {})
-        daily.append({
-            "day": current_day,
-            "qty": aggregate.get("qty") or 0,
-            "net": aggregate.get("net") or 0,
-            "gross": aggregate.get("gross") or 0,
-            "orders": aggregate.get("orders") or 0,
-        })
-        current_day += timedelta(days=1)
-    max_gross = max((row["gross"] for row in daily), default=0)
-    for row in daily:
-        row["label"] = date_format(row["day"], "d M Y" if start.year != end.year else "d M")
-        row["bar"] = float((row["gross"] or 0) / max_gross * 100) if max_gross else 0
+    period_trend = _dashboard_period_trend(lines, start, end, period_trend_grain)
 
     monthly_end = latest.replace(day=1)
     monthly_start = max(earliest.replace(day=1), _shift_month(monthly_end, -11))
-    monthly_lines = all_lines.filter(order__order_date__gte=_shift_month(monthly_start, -1))
+    monthly_lines = filtered_all_lines.filter(order__order_date__gte=_shift_month(monthly_start, -1))
     monthly_gross = _monthly_gross_chart(monthly_lines, monthly_start, monthly_end)
     mtd_gross = _monthly_gross_chart(
         monthly_lines.filter(order__order_date__day__lte=latest.day),
@@ -216,15 +367,24 @@ def dashboard(request):
     return render(request, "sales/dashboard.html", {
         "date_from": start,
         "date_to": end,
+        "period_type": period_type,
+        "period_value": period_value,
+        "period_options": period_options,
+        "period_trend": period_trend,
+        "period_trend_grain": period_trend_grain,
+        "period_trend_title": "Daily Gross Sales" if period_trend_grain == "day" else "Monthly Gross Sales Trend",
         "latest": latest,
         "totals": totals,
         "status_rows": status_rows,
         "source_rows": source_rows,
-        "daily": daily,
         "monthly_gross": monthly_gross,
         "mtd_gross": mtd_gross,
         "mtd_cutoff_day": latest.day,
         "monthly_period_label": monthly_period_label,
+        "source_groups": ("Marketplace", "Other"),
+        "source_options": source_options,
+        "selected_sources": sources,
+        "selected_source_groups": source_groups,
         "legacy_exceptions": lines.filter(sku__isnull=True).count(),
         "includes_historical": start < date(2026, 8, 1),
     })
@@ -237,7 +397,16 @@ def product_performance(request):
     end = _date(request.GET.get("date_to"), latest)
     if start > end:
         start, end = end, start
-    lines = _line_filters(request).filter(
+    filter_state = _product_performance_filter_state(request)
+    product_statuses = filter_state["selected_product_statuses"]
+    categories = filter_state["selected_categories"]
+    products = filter_state["selected_products"]
+    lines = _line_filters(
+        request,
+        product_statuses=product_statuses,
+        categories=categories,
+        products=products,
+    ).filter(
         order__order_date__range=(start, end),
     ).exclude(product_name_snapshot="")
     sales_monthly = {
@@ -252,13 +421,13 @@ def product_performance(request):
     traffic = TrafficProductMetric.objects.filter(period_start__lte=end, period_end__gte=start)
     sources = [item for item in request.GET.getlist("source") if item]
     source_groups = [item for item in request.GET.getlist("source_group") if item]
-    categories = [item for item in request.GET.getlist("category") if item]
-    products = [item for item in request.GET.getlist("product") if item]
     if sources:
         traffic_sources = [source for source in sources if source in {"Shopee", "Tiktok"}]
         traffic = traffic.filter(source__in=traffic_sources) if traffic_sources else traffic.none()
     if source_groups and "Marketplace" not in source_groups:
         traffic = traffic.none()
+    if product_statuses:
+        traffic = traffic.filter(product__status__name__in=product_statuses)
     if categories:
         traffic = traffic.filter(Q(product__category__name__in=categories) | Q(category_snapshot__in=categories))
     if products:
@@ -310,6 +479,12 @@ def product_performance(request):
     for row in rows:
         row["traffic_bar"] = float(row["views"] / max_traffic * 100) if max_traffic else 0
         row["sales_bar"] = float(row["net"] / max_net * 100) if max_net else 0
+    filter_options = _filter_options()
+    filter_options.update({
+        "product_statuses": filter_state["product_statuses"],
+        "categories": filter_state["categories"],
+        "products": filter_state["products"],
+    })
     return render(request, "sales/product_performance.html", {
         "rows": rows,
         "date_from": start,
@@ -319,9 +494,10 @@ def product_performance(request):
         "source_groups": ("Marketplace", "Other"),
         "selected_sources": sources,
         "selected_source_groups": source_groups,
+        "selected_product_statuses": product_statuses,
         "selected_categories": categories,
         "selected_products": products,
-        **_filter_options(),
+        **filter_options,
     })
 
 
@@ -403,3 +579,28 @@ def transactions(request):
         "statuses": SalesOrderLine.objects.order_by().values_list("order__current_status", flat=True).distinct(),
         **_filter_options(),
     })
+
+
+@login_required
+def input_transaction(request):
+    form = ManualSaleForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            line = create_manual_sale(actor=request.user, **form.cleaned_data)
+        except ValidationError as exc:
+            form.add_error(None, exc)
+        else:
+            if getattr(line, "retail_price_special_case", False):
+                master_retail = f"{line.master_retail_price_at_entry:,.0f}".replace(",", ".")
+                retail_snapshot = f"{line.retail_price_snapshot:,.0f}".replace(",", ".")
+                messages.warning(
+                    request,
+                    f"SPECIAL CASE HARGA · Transaksi {line.business_key} berhasil diposting. "
+                    f"Retail Price master tetap Rp {master_retail}; snapshot transaksi ini saja "
+                    f"disesuaikan menjadi Rp {retail_snapshot}.",
+                )
+            else:
+                messages.success(request, f"Transaksi manual {line.business_key} berhasil diposting.")
+            return redirect("sales:input_transaction")
+
+    return render(request, "sales/input_transaction.html", {"form": form})

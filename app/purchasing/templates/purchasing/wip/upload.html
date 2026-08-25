@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Upload PO WIP · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">PPIC · PO WIP MIGRATION</p><h1>Upload evidence PO WIP</h1><p>File hanya diparsing ke staging. Tidak ada Purchase Order, inventory movement, atau FIFO layer sebelum Adit melakukan approval.</p></div>
+  <a class="secondary-button" href="{% url 'purchasing:po_wip_list' %}">Riwayat batch</a>
+</header>
+
+<section class="dashboard-grid">
+  <article class="panel span-two">
+    <div class="panel-header"><div><p class="eyebrow">SOURCE FILE</p><h2>PO WIP final</h2></div><span class="status-badge parsing">XLSX / CSV</span></div>
+    <form method="post" enctype="multipart/form-data" class="stack-form">
+      {% csrf_token %}{{ form.as_p }}
+      <button class="primary-button" type="submit">Upload &amp; Parse</button>
+    </form>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">EXPECTED HEADER</p><h2>Format file</h2>
+    <p class="muted">NO PO · SKU Induk · SKU · Nama Barang · WIP</p>
+    <p class="muted">WIP wajib outstanding qty per 31 July 2026 dalam bilangan bulat positif.</p>
+  </article>
+</section>
+{% endblock %}

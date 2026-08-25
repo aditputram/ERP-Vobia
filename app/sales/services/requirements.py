@@ -10,8 +10,9 @@ from sales.models import SalesOrder
 FINAL_STATUSES = {"Selesai", "Retur"}
 
 
-def summarize_import_requirements(requirements):
-    """Collapse detailed monthly requirements into one export range per marketplace."""
+def summarize_import_requirements(requirements, as_of_date=None):
+    """Collapse detail into an exact oldest-required-date through yesterday range."""
+    yesterday = (as_of_date or date.today()) - timedelta(days=1)
     summaries = {}
     for item in requirements:
         source = item["source"]
@@ -20,11 +21,11 @@ def summarize_import_requirements(requirements):
             {
                 "source": source,
                 "period_start": item["period_start"],
-                "period_end": item["period_end"],
+                "period_end": yesterday,
             },
         )
         summary["period_start"] = min(summary["period_start"], item["period_start"])
-        summary["period_end"] = max(summary["period_end"], item["period_end"])
+        summary["period_end"] = yesterday
     source_order = {SalesOrder.Source.SHOPEE: 0, SalesOrder.Source.TIKTOK: 1}
     return sorted(summaries.values(), key=lambda item: source_order.get(item["source"], 99))
 
@@ -69,7 +70,7 @@ def import_requirements(as_of_date=None):
             key,
             {
                 "source": order.source,
-                "period_start": month_start,
+                "period_start": order.order_date,
                 "period_end": month_end,
                 "reasons": [],
                 "nonfinal_count": 0,
@@ -80,7 +81,7 @@ def import_requirements(as_of_date=None):
         )
         if "Status pesanan belum final" not in item["reasons"]:
             item["reasons"].append("Status pesanan belum final")
-        item["period_start"] = min(item["period_start"], month_start)
+        item["period_start"] = min(item["period_start"], order.order_date)
         item["period_end"] = max(item["period_end"], month_end)
         item["nonfinal_count"] += 1
         item["nonfinal_statuses"].add(order.current_status)

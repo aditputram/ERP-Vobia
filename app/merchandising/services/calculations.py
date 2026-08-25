@@ -1,6 +1,6 @@
 import calendar
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 
@@ -8,6 +8,7 @@ from merchandising.models import ProjectionRule
 
 
 ZERO = Decimal("0")
+PLANNING_BUFFER_TARGET_RATIO = Decimal("1.5")
 NO_INCOMING_STATUSES = {"Discontinue", "Seasonal New"}
 NO_INCOMING_CATEGORIES = {"Packaging"}
 
@@ -93,11 +94,13 @@ def current_month_metric_values(
     }
 
 
-def future_projection(method, baseline_qty, parameter, beginning_qty=None):
+def future_projection(method, baseline_qty, parameter, beginning_qty=None, previous_ending_qty=None):
     baseline_qty = Decimal(baseline_qty)
     parameter = Decimal(parameter)
     if baseline_qty < 0 or parameter < 0:
         raise ValidationError("Baseline dan parameter tidak boleh negatif.")
+    if method == ProjectionRule.Method.SAME_AS_LAST_MONTH:
+        return baseline_qty
     if method == ProjectionRule.Method.INCREASE_PERCENT:
         return baseline_qty * (Decimal("1") + parameter / Decimal("100"))
     if method == ProjectionRule.Method.DECREASE_PERCENT:
@@ -111,6 +114,12 @@ def future_projection(method, baseline_qty, parameter, beginning_qty=None):
         if beginning_qty < 0:
             raise ValidationError("Beginning Qty tidak boleh negatif.")
         return beginning_qty / parameter
+    if method == ProjectionRule.Method.SELL_OUT_ENDING_MONTHS:
+        if parameter <= 0 or parameter != parameter.to_integral_value():
+            raise ValidationError("Jumlah bulan harus bilangan bulat lebih dari nol.")
+        if previous_ending_qty is None:
+            raise ValidationError("Ending bulan sebelumnya wajib untuk metode sell out stock.")
+        return max(Decimal(previous_ending_qty), ZERO) / parameter
     raise ValidationError("Projection method tidak dikenali.")
 
 
@@ -146,10 +155,32 @@ def incoming_calculation(final_sales_projection, prior_ending_qty, target_stock_
     }
 
 
+def planning_buffer_incoming(
+    sales_projection,
+    prior_ending_qty,
+    *,
+    incoming_allowed=True,
+):
+    """Whole-unit incoming needed to lift low coverage to the planning buffer."""
+    projection = Decimal(sales_projection)
+    prior_ending = Decimal(prior_ending_qty)
+    if projection < 0:
+        raise ValidationError("Sales Projection tidak boleh negatif.")
+    if not incoming_allowed or projection == 0:
+        return ZERO
+    current_ratio = prior_ending / projection
+    if current_ratio >= PLANNING_BUFFER_TARGET_RATIO:
+        return ZERO
+    required = projection * PLANNING_BUFFER_TARGET_RATIO - prior_ending
+    return max(required.quantize(Decimal("1"), rounding=ROUND_CEILING), ZERO)
+
+
 def select_effective_rule(rules, sku):
     matching = []
     for rule in rules:
-        if rule.scope_type == ProjectionRule.ScopeType.PRODUCT and rule.product_id == sku.product_variant.product_id:
+        if rule.scope_type == ProjectionRule.ScopeType.ALL_PRODUCTS:
+            matching.append(rule)
+        elif rule.scope_type == ProjectionRule.ScopeType.PRODUCT and rule.product_id == sku.product_variant.product_id:
             matching.append(rule)
         elif rule.scope_type == ProjectionRule.ScopeType.CATEGORY and rule.category_id == sku.product_variant.product.category_id:
             matching.append(rule)

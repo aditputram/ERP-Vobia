@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Koreksi Production Activity · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">PRODUCTION · AUDITABLE CORRECTION</p><h1>Koreksi {{ original.get_activity_type_display }}</h1><p>{{ original.production_order.po.po_number }} · Activity asli tetap disimpan dan tidak diubah.</p></div><a class="secondary-button" href="{% url 'production:activity' %}?production_order={{ original.production_order_id }}">Kembali</a></header>
+<section class="dashboard-grid">
+  <article class="panel"><div class="panel-header"><div><p class="eyebrow">ORIGINAL ENTRY</p><h2>{{ original.get_activity_type_display }}</h2></div><span class="status-badge">Immutable</span></div><dl class="compact-definition-list"><div><dt>Tanggal</dt><dd>{{ original.activity_date|date:"d M Y" }}</dd></div><div><dt>Qty</dt><dd>{{ original.quantity|floatformat:"0g"|default:"—" }}</dd></div><div><dt>SKU</dt><dd>{{ original.po_line.sku.sku|default:"—" }}</dd></div><div><dt>Catatan</dt><dd>{{ original.notes|default:"—" }}</dd></div><div><dt>Submitted by</dt><dd>{{ original.actor.username|default:"System" }} · {{ original.occurred_at|date:"d M Y H:i" }}</dd></div></dl></article>
+  <article class="panel span-two"><div class="panel-header"><div><p class="eyebrow">CORRECTION ENTRY</p><h2>Masukkan nilai yang benar</h2></div><span class="pill">Baris baru</span></div><form method="post" class="stack-form" data-single-submit>{% csrf_token %}{{ correction_form.non_field_errors }}<div class="production-activity-form-grid">{% for field in correction_form %}<div {% if field.name == 'notes' or field.name == 'reason' %}class="wide"{% endif %}><label>{{ field.label }}</label>{{ field }}{{ field.errors }}</div>{% endfor %}</div><button class="primary-button wide" type="submit" data-loading-label="Menyimpan Koreksi...">Simpan Koreksi Auditable</button></form></article>
+</section>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Input Transaction · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">SALES · INPUT TRANSACTION</p>
+        <h1>Input Transaction</h1>
+        <p>Catat transaksi non-marketplace secara manual. Transaksi yang berhasil diposting langsung masuk ke canonical Transaction dengan snapshot harga dan COGS yang auditable.</p>
+    </div>
+    <div class="header-actions">
+        <a class="secondary-button" href="{% url 'sales:transactions' %}">Lihat Transaction</a>
+    </div>
+</header>
+
+<section class="dashboard-grid">
+    <article class="panel span-two">
+        <div class="panel-header">
+            <div>
+                <p class="eyebrow">NON-MARKETPLACE</p>
+                <h2>Detail transaksi</h2>
+            </div>
+        </div>
+        <form method="post" class="stack-form">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button class="primary-button" type="submit">Post transaksi</button>
+        </form>
+    </article>
+    <article class="panel">
+        <p class="eyebrow">KONTROL DATA</p>
+        <h2>Sebelum diposting</h2>
+        <ul class="guide-list">
+            <li>Gunakan nomor pesanan atau invoice yang unik.</li>
+            <li>Pilih SKU dan quantity sesuai transaksi aktual.</li>
+            <li>Harga net disimpan sebagai snapshot transaksi.</li>
+            <li>Centang barang sudah keluar jika stok fisik memang sudah dikirim.</li>
+        </ul>
+    </article>
+</section>
+{% endblock %}

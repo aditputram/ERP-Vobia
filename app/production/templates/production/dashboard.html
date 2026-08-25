@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Production Dashboard · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">OPERATION · PRODUCTION</p><h1>Production Dashboard</h1><p>Ringkasan PO dengan Production Plan Active dari material, trial, CMT, QC, sampai handoff Warehouse.</p></div>
+  <div class="header-actions"><a class="primary-button" href="{% url 'production:planning' %}">Production Plan</a><a class="secondary-button" href="{% url 'production:monitoring' %}">Monitoring</a><a class="secondary-button" href="{% url 'production:activity' %}">Production Activity</a></div>
+</header>
+<section class="metric-grid five">
+  <article class="metric-card"><span>Active Production Plan</span><strong>{{ metrics.total|floatformat:"0g" }}</strong><small>PO masuk monitoring</small></article>
+  <article class="metric-card"><span>Trial</span><strong>{{ metrics.waiting_trial|floatformat:"0g" }}</strong><small>trial / approval</small></article>
+  <article class="metric-card"><span>Mass Production</span><strong>{{ metrics.mass_production|floatformat:"0g" }}</strong><small>Cut, Make, atau Trim</small></article>
+  <article class="metric-card"><span>Ready / Progress QC</span><strong>{{ metrics.ready_qc|floatformat:"0g" }}</strong><small>sudah memiliki output Trim</small></article>
+  <article class="metric-card {% if metrics.late %}danger-card{% endif %}"><span>Risk Late</span><strong>{{ metrics.late|floatformat:"0g" }}</strong><small>target terlewati</small></article>
+</section>
+<section class="dashboard-grid section-gap">
+  <article class="panel span-two">
+    <div class="panel-header"><div><p class="eyebrow">READ ONLY MONITORING</p><h2>PO Production terbaru</h2></div><a class="row-link" href="{% url 'production:monitoring' %}">Lihat semua →</a></div>
+    <div class="table-wrap"><table class="production-table"><thead><tr><th>No. PO</th><th>Vendor</th><th>Passed Process</th><th>Next Process</th><th>Qty PO</th><th>Trim / QC / Inbound</th><th>Target</th><th>Risk</th><th></th></tr></thead><tbody>
+      {% for row in rows %}<tr><td><strong>{{ row.production_order.po.po_number }}</strong></td><td>{{ row.production_order.po.supplier.name }}</td><td><span class="status-badge {% if row.is_late %}blocked{% elif row.current_code == 'QC_COMPLETE' %}ready{% else %}parsing{% endif %}">{{ row.passed_process_label }}</span></td><td>{{ row.next_process_label }}</td><td>{{ row.ordered_qty|floatformat:"0g" }} pcs</td><td>{{ row.trim_completed_qty|floatformat:"0g" }} / {{ row.inspected_qty|floatformat:"0g" }} / {{ row.received_qty|floatformat:"0g" }}</td><td>{{ row.target_date|date:"d M Y"|default:"—" }}</td><td>{% if row.is_late %}<span class="status-badge blocked">Late</span>{% else %}<span class="status-badge ready">On track</span>{% endif %}</td><td><a class="row-link" href="{% url 'production:detail' row.production_order.id %}">Buka →</a></td></tr>
+      {% empty %}<tr><td colspan="9"><div class="empty-state">Belum ada plan Active. Mulai dari Production Plan.</div></td></tr>{% endfor %}
+    </tbody></table></div>
+  </article>
+  <article class="panel">
+    <div class="panel-header"><div><p class="eyebrow">FIELD ACTION</p><h2>Entry terpusat</h2></div></div>
+    <p class="muted">Production Monitoring tidak memiliki form edit. Semua realisasi dan keputusan Trial/QC masuk melalui satu ledger Production Activity.</p>
+    <div class="stack-form"><a class="primary-button wide" href="{% url 'production:activity' %}">Buka Production Activity</a><a class="secondary-button wide" href="{% url 'production:planning' %}">Kelola Production Plan</a></div>
+  </article>
+</section>
+{% endblock %}

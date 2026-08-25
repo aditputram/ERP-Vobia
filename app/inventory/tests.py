@@ -12,20 +12,26 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import User
+from audit.models import AuditEvent
 from master_data.models import Category, Product, ProductStatus, ProductVariant, SKU, Supplier, Warehouse
 from purchasing.models import PurchaseOrder, PurchaseOrderLine
+from production.models import ProductionStage
+from production.services import ensure_production_order
 from sales.models import SalesOrder, SalesOrderLine
 
-from .models import FIFOAllocation, FIFOLayer, FIFOOpeningImportBatch, FIFOOpeningSnapshot, InventoryException, InventoryMovement, PhysicalReturnReceipt
+from .models import FIFOAllocation, FIFOLayer, FIFOOpeningImportBatch, FIFOOpeningSnapshot, InboundReceipt, InventoryException, InventoryMovement, PhysicalReturnReceipt, QCFollowUp
 from .services.aging import po_aging_snapshot, refresh_po_close
 from .services.fifo import (
     inventory_balance,
+    complete_qc_rework,
     post_adjustment,
     post_opening,
     post_sales_out,
     record_inbound,
     record_physical_return,
     record_qc,
+    record_re_qc,
+    undo_unallocated_inbound,
 )
 from .services.opening_import import approve_opening_import, create_opening_import
 
@@ -44,7 +50,7 @@ class InventoryWorkflowTests(TestCase):
             current_master_cogs=Decimal("100000"),
         )
         self.supplier = Supplier.objects.create(code="SUP-1", name="Supplier")
-        self.warehouse = Warehouse.objects.create(code="WH-1", name="Main Warehouse")
+        self.warehouse = Warehouse.objects.get(code="MAIN")
         self.po = PurchaseOrder.objects.create(
             po_number="PO-VOB-09/26-001",
             sequence=1,
@@ -61,6 +67,18 @@ class InventoryWorkflowTests(TestCase):
             sku=self.sku,
             ordered_qty=Decimal("10"),
             cogs_snapshot=Decimal("120000"),
+        )
+        self.production_order = ensure_production_order(self.po, actor=self.user)
+        ProductionStage.objects.filter(
+            production_order=self.production_order,
+            stage=ProductionStage.Stage.TRIM,
+        ).update(
+            status=ProductionStage.Status.COMPLETE,
+            progress_percent=100,
+            completed_qty=Decimal("10"),
+            actual_start_date=date(2026, 9, 1),
+            actual_end_date=date(2026, 9, 4),
+            updated_by=self.user,
         )
 
     def _sales_line(self, number="ORDER-1", quantity=8, order_date=date(2026, 9, 10)):
@@ -122,14 +140,128 @@ class InventoryWorkflowTests(TestCase):
                 actor=self.user,
             )
 
+    def test_unallocated_inbound_can_be_undone_with_audit_trail(self):
+        record_qc(
+            po_line=self.po_line,
+            inspected_at=timezone.make_aware(datetime(2026, 9, 5, 10, 0)),
+            qty_inspected=10,
+            qty_passed=10,
+            qty_failed=0,
+            actor=self.user,
+        )
+        receipt, movement = record_inbound(
+            po_line=self.po_line,
+            inbound_date=date(2026, 9, 6),
+            received_qty=5,
+            warehouse=self.warehouse,
+            reference="GRN-UNDO",
+            actor=self.user,
+        )
+        receipt_id = receipt.id
+        movement_id = movement.id
+        layer_id = movement.created_fifo_layer.id
+
+        undo_unallocated_inbound(
+            receipt=receipt,
+            actor=self.user,
+            reason="Tanggal penerimaan salah.",
+        )
+
+        self.assertFalse(InboundReceipt.objects.filter(pk=receipt_id).exists())
+        self.assertFalse(InventoryMovement.objects.filter(pk=movement_id).exists())
+        self.assertFalse(FIFOLayer.objects.filter(pk=layer_id).exists())
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="inbound_receipt_undone",
+                entity_id=str(receipt_id),
+            ).exists()
+        )
+
+    def test_rework_follow_up_re_qc_and_inbound_flow(self):
+        inspection = record_qc(
+            po_line=self.po_line,
+            inspected_at=timezone.make_aware(datetime(2026, 9, 5, 10, 0)),
+            qty_inspected=10,
+            qty_passed=8,
+            qty_failed=2,
+            disposition="REWORK",
+            notes="Jahitan perlu dirapikan.",
+            actor=self.user,
+        )
+        follow_up = QCFollowUp.objects.get(source_inspection=inspection)
+        self.assertEqual(follow_up.status, QCFollowUp.Status.AWAITING_REWORK)
+        self.assertEqual(follow_up.open_qty, Decimal("2"))
+
+        complete_qc_rework(
+            follow_up=follow_up,
+            activity_date=date(2026, 9, 6),
+            notes="Jahitan sudah diperbaiki.",
+            actor=self.user,
+        )
+        follow_up.refresh_from_db()
+        self.assertEqual(follow_up.status, QCFollowUp.Status.READY_RE_QC)
+
+        record_re_qc(
+            follow_up=follow_up,
+            activity_date=date(2026, 9, 7),
+            qty_passed=1,
+            failed_disposition="REWORK",
+            notes="Satu pcs masih perlu diperbaiki.",
+            actor=self.user,
+        )
+        follow_up.refresh_from_db()
+        self.assertEqual(follow_up.status, QCFollowUp.Status.AWAITING_REWORK)
+        self.assertEqual(follow_up.open_qty, Decimal("1"))
+        self.assertEqual(follow_up.resolved_passed_qty, Decimal("1"))
+
+        complete_qc_rework(
+            follow_up=follow_up,
+            activity_date=date(2026, 9, 8),
+            notes="Perbaikan kedua selesai.",
+            actor=self.user,
+        )
+        record_re_qc(
+            follow_up=follow_up,
+            activity_date=date(2026, 9, 9),
+            qty_passed=1,
+            failed_disposition="",
+            notes="Lolos.",
+            actor=self.user,
+        )
+        follow_up.refresh_from_db()
+        self.assertEqual(follow_up.status, QCFollowUp.Status.RESOLVED)
+        self.assertEqual(follow_up.open_qty, Decimal("0"))
+        self.assertEqual(follow_up.resolved_passed_qty, Decimal("2"))
+        self.assertEqual(follow_up.events.count(), 5)
+
+        _, movement = record_inbound(
+            po_line=self.po_line,
+            inbound_date=date(2026, 9, 10),
+            received_qty=10,
+            warehouse=self.warehouse,
+            reference="GRN-RE-QC",
+            actor=self.user,
+        )
+        self.assertEqual(movement.quantity, Decimal("10"))
+
+    def test_old_qc_follow_up_url_redirects_to_production_monitoring(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("production:qc_follow_up"))
+        self.assertRedirects(response, reverse("production:monitoring"), fetch_redirect_response=False)
+
     def test_production_page_is_separate_from_warehouse(self):
         self.client.force_login(self.user)
-        production_response = self.client.get(reverse("inventory:production"))
+        production_response = self.client.get(reverse("production:dashboard"))
         warehouse_response = self.client.get(reverse("inventory:overview"))
         self.assertEqual(production_response.status_code, 200)
-        self.assertContains(production_response, "Quality Control")
-        self.assertContains(production_response, "Belum ada QC aktual")
+        self.assertContains(production_response, "Production Dashboard")
+        self.assertNotContains(production_response, "PO-VOB-09/26-001")
+        self.assertContains(production_response, "Production Plan")
         self.assertNotContains(warehouse_response, "Catat QC")
+        self.assertEqual(warehouse_response.context["selected_warehouse"].code, "MAIN")
+        turnover_response = self.client.get(reverse("inventory:turnover"))
+        self.assertEqual(turnover_response.context["selected_warehouse"].code, "MAIN")
 
     def test_inventory_summary_date_filter_reconstructs_ending_stock_and_fifo(self):
         post_opening(sku=self.sku, quantity=10, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
@@ -155,6 +287,7 @@ class InventoryWorkflowTests(TestCase):
         before_inbound = self.client.get(reverse("inventory:overview"), {"as_of_date": "2026-08-04"})
         after_inbound = self.client.get(reverse("inventory:overview"), {"as_of_date": "2026-08-06"})
         after_sale = self.client.get(reverse("inventory:overview"), {"as_of_date": "2026-08-10"})
+        future = self.client.get(reverse("inventory:overview"), {"as_of_date": "2030-12-31"})
 
         self.assertEqual(before_inbound.context["balances"][0]["balance"], Decimal("10"))
         self.assertEqual(before_inbound.context["balances"][0]["fifo_value"], Decimal("1000000"))
@@ -166,6 +299,8 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(after_sale.context["balances"][0]["fifo_value"], Decimal("960000"))
         self.assertContains(after_sale, 'name="as_of_date"')
         self.assertContains(after_sale, 'value="2026-08-10"')
+        self.assertEqual(future.context["as_of_date"], date(2030, 12, 31))
+        self.assertNotContains(future, 'max="')
 
     def test_inventory_summary_can_aggregate_by_parent_sku(self):
         second_sku = SKU.objects.create(
@@ -193,6 +328,72 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(parent["balance"], Decimal("14"))
         self.assertEqual(parent["fifo_value"], Decimal("1400000"))
         self.assertContains(response, "2 SKU")
+
+    def test_inventory_turnover_filters_product_and_size(self):
+        self.sku.size = "M"
+        self.sku.save(update_fields=["size"])
+        other_product = Product.objects.create(
+            code="P-2",
+            name="Other Product",
+            status=self.sku.product_variant.product.status,
+            category=self.sku.product_variant.product.category,
+        )
+        other_sku = SKU.objects.create(
+            sku="SKU-2",
+            product_variant=ProductVariant.objects.create(product=other_product, name="Black"),
+            size="L",
+            current_master_cogs=Decimal("100000"),
+        )
+        post_opening(sku=self.sku, quantity=10, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
+        post_opening(sku=other_sku, quantity=4, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
+        post_sales_out(self._sales_line(quantity=2), self.user)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("inventory:turnover"), {
+            "product": str(self.sku.product_variant.product_id),
+            "size": "M",
+        })
+
+        self.assertContains(response, 'name="product"')
+        self.assertContains(response, 'name="size"')
+        self.assertContains(response, 'placeholder="Cari produk..."')
+        self.assertContains(response, "data-auto-search")
+        self.assertContains(response, "Clear All")
+        self.assertContains(response, "Balance Value")
+        self.assertNotContains(response, ">Apply</button>")
+        self.assertEqual(response.context["size_options"], [{"value": "M", "label": "M"}])
+        self.assertEqual(response.context["page"].object_list[-1]["running_balance"], Decimal("8"))
+        self.assertEqual(response.context["page"].object_list[-1]["running_value"], Decimal("800000"))
+        self.assertContains(response, "SKU-1")
+        self.assertNotContains(response, "SKU-2")
+
+    def test_inventory_turnover_parent_sku_summarizes_child_skus(self):
+        self.sku.size = "M"
+        self.sku.save(update_fields=["size"])
+        sibling = SKU.objects.create(
+            sku="SKU-1-L",
+            product_variant=self.sku.product_variant,
+            size="L",
+            current_master_cogs=Decimal("100000"),
+        )
+        post_opening(sku=self.sku, quantity=10, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
+        post_opening(sku=sibling, quantity=4, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
+        post_sales_out(self._sales_line(quantity=2), self.user)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("inventory:turnover"), {
+            "sku_type": "parent",
+            "product": str(self.sku.product_variant.product_id),
+        })
+        rows = response.context["page"].object_list
+
+        self.assertEqual(response.context["sku_type"], "parent")
+        self.assertEqual(rows[0]["parent_sku"], "PARENT-1")
+        self.assertEqual(rows[0]["quantity"], Decimal("14"))
+        self.assertEqual(rows[0]["running_value"], Decimal("1400000"))
+        self.assertEqual(rows[-1]["running_balance"], Decimal("12"))
+        self.assertEqual(rows[-1]["running_value"], Decimal("1200000"))
+        self.assertContains(response, "Parent SKU")
 
     def test_fifo_oldest_first_short_exception_and_no_fake_cost(self):
         post_opening(sku=self.sku, quantity=5, unit_cost=100000, actor=self.user, warehouse=self.warehouse)

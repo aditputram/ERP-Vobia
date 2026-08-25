@@ -1,54 +1,76 @@
 {% extends "base.html" %}
-{% block title %}PPIC & Purchase Order · Vobia ERP{% endblock %}
+{% block title %}PO Generator · Vobia ERP{% endblock %}
 {% block content %}
-<header class="page-header"><div><p class="eyebrow">PPIC &amp; PURCHASING</p><h1>Requirement → Review → Create PO</h1><p>Approved Incoming membentuk requirement. Review tidak menyimpan data; Draft PO baru dibuat setelah konfirmasi.</p></div><div class="header-actions"><a class="secondary-button" href="{% url 'purchasing:tracking' %}">Buka PO Tracking</a><span class="status-chip"><span></span> PO format otomatis</span></div></header>
+<header class="page-header"><div><p class="eyebrow">PPIC · PO GENERATOR</p><h1>Create dan Print Purchase Order</h1><p>Qty mengikuti PPIC Requirement. COGS master menjadi nilai awal, lalu PPIC mengonfirmasi atau mengedit COGS per SKU saat Review PO.</p></div><div class="header-actions"><a class="secondary-button" href="{% url 'purchasing:requirements' %}">Lihat Requirement</a><span class="status-chip"><span></span> Need Key terkontrol</span></div></header>
 
-<section class="dashboard-grid">
-  <article class="panel span-two">
-    <div class="panel-header"><div><p class="eyebrow">REVIEW PO</p><h2>Requirement yang belum dialokasikan</h2></div></div>
-    <form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="form_name" value="requirement_po">
-      {{ header_form.as_p }}
-      {% if requirements %}<div class="table-wrap"><table><thead><tr><th>Pilih</th><th>Need Month</th><th>SKU</th><th>Approved</th><th>Ordered</th><th>Remaining</th><th>PO Qty</th></tr></thead><tbody>
-      {% for row in requirements %}<tr><td><input type="checkbox" name="requirements" value="{{ row.id }}" {% if row.ui_selected %}checked{% endif %}></td><td>{{ row.need_month|date:"M Y" }}</td><td><span class="code-label">{{ row.sku.sku }}</span><small class="table-subtext">{{ row.sku.product_variant.product.name }}</small></td><td>{{ row.approved_qty|floatformat:"0g" }}</td><td>{{ row.ordered_qty|floatformat:"0g" }}</td><td>{{ row.remaining_qty|floatformat:"0g" }}</td><td><input class="table-input" type="number" name="qty_{{ row.id }}" min="1" max="{{ row.remaining_qty|floatformat:"0u" }}" step="1" value="{{ row.ui_quantity|floatformat:"0u" }}"></td></tr>{% endfor %}
-      </tbody></table></div>
-      {% if po_preview %}
-      <section class="approval-panel">
-        <div class="panel-header"><div><p class="eyebrow">REVIEW RESULT · BELUM TERSIMPAN</p><h2>Konfirmasi Draft PO</h2></div><span class="status-badge parsing">Preview only</span></div>
-        <dl class="quality-list">
-          <div><dt>Supplier</dt><dd>{{ po_preview.supplier.name }}</dd></div>
-          <div><dt>Need Month</dt><dd>{{ po_preview.need_month|date:"M Y" }}</dd></div>
-          <div><dt>Required Arrival</dt><dd>{{ po_preview.required_arrival|date:"d M Y" }}</dd></div>
-          <div><dt>Total Qty</dt><dd>{{ po_preview.total_qty|floatformat:"0g" }}</dd></div>
-          <div><dt>Estimasi COGS saat ini</dt><dd>Rp {{ po_preview.total_cogs|floatformat:"0g" }}</dd></div>
-        </dl>
-        <div class="table-wrap"><table><thead><tr><th>SKU</th><th>Qty</th><th>Current COGS</th><th>Line Value</th></tr></thead><tbody>
-          {% for line in po_preview.lines %}<tr><td><span class="code-label">{{ line.sku.sku }}</span></td><td>{{ line.qty|floatformat:"0g" }}</td><td>Rp {{ line.cogs_snapshot|floatformat:"0g" }}</td><td>Rp {{ line.line_value|floatformat:"0g" }}</td></tr>{% endfor %}
-        </tbody></table></div>
-        <p class="muted">Saat tombol di bawah ditekan, sistem memvalidasi ulang requirement dan COGS. Nomor PO serta snapshot COGS final baru dibekukan ketika Draft di-Release.</p>
-        <button class="primary-button" type="submit" name="action" value="create">Konfirmasi &amp; Create Draft PO</button>
-      </section>
-      {% else %}
-      <button class="primary-button" type="submit" name="action" value="review">Review PO</button>
-      {% endif %}
-      {% else %}<div class="empty-state">Tidak ada PPIC Requirement yang masih tersisa.</div>{% endif %}
-    </form>
-  </article>
+<section class="panel">
+  <div class="panel-header"><div><p class="eyebrow">CREATE PO · FILTER</p><h2>Pilih requirement seperti sheet Create PO</h2></div><span class="status-badge ready">All = semua eligible</span></div>
+  <form method="get" class="report-filter po-generator-filter" data-auto-submit>
+    {% include "purchasing/includes/generator_multi_select.html" with label="Month" name="month" options=generator.month_options selected=generator.selected.months all_label="All Month" search_placeholder="Cari bulan..." %}
+    {% include "purchasing/includes/generator_multi_select.html" with label="Status Product" name="status" options=generator.status_options selected=generator.selected.statuses all_label="All Status" search_placeholder="Cari status..." %}
+    {% include "purchasing/includes/generator_multi_select.html" with label="Category" name="category" options=generator.category_options selected=generator.selected.categories all_label="All Categories" search_placeholder="Cari kategori..." %}
+    {% include "purchasing/includes/generator_multi_select.html" with label="Product" name="product" options=generator.product_options selected=generator.selected.products all_label="All Products" search_placeholder="Cari produk..." %}
+    {% include "purchasing/includes/generator_multi_select.html" with label="Size" name="size" options=generator.size_options selected=generator.selected.sizes all_label="All Sizes" search_placeholder="Cari size..." %}
+    <button class="primary-button" type="submit" name="review" value="1">Review PO</button>
+    <a class="secondary-button" href="{% url 'purchasing:generator' %}">Reset</a>
+  </form>
+  <p class="muted section-gap">Product dan Size hanya menampilkan pilihan yang masih eligible dari filter sebelumnya. Requirement yang sudah masuk Draft/Released PO otomatis hilang; jika Draft dihapus, Need Key menjadi eligible kembali.</p>
+</section>
+
+{% if show_preview %}
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">REVIEW RESULT · BELUM TERSIMPAN</p><h2>Candidate PO hasil filter</h2></div><span class="status-badge parsing">Preview only</span></div>
+  <section class="metric-grid">
+    <article class="metric-card"><span>Requirement line</span><strong>{{ generator.candidates|length|floatformat:"0g" }}</strong><small>Need Month + SKU</small></article>
+    <article class="metric-card"><span>PO Qty</span><strong>{{ generator.candidate_qty|floatformat:"0g" }}</strong><small>mengikuti MD Incoming Qty</small></article>
+    <article class="metric-card"><span>Total PO COGS</span><strong class="metric-money" data-po-cogs-grand-total>Rp {{ generator.candidate_cogs|floatformat:"0g" }}</strong><small>PPIC COGS × PO Qty</small></article>
+    <article class="metric-card {% if generator.has_missing_cogs %}danger-card{% endif %}" data-po-cogs-status-card><span>COGS belum valid</span><strong data-po-cogs-invalid-count>{% if generator.has_missing_cogs %}Ada{% else %}0{% endif %}</strong><small data-po-cogs-status-copy>{% if generator.has_missing_cogs %}Wajib dilengkapi{% else %}Siap dikonfirmasi{% endif %}</small></article>
+  </section>
+
+  {% if generator_errors %}<div class="issue-list section-gap">{% for error in generator_errors %}<div class="issue-row error"><span>ERROR</span><div><strong>Create PO diblokir</strong><small>{{ error }}</small></div></div>{% endfor %}</div>{% endif %}
+
+  {% if generator.candidates %}
+  <p class="muted">PPIC COGS dapat diedit di bawah. Nilai master hanya rekomendasi awal; nilai yang dikonfirmasi disimpan sebagai snapshot Draft PO dan tidak ditimpa lagi saat Release.</p>
+  <div class="table-wrap section-gap"><table><thead><tr><th>Need Month</th><th>Required Arrival</th><th>Status Product</th><th>Category</th><th>Sub Category</th><th>Product</th><th>Variant / Color</th><th>Size</th><th>SKU</th><th>PPIC COGS / Unit</th><th>PO Qty</th><th>Total PO COGS</th></tr></thead><tbody>
+  {% for row in generator.candidates %}<tr>
+    <td><strong>{{ row.need_month|date:"F Y" }}</strong></td><td><span class="muted">Set saat konfirmasi</span></td>
+    <td>{{ row.sku.product_variant.product.status.name }}</td><td>{{ row.sku.product_variant.product.category.name }}</td><td>{{ row.sku.product_variant.product.subcategory.name|default:"—" }}</td>
+    <td><strong>{{ row.sku.product_variant.product.name }}</strong></td><td>{{ row.sku.product_variant.name }}{% if row.sku.product_variant.color and row.sku.product_variant.color != row.sku.product_variant.name %} / {{ row.sku.product_variant.color }}{% endif %}</td><td>{{ row.sku.size|default:"—" }}</td>
+    <td><span class="code-label">{{ row.sku.sku }}</span></td><td><div class="money-input"><span>Rp</span><input type="number" name="{{ row.cogs_field_name }}" value="{{ row.cogs_input_value }}" min="1" step="1" required form="po-generator-create-form" data-po-cogs-input data-qty="{{ row.po_qty|floatformat:'0' }}" aria-label="PPIC COGS {{ row.sku.sku }}"></div></td><td><strong>{{ row.po_qty|floatformat:"0g" }}</strong></td><td><strong id="po-cogs-total-{{ row.id }}" data-po-cogs-line-total>{% if row.incoming_cogs != None %}Rp {{ row.incoming_cogs|floatformat:"0g" }}{% else %}—{% endif %}</strong></td>
+  </tr>{% endfor %}
+  </tbody></table></div>
+
+  <form method="post" id="po-generator-create-form" class="stack-form po-confirmation section-gap" data-single-submit>{% csrf_token %}<input type="hidden" name="form_name" value="generator_create">
+    {% for value in generator.selected.months %}<input type="hidden" name="month" value="{{ value }}">{% endfor %}
+    {% for value in generator.selected.statuses %}<input type="hidden" name="status" value="{{ value }}">{% endfor %}
+    {% for value in generator.selected.categories %}<input type="hidden" name="category" value="{{ value }}">{% endfor %}
+    {% for value in generator.selected.products %}<input type="hidden" name="product" value="{{ value }}">{% endfor %}
+    {% for value in generator.selected.sizes %}<input type="hidden" name="size" value="{{ value }}">{% endfor %}
+    <div class="panel-header"><div><p class="eyebrow">CREATE CONFIRMATION</p><h2>Header Draft PO</h2></div><span class="status-badge">1 PO per Need Month</span></div>
+    <div class="po-confirmation-grid">
+      <label>Vendor<select name="supplier" required><option value="">Pilih vendor...</option>{% for supplier in suppliers %}<option value="{{ supplier.id }}" {% if selected_supplier and selected_supplier.id == supplier.id %}selected{% endif %}>{{ supplier.name }}</option>{% endfor %}</select></label>
+      {% for month in generator.candidate_months %}<label>Required Arrival · {{ month.date|date:"F Y" }}<input type="date" name="{{ month.field_name }}" value="{{ month.value }}" required></label>{% endfor %}
+      <label class="po-notes-field">Notes<textarea name="notes" rows="2" placeholder="Opsional">{{ request.POST.notes }}</textarea></label>
+    </div>
+    <p class="muted">Saat Create ditekan, sistem menghitung ulang eligibility, memvalidasi COGS, lalu menyimpan qty dan COGS per SKU ke Draft PO. Setiap Need Month dibuat sebagai satu Draft PO terpisah.</p>
+    <button class="primary-button" type="submit" data-loading-label="Menyimpan Draft PO…">Konfirmasi &amp; Create Draft PO</button>
+  </form>
+  {% else %}<div class="empty-state">Tidak ada PPIC Requirement eligible untuk kombinasi filter ini.</div>{% endif %}
+</section>
+{% endif %}
+
+<section class="dashboard-grid section-gap">
   <article class="panel">
     <div class="panel-header"><div><p class="eyebrow">MANUAL</p><h2>PO produk baru</h2></div></div>
-    <p class="muted">SKU wajib sudah tersedia di Master Data. Source disimpan sebagai Manual – New Product.</p>
+    <p class="muted">Khusus produk baru yang belum berasal dari PPIC Requirement. SKU wajib sudah tersedia di Master Data.</p>
     <form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="form_name" value="manual_po">{{ manual_form.as_p }}<button class="secondary-button" type="submit">Create Draft Manual PO</button></form>
   </article>
+  <article class="panel span-two">
+    <div class="panel-header"><div><p class="eyebrow">PRINT PO</p><h2>Preview dan print PO terbaru</h2></div><a class="row-link" href="{% url 'purchasing:purchase_orders' %}">Lihat seluruh Purchase Order →</a></div>
+    {% if pos %}<div class="table-wrap"><table><thead><tr><th>No. PO</th><th>Vendor</th><th>Need Month</th><th>Required Arrival</th><th>Status</th><th>Qty</th><th>Action</th></tr></thead><tbody>
+    {% for po in pos %}<tr><td><strong>{{ po.po_number|default:"Draft – belum bernomor" }}</strong></td><td>{{ po.supplier.name }}</td><td>{{ po.need_month|date:"F Y" }}</td><td>{{ po.required_arrival|date:"d M Y"|default:"—" }}</td><td><span class="status-badge {% if po.status == 'RELEASED' %}ready{% endif %}">{{ po.get_status_display }}</span></td><td>{{ po.total_qty|floatformat:"0g" }}</td><td><a class="row-link" href="{% url 'purchasing:po_detail' po.id %}">Buka PO</a>{% if po.status == 'RELEASED' %} · <a class="row-link" target="_blank" href="{% url 'purchasing:po_print' po.id %}">Print</a>{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty-state">Belum ada PO.</div>{% endif %}
+  </article>
 </section>
-
-<section class="panel section-gap">
-  <div class="panel-header"><div><p class="eyebrow">PO HISTORY</p><h2>Purchase Order</h2></div><a class="row-link" href="{% url 'purchasing:tracking' %}">Lihat tracking lengkap →</a></div>
-  {% if pos %}<div class="table-wrap"><table><thead><tr><th>No. PO</th><th>Supplier</th><th>Need Month</th><th>Required Arrival</th><th>Status</th><th>Qty</th><th>Remaining</th><th>Aging</th><th></th></tr></thead><tbody>
-  {% for po in pos %}<tr><td><strong>{{ po.po_number|default:"Draft – belum bernomor" }}</strong></td><td>{{ po.supplier.name }}</td><td>{{ po.need_month|date:"M Y" }}</td><td>{{ po.required_arrival|date:"d M Y"|default:"—" }}</td><td><span class="status-badge {% if po.status == 'RELEASED' %}ready{% endif %}">{{ po.get_status_display }}</span></td><td>{{ po.total_qty|floatformat:"0g" }}</td><td>{% if po.aging_snapshot %}{{ po.aging_snapshot.po_remaining_qty|floatformat:"0g" }}{% else %}—{% endif %}</td><td>{% if po.aging_snapshot %}{{ po.aging_snapshot.age_days|floatformat:"0g" }} days · {{ po.aging_snapshot.status }}{% else %}—{% endif %}</td><td><a class="row-link" href="{% url 'purchasing:po_detail' po.id %}">Buka</a></td></tr>{% endfor %}
-  </tbody></table></div>{% else %}<div class="empty-state">Belum ada PO.</div>{% endif %}
-</section>
-
-<section class="panel section-gap narrow-panel">
-  <div class="panel-header"><div><p class="eyebrow">MASTER</p><h2>Tambah supplier</h2></div></div>
-  <form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="form_name" value="supplier">{{ supplier_form.as_p }}<button class="secondary-button" type="submit">Simpan supplier</button></form>
-</section>
+{% include "includes/multi_select_script.html" %}
 {% endblock %}

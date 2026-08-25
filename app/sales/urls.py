@@ -11,4 +11,5 @@ urlpatterns = [
     path("product-performance/", views.product_performance, name="product_performance"),
     path("pareto-analysis/", views.pareto, name="pareto"),
     path("transactions/", views.transactions, name="transactions"),
+    path("input-transaction/", views.input_transaction, name="input_transaction"),
 ]

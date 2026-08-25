@@ -6,7 +6,7 @@ from django.core.paginator import Paginator
 from django.http import HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 
-from .forms import ManualSaleForm, MasterImportUploadForm, SalesImportUploadForm
+from .forms import MasterImportUploadForm, SalesImportUploadForm
 from .models import (
     ImportValidationIssue,
     MasterImportBatch,
@@ -17,7 +17,6 @@ from .models import (
 from .services.master_commit import approve_master_import
 from .services.sales_commit import approve_sales_import
 from .services.storage import DuplicateRawFile, create_master_import, create_sales_import
-from sales.services.manual import create_manual_sale
 from sales.services.requirements import import_requirements, summarize_import_requirements
 from inventory.models import FIFOOpeningImportBatch
 
@@ -101,27 +100,8 @@ def master_import_approve(request, batch_id):
 
 @login_required
 def sales_import_list(request):
-    manual_form = ManualSaleForm()
-    if request.method == "POST":
-        manual_form = ManualSaleForm(request.POST)
-        if manual_form.is_valid():
-            try:
-                line = create_manual_sale(actor=request.user, **manual_form.cleaned_data)
-            except ValidationError as exc:
-                manual_form.add_error(None, exc)
-            else:
-                if getattr(line, "retail_price_special_case", False):
-                    master_retail = f"{line.master_retail_price_at_entry:,.0f}".replace(",", ".")
-                    retail_snapshot = f"{line.retail_price_snapshot:,.0f}".replace(",", ".")
-                    messages.warning(
-                        request,
-                        f"SPECIAL CASE HARGA · Transaksi {line.business_key} berhasil diposting. "
-                        f"Retail Price master tetap Rp {master_retail}; snapshot transaksi ini saja "
-                        f"disesuaikan menjadi Rp {retail_snapshot}.",
-                    )
-                else:
-                    messages.success(request, f"Transaksi manual {line.business_key} berhasil diposting.")
-                return redirect("imports:sales_list")
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
     batches = SalesImportBatch.objects.exclude(
         status=SalesImportBatch.Status.VOIDED
     ).select_related("raw_file", "raw_file__uploaded_by")[:30]
@@ -133,7 +113,6 @@ def sales_import_list(request):
             "batches": batches,
             "requirements": requirements,
             "requirement_summary": summarize_import_requirements(requirements),
-            "manual_form": manual_form,
         },
     )
 

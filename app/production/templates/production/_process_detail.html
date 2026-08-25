@@ -1,0 +1,18 @@
+<details class="production-process-detail" id="{{ detail_id }}">
+  <summary class="production-detail-toggle">
+    <span class="production-detail-closed">View Detail</span>
+    <span class="production-detail-open">Hide Detail</span>
+  </summary>
+  <div class="table-wrap production-process-detail-table">
+    <table>
+      <thead><tr><th>Product</th><th>Size</th><th>{{ detail.quantity_label }}</th></tr></thead>
+      <tbody>
+        {% for row in detail.rows %}
+        <tr><td><strong>{{ row.product_name }}</strong></td><td>{{ row.size }}</td><td><strong>{{ row.quantity|floatformat:"0g" }}</strong></td></tr>
+        {% empty %}
+        <tr><td colspan="3"><div class="empty-state">Belum ada pekerjaan yang tercatat pada proses ini.</div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>

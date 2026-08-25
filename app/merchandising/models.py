@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -55,6 +56,7 @@ class ProjectionScenario(models.Model):
 
 class ProjectionRule(models.Model):
     class ScopeType(models.TextChoices):
+        ALL_PRODUCTS = "ALL_PRODUCTS", "All Products"
         PRODUCT_STATUS = "PRODUCT_STATUS", "Product Status"
         CATEGORY = "CATEGORY", "Category"
         PRODUCT = "PRODUCT", "Product"
@@ -62,7 +64,9 @@ class ProjectionRule(models.Model):
     class Method(models.TextChoices):
         INCREASE_PERCENT = "INCREASE_PERCENT", "Increase by %"
         DECREASE_PERCENT = "DECREASE_PERCENT", "Decrease by %"
+        SAME_AS_LAST_MONTH = "SAME_AS_LAST_MONTH", "Sama dengan Bulan Lalu"
         TARGET_STOCK_RATIO = "TARGET_STOCK_RATIO", "Target Stock Ratio"
+        SELL_OUT_ENDING_MONTHS = "SELL_OUT_ENDING_MONTHS", "Ending Stock Habis dalam X Bulan"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     scenario = models.ForeignKey(ProjectionScenario, on_delete=models.PROTECT, related_name="rules")
@@ -102,6 +106,7 @@ class ProjectionRule(models.Model):
     @property
     def priority(self):
         return {
+            self.ScopeType.ALL_PRODUCTS: 0,
             self.ScopeType.PRODUCT_STATUS: 100,
             self.ScopeType.CATEGORY: 200,
             self.ScopeType.PRODUCT: 300,
@@ -116,12 +121,19 @@ class ProjectionRule(models.Model):
             self.ScopeType.CATEGORY: self.category_id,
             self.ScopeType.PRODUCT: self.product_id,
         }
-        if not selected.get(self.scope_type) or sum(bool(value) for value in selected.values()) != 1:
+        selected_count = sum(bool(value) for value in selected.values())
+        if self.scope_type == self.ScopeType.ALL_PRODUCTS:
+            if selected_count:
+                raise ValidationError("Scope All Products tidak boleh memakai filter khusus.")
+        elif not selected.get(self.scope_type) or selected_count != 1:
             raise ValidationError("Pilih tepat satu scope yang sesuai Scope Type.")
         if self.parameter < 0:
             raise ValidationError({"parameter": "Parameter tidak boleh negatif."})
         if self.method == self.Method.TARGET_STOCK_RATIO and self.parameter <= 0:
             raise ValidationError({"parameter": "Target Stock Ratio harus lebih besar dari nol."})
+        if self.method == self.Method.SELL_OUT_ENDING_MONTHS:
+            if self.parameter <= 0 or self.parameter != self.parameter.to_integral_value():
+                raise ValidationError({"parameter": "Jumlah bulan harus bilangan bulat lebih dari nol."})
 
     def __str__(self):
         return f"{self.scenario} · {self.target_month:%b %Y} · {self.get_method_display()}"
@@ -146,6 +158,9 @@ class SalesProjection(models.Model):
     baseline_month = models.DateField(null=True, blank=True)
     baseline_qty = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
     beginning_qty = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
+    cogs_snapshot = models.DecimalField(max_digits=22, decimal_places=4, default=0)
+    retail_price_snapshot = models.DecimalField(max_digits=22, decimal_places=4, default=0)
+    net_rate_snapshot = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal("0.97"))
     system_recommendation = models.DecimalField(max_digits=18, decimal_places=4)
     adit_adjustment = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
     final_approved_qty = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True)
@@ -175,6 +190,18 @@ class SalesProjection(models.Model):
                 condition=Q(system_recommendation__gte=0),
                 name="merch_projection_recommendation_nonnegative",
             ),
+            models.CheckConstraint(
+                condition=Q(cogs_snapshot__gte=0),
+                name="merch_projection_cogs_snapshot_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=Q(retail_price_snapshot__gte=0),
+                name="merch_projection_retail_snapshot_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=Q(net_rate_snapshot__gte=0) & Q(net_rate_snapshot__lte=1),
+                name="merch_projection_net_rate_snapshot_range",
+            ),
         ]
 
     def clean(self):
@@ -186,6 +213,10 @@ class SalesProjection(models.Model):
                 raise ValidationError({"final_approved_qty": "Final qty tidak boleh negatif."})
             if self.final_approved_qty != self.final_approved_qty.to_integral_value():
                 raise ValidationError({"final_approved_qty": "Final approved Sales Qty harus bilangan bulat."})
+
+    @property
+    def proposed_qty(self):
+        return self.system_recommendation + (self.adit_adjustment or Decimal("0"))
 
     def __str__(self):
         return f"{self.month:%b %Y} · {self.sku.sku}"
@@ -248,6 +279,10 @@ class IncomingPlan(models.Model):
                     {"final_approved_incoming": "Final Approved Incoming harus bilangan bulat."}
                 )
 
+    @property
+    def proposed_incoming(self):
+        return self.recommended_incoming + (self.adit_adjustment or Decimal("0"))
+
     def __str__(self):
         return f"Incoming {self.month:%b %Y} · {self.sku.sku}"
 
@@ -281,15 +316,20 @@ class IncomingMonthClose(models.Model):
 
 
 class IncomingMonthlyActual(models.Model):
-    """Frozen actual, projection and variance per SKU at month close."""
+    """Frozen planning-versus-actual cost bridge per SKU at month close."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     month_close = models.ForeignKey(IncomingMonthClose, on_delete=models.PROTECT, related_name="actual_rows")
     sku = models.ForeignKey("master_data.SKU", on_delete=models.PROTECT, related_name="incoming_monthly_actuals")
     projected_qty = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    projected_cogs = models.DecimalField(max_digits=22, decimal_places=4, default=0)
+    projected_ending_qty = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    projected_ending_cogs = models.DecimalField(max_digits=22, decimal_places=4, default=0)
     actual_qty = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     actual_cogs = models.DecimalField(max_digits=22, decimal_places=4, default=0)
     actual_gross = models.DecimalField(max_digits=22, decimal_places=4, default=0)
+    actual_ending_qty = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    actual_ending_cogs = models.DecimalField(max_digits=22, decimal_places=4, default=0)
     variance_qty = models.DecimalField(max_digits=18, decimal_places=4, default=0)
 
     class Meta:

@@ -19,9 +19,25 @@ class DashboardAccessTests(TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse("dashboard:index"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Pilih modul kerja")
+        self.assertContains(response, "Vobia Space")
+        self.assertContains(response, "Play For Legacy")
+        self.assertContains(response, "module-space-brand")
+        self.assertContains(response, "Vobia Business Connected")
+        self.assertContains(response, "Tempat Untuk Bekerja, Berkarya dan Tertawa")
+        self.assertContains(response, "VOBIA SPACE")
+        self.assertNotContains(response, "Pilih modul kerja")
+        self.assertNotContains(response, "Mulai dari Sales")
         for module_name in ("Sales", "Operation", "RnD", "Marketing", "Finance", "Human Resource"):
             self.assertContains(response, module_name)
+        for image_name in (
+            "module-sales.jpg",
+            "module-operation.jpg",
+            "module-rnd.jpg",
+            "module-marketing.jpg",
+            "module-finance.jpg",
+            "module-human-resource.jpg",
+        ):
+            self.assertContains(response, image_name)
 
     def test_sales_module_sets_context_and_opens_sales_dashboard(self):
         user = get_user_model().objects.create_superuser(

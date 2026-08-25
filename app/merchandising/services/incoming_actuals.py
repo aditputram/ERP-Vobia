@@ -10,6 +10,8 @@ from django.utils import timezone
 
 from audit.services import record_audit
 from inventory.models import InboundReceipt
+from inventory.services.reporting import inventory_summary_rows
+from master_data.models import SKU
 from merchandising.models import (
     IncomingCarryover,
     IncomingMonthClose,
@@ -105,6 +107,23 @@ def incoming_comparison(batch, month, sku_ids=None):
     }
 
 
+def closed_cost_actuals(year, sku_ids=None):
+    """Frozen actual incoming and ending values used after a month is closed."""
+    rows = IncomingMonthlyActual.objects.filter(month_close__month__year=year)
+    if sku_ids is not None:
+        rows = rows.filter(sku_id__in=list(sku_ids))
+    return {
+        (row.sku_id, row.month_close.month.month): {
+            "incoming_qty": row.actual_qty,
+            "incoming_cogs": row.actual_cogs,
+            "incoming_gross": row.actual_gross,
+            "ending_qty": row.actual_ending_qty,
+            "ending_cogs": row.actual_ending_cogs,
+        }
+        for row in rows.select_related("month_close")
+    }
+
+
 @transaction.atomic
 def close_incoming_month(*, month, actor, evidence_reference, notes="", today=None, allow_open_month=False):
     month = month_start(month)
@@ -131,6 +150,10 @@ def close_incoming_month(*, month, actor, evidence_reference, notes="", today=No
     close.save()
     projected_values = projected_incoming(batch, month)
     live_values = live_incoming_actuals(month)
+    projected_month_rows = {
+        row.sku_id: row
+        for row in MerchandisingMonthlySnapshot.objects.filter(batch=batch, month=month)
+    }
     comparison = {
         sku_id: {
             "projection": projected_values.get(sku_id, {"incoming_qty": ZERO, "incoming_cogs": ZERO, "incoming_gross": ZERO}),
@@ -138,11 +161,25 @@ def close_incoming_month(*, month, actor, evidence_reference, notes="", today=No
         }
         for sku_id in set(projected_values) | set(live_values)
     }
+    sku_ids = set(comparison)
+    ending_actuals = {
+        row["sku"].id: row
+        for row in inventory_summary_rows(
+            SKU.objects.filter(id__in=sku_ids).select_related(
+                "product_variant__product__status",
+                "product_variant__product__category",
+                "product_variant__product__subcategory",
+            ),
+            as_of_date=cutoff,
+        )
+    }
     actual_rows = []
     shortage_by_sku = {}
     for sku_id, values in comparison.items():
         projection = values["projection"]
         actual = values["actual"]
+        projected_month = projected_month_rows.get(sku_id)
+        ending_actual = ending_actuals.get(sku_id, {})
         shortage = max(projection["incoming_qty"] - actual["incoming_qty"], ZERO)
         shortage_by_sku[sku_id] = shortage
         actual_rows.append(
@@ -150,9 +187,14 @@ def close_incoming_month(*, month, actor, evidence_reference, notes="", today=No
                 month_close=close,
                 sku_id=sku_id,
                 projected_qty=projection["incoming_qty"],
+                projected_cogs=projection["incoming_cogs"],
+                projected_ending_qty=(projected_month.ending_qty if projected_month else ZERO),
+                projected_ending_cogs=(projected_month.ending_cogs if projected_month else ZERO),
                 actual_qty=actual["incoming_qty"],
                 actual_cogs=actual["incoming_cogs"],
                 actual_gross=actual["incoming_gross"],
+                actual_ending_qty=ending_actual.get("balance", ZERO),
+                actual_ending_cogs=ending_actual.get("fifo_value", ZERO),
                 variance_qty=actual["incoming_qty"] - projection["incoming_qty"],
             )
         )
@@ -199,6 +241,8 @@ def close_incoming_month(*, month, actor, evidence_reference, notes="", today=No
             "month": str(month),
             "actual_rows": len(actual_rows),
             "carryover_rows": len(carryovers),
+            "actual_incoming_cogs": str(sum((row.actual_cogs for row in actual_rows), ZERO)),
+            "actual_ending_cogs": str(sum((row.actual_ending_cogs for row in actual_rows), ZERO)),
             "evidence_reference": evidence_reference,
         },
     )

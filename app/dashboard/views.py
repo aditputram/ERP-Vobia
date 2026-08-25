@@ -14,6 +14,8 @@ MODULES = (
         "status": "Aktif",
         "available": True,
         "accent": "lime",
+        "image": "img/modules/module-sales.jpg",
+        "image_position": "center 58%",
     },
     {
         "slug": "operation",
@@ -23,6 +25,8 @@ MODULES = (
         "status": "Fondasi aktif",
         "available": True,
         "accent": "teal",
+        "image": "img/modules/module-operation.jpg",
+        "image_position": "center 60%",
     },
     {
         "slug": "rnd",
@@ -32,6 +36,8 @@ MODULES = (
         "status": "Segera hadir",
         "available": False,
         "accent": "violet",
+        "image": "img/modules/module-rnd.jpg",
+        "image_position": "center 52%",
     },
     {
         "slug": "marketing",
@@ -41,6 +47,8 @@ MODULES = (
         "status": "Segera hadir",
         "available": False,
         "accent": "coral",
+        "image": "img/modules/module-marketing.jpg",
+        "image_position": "center 52%",
     },
     {
         "slug": "finance",
@@ -50,6 +58,8 @@ MODULES = (
         "status": "Segera hadir",
         "available": False,
         "accent": "blue",
+        "image": "img/modules/module-finance.jpg",
+        "image_position": "center 54%",
     },
     {
         "slug": "human-resource",
@@ -59,6 +69,8 @@ MODULES = (
         "status": "Segera hadir",
         "available": False,
         "accent": "amber",
+        "image": "img/modules/module-human-resource.jpg",
+        "image_position": "center 54%",
     },
 )
 

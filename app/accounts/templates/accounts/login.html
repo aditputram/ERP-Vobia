@@ -4,20 +4,19 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Masuk · Vobia ERP</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    <title>Masuk · Vobia Space</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260824-login-space">
 </head>
 <body class="auth-page">
     <main class="auth-layout">
         <section class="auth-story">
-            <div class="brand auth-brand">
-                <span class="brand-mark">V</span>
-                <span><strong>VOBIA</strong><small>ERP</small></span>
+            <div class="auth-brand">
+                <img class="auth-brand-logo" src="{% static 'img/logo-vobia.png' %}" alt="Vobia">
             </div>
             <div>
-                <p class="eyebrow light">PRIVATE OPERATIONS SYSTEM</p>
-                <h1>Satu alur yang bisa ditelusuri, dari sales hingga inventory.</h1>
-                <p>Fondasi ERP Vobia menerjemahkan proses yang sudah teruji di Sales dan Operation tanpa mengubah histori.</p>
+                <p class="eyebrow light">VOBIA SPACE</p>
+                <h1>Business Connected, tempat untuk bekerja, berkarya dan tertawa.</h1>
+                <p class="auth-tagline">Play For Legacy</p>
             </div>
             <div class="auth-principles">
                 <span>Immutable history</span>
@@ -31,7 +30,7 @@
                 {% csrf_token %}
                 <div>
                     <p class="eyebrow">SECURE ACCESS</p>
-                    <h2>Masuk ke Vobia ERP</h2>
+                    <h2>Masuk ke Vobia Space</h2>
                     <p class="muted">Gunakan username dan password lokal yang telah disiapkan.</p>
                 </div>
 
@@ -52,4 +51,3 @@
     </main>
 </body>
 </html>
-

@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "sales",
     "merchandising",
     "purchasing",
+    "production",
     "inventory",
     "reconciliation",
     "traffic",

@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
     <title>{% block title %}Vobia ERP{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260821-11">
-    <script src="{% static 'js/app.js' %}?v=20260821-2" defer></script>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260824-07">
+    <script src="{% static 'js/app.js' %}?v=20260824-01" defer></script>
 </head>
 <body>
     <div class="app-shell">
@@ -24,31 +24,35 @@
             <nav class="navigation" aria-label="Navigasi utama">
                 {% if request.session.active_module == 'operation' %}
                 <span class="nav-label">OPERATION</span>
-                <a class="nav-item {% if request.resolver_match.namespace == 'merchandising' %}active{% endif %}" href="{% url 'merchandising:dashboard' %}"><span>Merchandising</span></a>
-                {% if request.resolver_match.namespace == 'merchandising' %}
-                <div class="nav-subitems">
+                <button class="nav-item nav-group-toggle {% if request.resolver_match.namespace == 'merchandising' %}active{% endif %}" type="button" data-nav-group-toggle="merchandising" data-nav-group-active="{% if request.resolver_match.namespace == 'merchandising' %}true{% else %}false{% endif %}" aria-expanded="{% if request.resolver_match.namespace == 'merchandising' %}true{% else %}false{% endif %}"><span>Merchandising</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+                <div class="nav-subitems" data-nav-group-panel="merchandising"{% if request.resolver_match.namespace != 'merchandising' %} hidden{% endif %}>
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'overview' or request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'merchandising:dashboard' %}">Dashboard</a>
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'projection' %}active{% endif %}" href="{% url 'merchandising:projection' %}">Projection</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'planning_builder' or request.resolver_match.url_name == 'approve_projection' or request.resolver_match.url_name == 'make_incoming' or request.resolver_match.url_name == 'approve_incoming' %}active{% endif %}" href="{% url 'merchandising:planning_builder' %}">Planning Builder</a>
                 </div>
-                {% endif %}
-                <a class="nav-item {% if request.resolver_match.namespace == 'purchasing' %}active{% endif %}" href="{% url 'purchasing:overview' %}"><span>PPIC</span></a>
-                {% if request.resolver_match.namespace == 'purchasing' %}
-                <div class="nav-subitems">
-                    <a class="nav-subitem {% if request.resolver_match.url_name == 'overview' %}active{% endif %}" href="{% url 'purchasing:overview' %}">Requirement &amp; Create PO</a>
-                    <a class="nav-subitem {% if request.resolver_match.url_name == 'tracking' %}active{% endif %}" href="{% url 'purchasing:tracking' %}">PO Tracking</a>
+                <button class="nav-item nav-group-toggle {% if request.resolver_match.namespace == 'purchasing' %}active{% endif %}" type="button" data-nav-group-toggle="purchasing" data-nav-group-active="{% if request.resolver_match.namespace == 'purchasing' %}true{% else %}false{% endif %}" aria-expanded="{% if request.resolver_match.namespace == 'purchasing' %}true{% else %}false{% endif %}"><span>PPIC</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+                <div class="nav-subitems" data-nav-group-panel="purchasing"{% if request.resolver_match.namespace != 'purchasing' %} hidden{% endif %}>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'requirements' %}active{% endif %}" href="{% url 'purchasing:requirements' %}">Requirement</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'overview' or request.resolver_match.url_name == 'generator' or request.resolver_match.url_name == 'po_print' %}active{% endif %}" href="{% url 'purchasing:generator' %}">PO Generator</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'purchase_orders' or request.resolver_match.url_name == 'tracking' or request.resolver_match.url_name == 'po_detail' or request.resolver_match.url_name == 'po_release' or request.resolver_match.url_name == 'po_cancel' or request.resolver_match.url_name == 'po_wip_list' or request.resolver_match.url_name == 'po_wip_upload' or request.resolver_match.url_name == 'po_wip_detail' %}active{% endif %}" href="{% url 'purchasing:purchase_orders' %}">Purchase Order</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'vendors' %}active{% endif %}" href="{% url 'purchasing:vendors' %}">Daftar Vendor</a>
                 </div>
-                {% endif %}
-                <a class="nav-item {% if request.resolver_match.url_name == 'production' %}active{% endif %}" href="{% url 'inventory:production' %}"><span>Production</span></a>
-                <a class="nav-item {% if request.resolver_match.namespace == 'inventory' and request.resolver_match.url_name != 'production' %}active{% endif %}" href="{% url 'inventory:overview' %}"><span>Warehouse</span></a>
-                {% if request.resolver_match.namespace == 'inventory' and request.resolver_match.url_name != 'production' %}
-                <div class="nav-subitems">
+                <button class="nav-item nav-group-toggle {% if request.resolver_match.namespace == 'production' or request.resolver_match.url_name == 'production' %}active{% endif %}" type="button" data-nav-group-toggle="production" data-nav-group-active="{% if request.resolver_match.namespace == 'production' %}true{% else %}false{% endif %}" aria-expanded="{% if request.resolver_match.namespace == 'production' %}true{% else %}false{% endif %}"><span>Production</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+                <div class="nav-subitems" data-nav-group-panel="production"{% if request.resolver_match.namespace != 'production' %} hidden{% endif %}>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'production:dashboard' %}">Dashboard</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'planning' %}active{% endif %}" href="{% url 'production:planning' %}">Production Plan</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'monitoring' or request.resolver_match.url_name == 'detail' %}active{% endif %}" href="{% url 'production:monitoring' %}">Production Monitoring</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'activity' or request.resolver_match.url_name == 'activity_correction' %}active{% endif %}" href="{% url 'production:activity' %}">Production Activity</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'rejected_goods' %}active{% endif %}" href="{% url 'production:rejected_goods' %}">Rejected Goods</a>
+                </div>
+                <button class="nav-item nav-group-toggle {% if request.resolver_match.namespace == 'inventory' and request.resolver_match.url_name != 'production' %}active{% endif %}" type="button" data-nav-group-toggle="inventory" data-nav-group-active="{% if request.resolver_match.namespace == 'inventory' and request.resolver_match.url_name != 'production' %}true{% else %}false{% endif %}" aria-expanded="{% if request.resolver_match.namespace == 'inventory' and request.resolver_match.url_name != 'production' %}true{% else %}false{% endif %}"><span>Warehouse</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+                <div class="nav-subitems" data-nav-group-panel="inventory"{% if request.resolver_match.namespace != 'inventory' or request.resolver_match.url_name == 'production' %} hidden{% endif %}>
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'overview' %}active{% endif %}" href="{% url 'inventory:overview' %}">Inventory Summary</a>
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'turnover' %}active{% endif %}" href="{% url 'inventory:turnover' %}">Inventory Turnover</a>
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'inbound' %}active{% endif %}" href="{% url 'inventory:inbound' %}">Inbound</a>
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'return_log' %}active{% endif %}" href="{% url 'inventory:return_log' %}">Return Log</a>
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'outbound' %}active{% endif %}" href="{% url 'inventory:outbound' %}">Outbound</a>
                 </div>
-                {% endif %}
                 {% else %}
                 <span class="nav-label">SALES</span>
                 <a class="nav-item {% if request.resolver_match.url_name == 'dashboard' and request.resolver_match.namespace == 'sales' %}active{% endif %}" href="{% url 'sales:dashboard' %}">
@@ -57,6 +61,7 @@
                 <a class="nav-item {% if request.resolver_match.url_name == 'product_performance' %}active{% endif %}" href="{% url 'sales:product_performance' %}"><span>Product Performance</span></a>
                 <a class="nav-item {% if request.resolver_match.url_name == 'pareto' %}active{% endif %}" href="{% url 'sales:pareto' %}"><span>Pareto Analysis</span></a>
                 <a class="nav-item {% if request.resolver_match.url_name == 'transactions' %}active{% endif %}" href="{% url 'sales:transactions' %}"><span>Transaction</span></a>
+                <a class="nav-item {% if request.resolver_match.url_name == 'input_transaction' %}active{% endif %}" href="{% url 'sales:input_transaction' %}"><span>Input Transaction</span></a>
                 <a class="nav-item {% if request.resolver_match.namespace == 'imports' and '/sales/' in request.path or request.resolver_match.namespace == 'traffic' %}active{% endif %}" href="{% url 'imports:sales_list' %}"><span>Data Import</span></a>
                 {% endif %}
                 <span class="nav-label">SYSTEM</span>

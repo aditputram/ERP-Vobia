@@ -9,14 +9,19 @@
     const options = [...root.querySelectorAll('.multi-select-option')];
     const checks = options.map(option => option.querySelector('input[type="checkbox"]'));
     const updateSummary = () => {
-      const selected = checks.filter(check => check.checked);
-      summary.textContent = selected.length === 0 ? root.dataset.allLabel : (selected.length === 1 ? selected[0].value : `${selected.length} selected`);
+      const selected = options.filter(option => option.querySelector('input[type="checkbox"]').checked);
+      summary.textContent = selected.length === 0
+        ? root.dataset.allLabel
+        : (selected.length === 1
+          ? selected[0].querySelector('span').textContent.trim()
+          : `${selected.length} selected`);
     };
     const filterOptions = () => {
       const keyword = search.value.trim().toLocaleLowerCase('id');
       let visible = 0;
       options.forEach(option => {
-        const match = option.textContent.toLocaleLowerCase('id').includes(keyword);
+        const match = option.dataset.cascadeHidden !== 'true'
+          && option.textContent.toLocaleLowerCase('id').includes(keyword);
         option.hidden = !match;
         if (match) visible += 1;
       });

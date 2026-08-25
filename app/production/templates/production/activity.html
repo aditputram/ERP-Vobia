@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}Production Activity · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">PRODUCTION · FIELD ENTRY</p><h1>Production Activity</h1><p>Semua realisasi Material, Trial, Cut, Make, Trim, dan QC dicatat di sini. Submit bersifat append-only.</p></div>
+  <div class="header-actions"><a class="secondary-button" href="{% url 'production:monitoring' %}">Buka Monitoring</a></div>
+</header>
+
+<section class="panel">
+  <form method="get" class="inventory-filter-grid production-plan-selector" data-preserve-scroll>
+    <label>Purchase Order<select name="production_order" data-auto-submit><option value="">Pilih PO dengan Plan Active...</option>{% for row in active_orders %}<option value="{{ row.id }}" {% if selected.id == row.id %}selected{% endif %}>{{ row.po.po_number }} · {{ row.po.supplier.name }}</option>{% endfor %}</select></label>
+    <div class="header-actions">
+      <button class="primary-button" type="submit">Buka Activity</button>
+      {% if selected %}<a class="secondary-button" href="{% url 'production:activity' %}">Cancel</a>{% endif %}
+    </div>
+  </form>
+</section>
+
+{% if selected %}
+<section class="metric-grid six section-gap">
+  <article class="metric-card"><span>Passed Process</span><strong class="metric-text">{{ snapshot.passed_process_label }}</strong><small>{{ selected.po.po_number }}</small></article>
+  <article class="metric-card"><span>Next Process</span><strong class="metric-text">{{ snapshot.next_process_label }}</strong><small>mengikuti progres Activity</small></article>
+  <article class="metric-card"><span>PO Qty</span><strong>{{ snapshot.ordered_qty|floatformat:"0g" }}</strong><small>pcs</small></article>
+  <article class="metric-card"><span>Cut / Make / Trim</span><strong class="metric-text">{{ snapshot.stages.CUT.completed_qty|floatformat:"0g" }} / {{ snapshot.stages.MAKE.completed_qty|floatformat:"0g" }} / {{ snapshot.stages.TRIM.completed_qty|floatformat:"0g" }}</strong><small>qty kumulatif</small></article>
+  <article class="metric-card"><span>QC tersedia</span><strong>{{ snapshot.remaining_qc_qty|floatformat:"0g" }}</strong><small>output Trim belum diperiksa</small></article>
+  <article class="metric-card"><span>Ready to Deliver</span><strong>{{ snapshot.ready_to_deliver_qty|floatformat:"0g" }}</strong><small>pcs QC Passed belum dikirim</small></article>
+</section>
+
+<section class="dashboard-grid section-gap production-activity-layout">
+  <article class="panel">
+    <div class="panel-header"><div><p class="eyebrow">AVAILABLE NEXT ACTIVITY</p><h2>Tahap yang boleh disubmit</h2></div></div>
+    <div class="activity-choice-list">{% for value, label in eligible_choices %}<span class="activity-choice">{{ label }}</span>{% empty %}<div class="empty-state compact-empty">Tidak ada Activity lanjutan yang tersedia. Tahap mungkin sudah selesai atau sedang menunggu output sebelumnya.</div>{% endfor %}</div>
+    <p class="muted">QC terbuka segera setelah ada output Trim. Cut, Make, Trim, dan QC dapat berjalan parsial sesuai output tahap sebelumnya.</p>
+  </article>
+  <article class="panel span-two">
+    <div class="panel-header"><div><p class="eyebrow">ENTRY FORM</p><h2>Catat aktivitas {{ selected.po.po_number }}</h2></div><div class="header-actions"><span class="pill" data-delivery-order-preview data-preview-url="{% url 'production:delivery_order_preview' %}" hidden>No. DO · <strong data-delivery-order-number>{{ next_delivery_order_number }}</strong></span><span class="pill">Sekali submit</span></div></div>
+    <form method="post" class="stack-form" data-production-activity-form data-single-submit>{% csrf_token %}
+      {{ activity_form.non_field_errors }}
+      <div class="production-activity-form-grid">
+        <div><label>{{ activity_form.production_order.label }}</label>{{ activity_form.production_order }}{{ activity_form.production_order.errors }}</div>
+        <div><label>{{ activity_form.activity_type.label }}</label>{{ activity_form.activity_type }}{{ activity_form.activity_type.errors }}</div>
+        <div><label>{{ activity_form.activity_date.label }}</label>{{ activity_form.activity_date }}{{ activity_form.activity_date.errors }}</div>
+        <div class="wide" data-activity-cmt-lines>
+          <div class="table-wrap production-line-entry-wrap">
+            <table class="production-line-entry-table">
+              <thead><tr><th>Parent SKU</th><th>Product</th><th>Size</th><th data-cmt-quantity-label>Qty Activity</th><th data-cmt-available-label>Sisa Parent SKU</th><th>PO Qty SKU</th></tr></thead>
+              <tbody>
+                {% for row in activity_form.cmt_line_fields %}
+                <tr>
+                  <td><span class="sku-tag">{{ row.line.sku.product_variant.product.parent_sku|default:row.line.sku.product_variant.product.code }}</span></td>
+                  <td><strong>{{ row.line.sku.product_variant.product.name }}</strong></td>
+                  <td><strong>{{ row.line.sku.size|default:"—" }}</strong></td>
+                  <td>{{ row.field }}{{ row.field.errors }}</td>
+                  <td><strong class="production-line-static-qty" data-cmt-available data-cut="Tanpa batas" data-make="{{ row.available_make_qty|floatformat:'0g' }}" data-trim="{{ row.available_trim_qty|floatformat:'0g' }}" data-warehouse_delivery="{{ row.available_delivery_qty|floatformat:'0g' }}" data-rejected_warehouse_delivery="{{ row.available_rejected_delivery_qty|floatformat:'0g' }}">Tanpa batas</strong></td>
+                  <td><strong class="production-line-static-qty">{{ row.line.ordered_qty|floatformat:"0g" }}</strong></td>
+                </tr>
+                {% empty %}<tr><td colspan="6"><div class="empty-state compact-empty">PO ini belum memiliki baris SKU.</div></td></tr>{% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="wide" data-activity-qc>
+          <div class="table-wrap production-line-entry-wrap">
+            <table class="production-line-entry-table production-qc-entry-table">
+              <thead><tr><th>SKU</th><th>Product</th><th>Size</th><th>Output Trim</th><th>Sudah di-QC</th><th>Sisa Wajib QC</th><th>Qty Diperiksa</th><th>Qty Lolos</th><th>Qty Gagal</th><th>Tindak Lanjut Barang Gagal</th><th>Alasan Gagal</th></tr></thead>
+              <tbody>
+                {% for row in activity_form.qc_line_fields %}
+                <tr data-qc-row>
+                  <td><span class="sku-tag">{{ row.line.sku.sku }}</span></td>
+                  <td><strong>{{ row.line.sku.product_variant.product.name }}</strong></td>
+                  <td>{{ row.line.sku.size|default:"—" }}</td>
+                  <td><strong class="production-line-static-qty">{{ row.trim_qty|floatformat:"0g" }}</strong></td>
+                  <td><strong class="production-line-static-qty">{{ row.inspected_qty|floatformat:"0g" }}</strong></td>
+                  <td><strong class="production-line-static-qty">{{ row.remaining_qty|floatformat:"0g" }}</strong></td>
+                  <td>{{ row.inspected_field }}{{ row.inspected_field.errors }}</td>
+                  <td>{{ row.passed_field }}{{ row.passed_field.errors }}</td>
+                  <td><output data-qc-failed>0</output></td>
+                  <td>{{ row.disposition_field }}{{ row.disposition_field.errors }}</td>
+                  <td>{{ row.reason_field }}{{ row.reason_field.errors }}</td>
+                </tr>
+                {% empty %}<tr><td colspan="11"><div class="empty-state compact-empty">PO ini belum memiliki baris SKU.</div></td></tr>{% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <p class="muted">Qty Gagal dihitung otomatis dari Qty Diperiksa − Qty Lolos. Baris dengan sisa 0 sudah selesai dan tidak dapat diisi kembali.</p>
+        </div>
+        <div class="wide"><label>{{ activity_form.notes.label }}</label>{{ activity_form.notes }}{{ activity_form.notes.errors }}</div>
+      </div>
+      <button class="primary-button wide" type="submit" data-loading-label="Menyimpan Activity..." {% if not eligible_choices %}disabled aria-disabled="true"{% endif %}>Submit Production Activity</button>
+    </form>
+  </article>
+</section>
+
+<section class="panel section-gap" id="qc-follow-up">
+  <div class="panel-header"><div><p class="eyebrow">QC FOLLOW-UP ACTIVITY</p><h2>Rework dan pemeriksaan ulang</h2></div><span class="pill">{{ qc_follow_up_rows.count }} record</span></div>
+  {% if selected_follow_up and follow_up_form %}
+  <div class="notice section-gap">
+    <div class="panel-header"><div><p class="eyebrow">{% if follow_up_action == 'complete_rework' %}REWORK{% else %}RE-QC{% endif %}</p><h2>{% if follow_up_action == 'complete_rework' %}Catat Rework Selesai{% else %}Catat Hasil Re-QC{% endif %} · {{ selected_follow_up.po_line.sku.sku }}</h2></div><span class="pill">{{ selected_follow_up.open_qty|floatformat:"0g" }} pcs</span></div>
+    <p>{{ selected_follow_up.po_line.sku.product_variant.product.name }} · Siklus Rework {{ selected_follow_up.rework_cycle }}</p>
+    <form method="post" class="stack-form" data-re-qc-form data-single-submit>{% csrf_token %}
+      <input type="hidden" name="form_name" value="qc_follow_up">
+      <input type="hidden" name="production_order" value="{{ selected.id }}">
+      <input type="hidden" name="follow_up" value="{{ selected_follow_up.id }}">
+      <input type="hidden" name="action" value="{{ follow_up_action }}">
+      {{ follow_up_form.as_p }}
+      <div class="header-actions"><button class="primary-button" type="submit" data-loading-label="Menyimpan...">{% if follow_up_action == 'complete_rework' %}Simpan Rework Selesai{% else %}Simpan Hasil Re-QC{% endif %}</button><a class="secondary-button" href="{% url 'production:activity' %}?production_order={{ selected.id }}#qc-follow-up">Batal</a></div>
+    </form>
+  </div>
+  {% endif %}
+  <div class="table-wrap section-gap"><table><thead><tr><th>SKU</th><th>Product</th><th>Qty</th><th>Status</th><th>Siklus</th><th>Tindakan</th></tr></thead><tbody>
+    {% for item in qc_follow_up_rows %}<tr>
+      <td><span class="sku-tag">{{ item.po_line.sku.sku }}</span></td><td>{{ item.po_line.sku.product_variant.product.name }}</td><td><strong>{{ item.open_qty|floatformat:"0g" }}</strong></td><td>{{ item.get_status_display }}</td><td>{{ item.rework_cycle }}</td>
+      <td>{% if item.status == 'AWAITING_REWORK' %}<a class="row-link" href="?production_order={{ selected.id }}&follow_up={{ item.id }}&action=complete_rework#qc-follow-up">Catat Rework Selesai →</a>{% elif item.status == 'READY_RE_QC' %}<a class="row-link" href="?production_order={{ selected.id }}&follow_up={{ item.id }}&action=re_qc#qc-follow-up">Catat Re-QC →</a>{% else %}<span class="muted">Selesai</span>{% endif %}</td>
+    </tr>{% empty %}<tr><td colspan="6"><div class="empty-state">Belum ada barang gagal QC pada PO ini.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">ACTIVITY LEDGER</p><h2>{% if selected %}Riwayat {{ selected.po.po_number }}{% else %}Aktivitas Production terbaru{% endif %}</h2></div><span class="pill">Append-only</span></div>
+  <div class="table-wrap production-audit-wrap"><table><thead><tr><th>Submitted</th><th>Tanggal Activity</th><th>No. PO</th><th>Jenis</th><th>Activity</th><th>No. DO</th><th>Qty</th><th>SKU</th><th>Catatan</th><th>User</th><th></th></tr></thead><tbody>
+    {% for row in history %}<tr><td>{{ row.occurred_at|date:"d M Y H:i" }}</td><td>{{ row.activity_date|date:"d M Y"|default:"—" }}</td><td>{{ row.production_order.po.po_number }}</td><td><span class="status-badge {% if row.entry_kind == 'CORRECTION' %}blocked{% else %}ready{% endif %}">{{ row.get_entry_kind_display }}</span></td><td>{{ row.get_activity_type_display }}</td><td>{{ row.delivery_order.number|default:"—" }}</td><td>{{ row.quantity|floatformat:"0g"|default:"—" }}</td><td>{{ row.po_line.sku.sku|default:"—" }}</td><td>{{ row.notes|default:row.description }}</td><td>{{ row.actor.username|default:"System" }}</td><td>{% if row.entry_kind == 'ACTIVITY' and row.activity_type != 'TRIAL_APPROVE' and row.activity_type != 'TRIAL_REVISION' %}<a class="row-link" href="{% url 'production:activity_correction' row.id %}">Koreksi →</a>{% endif %}</td></tr>
+    {% empty %}<tr><td colspan="11"><div class="empty-state">Belum ada Production Activity.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<script>
+(() => {
+  const form = document.querySelector('[data-production-activity-form]');
+  if (!form) return;
+  const select = form.querySelector('[name="activity_type"]');
+  const cmtLines = form.querySelectorAll('[data-activity-cmt-lines]');
+  const cmtLabel = form.querySelector('[data-cmt-quantity-label]');
+  const cmtAvailableLabel = form.querySelector('[data-cmt-available-label]');
+  const cmtAvailable = form.querySelectorAll('[data-cmt-available]');
+  const qc = form.querySelectorAll('[data-activity-qc]');
+  const deliveryOrderPreview = form.closest('article').querySelector('[data-delivery-order-preview]');
+  const deliveryOrderNumber = deliveryOrderPreview?.querySelector('[data-delivery-order-number]');
+  const activityDate = form.querySelector('[name="activity_date"]');
+  form.querySelectorAll('[data-qc-row]').forEach(row => {
+    const inspected = row.querySelector('[data-qc-inspected]');
+    const passed = row.querySelector('[data-qc-passed]');
+    const failed = row.querySelector('[data-qc-failed]');
+    const disposition = row.querySelector('[data-qc-disposition]');
+    const reason = row.querySelector('[data-qc-failure-reason]');
+    const updateFailed = () => {
+      const inspectedQty = Number(inspected.value) || 0;
+      if (Number(passed.value) > inspectedQty) passed.value = String(inspectedQty);
+      passed.max = String(inspectedQty);
+      const failedQty = Math.max(inspectedQty - (Number(passed.value) || 0), 0);
+      failed.value = String(failedQty);
+      failed.textContent = String(failedQty);
+      disposition.required = failedQty > 0;
+      reason.required = failedQty > 0;
+    };
+    inspected.addEventListener('input', updateFailed);
+    passed.addEventListener('input', updateFailed);
+    updateFailed();
+  });
+  const refresh = () => {
+    const type = select.value;
+    const cmt = ['CUT', 'MAKE', 'TRIM', 'WAREHOUSE_DELIVERY', 'REJECTED_WAREHOUSE_DELIVERY'].includes(type);
+    cmtLines.forEach(el => el.hidden = !cmt);
+    if (cmtLabel) cmtLabel.textContent = {CUT: 'Qty Cut', MAKE: 'Qty Make', TRIM: 'Qty Trim', WAREHOUSE_DELIVERY: 'Qty Dikirim', REJECTED_WAREHOUSE_DELIVERY: 'Qty Rejected Dikirim'}[type] || 'Qty Activity';
+    if (cmtAvailableLabel) cmtAvailableLabel.textContent = type === 'CUT' ? 'Sisa Parent SKU' : type === 'REJECTED_WAREHOUSE_DELIVERY' ? 'Rejected Belum Dikirim' : 'Available Qty';
+    cmtAvailable.forEach(el => {
+      el.textContent = el.dataset[type.toLowerCase()] || '0';
+    });
+    qc.forEach(el => el.hidden = type !== 'QC');
+    if (deliveryOrderPreview) deliveryOrderPreview.style.display = ['WAREHOUSE_DELIVERY', 'REJECTED_WAREHOUSE_DELIVERY'].includes(type) ? '' : 'none';
+  };
+  select.addEventListener('change', refresh);
+  activityDate?.addEventListener('change', async () => {
+    if (!activityDate.value || !deliveryOrderPreview || !deliveryOrderNumber) return;
+    const response = await fetch(`${deliveryOrderPreview.dataset.previewUrl}?date=${encodeURIComponent(activityDate.value)}`);
+    if (response.ok) deliveryOrderNumber.textContent = (await response.json()).number;
+  });
+  refresh();
+})();
+</script>
+{% endblock %}

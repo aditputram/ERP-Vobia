@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Daftar Vendor · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">PPIC · VENDOR MASTER</p><h1>Daftar Vendor</h1><p>Master supplier canonical yang dapat dipilih saat membuat Purchase Order.</p></div>
+  <span class="status-chip"><span></span> {{ suppliers|length|floatformat:"0g" }} vendor</span>
+</header>
+
+<section class="dashboard-grid">
+  <article class="panel span-two">
+    <div class="panel-header"><div><p class="eyebrow">VENDOR DIRECTORY</p><h2>Vendor aktif dan histori PO</h2></div></div>
+    {% if suppliers %}<div class="table-wrap"><table><thead><tr><th>Kode</th><th>Nama Vendor</th><th>Contact Person</th><th>Telepon</th><th>Status</th><th>Jumlah PO</th><th>Action</th></tr></thead><tbody>
+    {% for vendor in suppliers %}<tr><td><span class="code-label">{{ vendor.code }}</span></td><td><strong>{{ vendor.name }}</strong></td><td>{{ vendor.contact_name|default:"—" }}</td><td>{{ vendor.phone|default:"—" }}</td><td><span class="status-badge {% if vendor.is_active %}ready{% endif %}">{% if vendor.is_active %}Active{% else %}Inactive{% endif %}</span></td><td>{{ vendor.po_count|floatformat:"0g" }}</td><td>{% if vendor.po_count == 0 %}<form method="post" action="{% url 'purchasing:vendor_delete' vendor.id %}" onsubmit="return confirm('Hapus vendor {{ vendor.name|escapejs }}? Tindakan ini hanya diizinkan jika vendor tidak dipakai Purchase Order.');">{% csrf_token %}<input type="hidden" name="reason" value="Vendor placeholder/tidak terpakai dihapus setelah verifikasi nol Purchase Order."><button class="secondary-button danger-button" type="submit">Hapus</button></form>{% else %}<span class="muted">Terkunci</span>{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty-state">Belum ada vendor.</div>{% endif %}
+  </article>
+  <article class="panel">
+    <div class="panel-header"><div><p class="eyebrow">NEW VENDOR</p><h2>Tambah vendor</h2></div></div>
+    <form method="post" class="stack-form">{% csrf_token %}{{ form.as_p }}<button class="primary-button" type="submit">Simpan Vendor</button></form>
+  </article>
+</section>
+{% endblock %}

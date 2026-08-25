@@ -9,6 +9,7 @@ class RawFile(models.Model):
     class DatasetType(models.TextChoices):
         MASTER_PRODUCT = "MASTER_PRODUCT", "Master Product"
         FIFO_OPENING = "FIFO_OPENING", "FIFO Opening"
+        PO_WIP = "PO_WIP", "PO WIP Migration"
         SALES_SHOPEE = "SALES_SHOPEE", "Sales Shopee"
         SALES_TIKTOK = "SALES_TIKTOK", "Sales TikTok"
         SALES_HISTORICAL = "SALES_HISTORICAL", "Sales Historical"

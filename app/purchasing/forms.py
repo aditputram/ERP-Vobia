@@ -1,4 +1,5 @@
 from django import forms
+from django.core.validators import FileExtensionValidator
 
 from master_data.models import SKU, Supplier
 
@@ -7,6 +8,19 @@ class SupplierForm(forms.ModelForm):
     class Meta:
         model = Supplier
         fields = ("code", "name", "contact_name", "phone")
+
+
+class LegacyWIPSupplierRevisionForm(forms.Form):
+    supplier = forms.ModelChoiceField(
+        label="Vendor yang benar",
+        queryset=Supplier.objects.filter(is_active=True).order_by("name"),
+    )
+    reason = forms.CharField(
+        label="Alasan revisi",
+        min_length=10,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Wajib menyebutkan sumber koreksi vendor agar audit trail lengkap.",
+    )
 
 
 class POHeaderForm(forms.Form):
@@ -23,3 +37,11 @@ class POHeaderForm(forms.Form):
 class ManualPOForm(POHeaderForm):
     sku = forms.ModelChoiceField(queryset=SKU.objects.filter(is_active=True).select_related("product_variant__product"))
     quantity = forms.IntegerField(min_value=1)
+
+
+class POWIPImportUploadForm(forms.Form):
+    file = forms.FileField(
+        label="File PO WIP",
+        validators=[FileExtensionValidator(allowed_extensions=["xlsx", "csv"])],
+        help_text="Gunakan file final berisi NO PO, SKU Induk, SKU, Nama Barang, dan WIP.",
+    )

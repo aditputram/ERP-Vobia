@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}{{ production_order.po.po_number }} · Production Monitoring{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">PRODUCTION · READ ONLY MONITORING</p>
+    <h1>{{ production_order.po.po_number }}</h1>
+    <p>{{ production_order.po.supplier.name }} · {{ snapshot.ordered_qty|floatformat:"0g" }} pcs · Need Month {{ production_order.po.need_month|date:"F Y" }}</p>
+  </div>
+  <div class="header-actions">
+    <a class="primary-button" href="{% url 'production:activity' %}?production_order={{ production_order.id }}">Entry Production Activity</a>
+    <a class="secondary-button" href="{% url 'production:monitoring' %}">Kembali</a>
+  </div>
+</header>
+
+{% if snapshot.plan_status != 'ACTIVE' %}
+<section class="notice warning-notice"><strong>PO ini belum memiliki Production Plan Active.</strong> Isi dan aktifkan seluruh target di Production Plan agar PO masuk Monitoring.</section>
+{% endif %}
+
+<section class="metric-grid six">
+  <article class="metric-card"><span>Passed Process</span><strong class="metric-text">{{ snapshot.passed_process_label }}</strong><small>{% if snapshot.is_late %}Target terlewati{% else %}tahap terakhir selesai{% endif %}</small></article>
+  <article class="metric-card"><span>Next Process</span><strong class="metric-text">{{ snapshot.next_process_label }}</strong><small>mengikuti progres Activity</small></article>
+  <article class="metric-card"><span>PO Qty</span><strong>{{ snapshot.ordered_qty|floatformat:"0g" }}</strong><small>pcs</small></article>
+  <article class="metric-card"><span>Trim selesai</span><strong>{{ snapshot.trim_completed_qty|floatformat:"0g" }}</strong><small>output tersedia untuk QC</small></article>
+  <article class="metric-card"><span>QC Inspected</span><strong>{{ snapshot.inspected_qty|floatformat:"0g" }}</strong><small>Passed {{ snapshot.passed_qty|floatformat:"0g" }} pcs</small></article>
+  <article class="metric-card"><span>Ready Inbound</span><strong>{{ snapshot.ready_inbound_qty|floatformat:"0g" }}</strong><small>QC Passed − Received</small></article>
+</section>
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">PRODUCTION PLAN</p><h2>Target dan alur kerja</h2></div><span class="status-badge {% if snapshot.plan_status == 'ACTIVE' %}ready{% endif %}">{{ snapshot.plan_status }}</span></div>
+  <ol class="production-roadmap production-roadmap-seven">
+    <li><span>01</span><div><strong>Pembelian Material</strong><small>{{ snapshot.plan.target_material_purchase_date|date:"d M Y"|default:"Belum direncanakan" }}</small></div></li>
+    <li><span>02</span><div><strong>Trial Production</strong><small>{{ snapshot.plan.target_trial_date|date:"d M Y"|default:"Belum direncanakan" }}</small></div></li>
+    <li><span>03</span><div><strong>Cut · Potong</strong><small>{{ snapshot.plan.target_cut_start_date|date:"d M"|default:"—" }} – {{ snapshot.plan.target_cut_end_date|date:"d M Y"|default:"—" }}</small></div></li>
+    <li><span>04</span><div><strong>Make · Jahit</strong><small>{{ snapshot.plan.target_make_start_date|date:"d M"|default:"—" }} – {{ snapshot.plan.target_make_end_date|date:"d M Y"|default:"—" }}</small></div></li>
+    <li><span>05</span><div><strong>Trim · Finishing</strong><small>{{ snapshot.plan.target_trim_start_date|date:"d M"|default:"—" }} – {{ snapshot.plan.target_trim_end_date|date:"d M Y"|default:"—" }}</small></div></li>
+    <li><span>06</span><div><strong>Quality Control</strong><small>{{ snapshot.plan.target_qc_start_date|date:"d M"|default:"—" }} – {{ snapshot.plan.target_qc_end_date|date:"d M Y"|default:"—" }}</small></div></li>
+    <li><span>07</span><div><strong>Target Inbound</strong><small>{{ snapshot.plan.target_inbound_date|date:"d M Y"|default:"Belum direncanakan" }}</small></div></li>
+  </ol>
+</section>
+
+<section class="section-gap">
+  <div class="panel-header"><div><p class="eyebrow">LIVE PROGRESS</p><h2>Status berdasarkan Activity yang sudah disubmit</h2></div><span class="pill">Tidak dapat diedit di halaman ini</span></div>
+  <div class="production-monitor-card-grid">
+    <article class="panel production-read-card">
+      <p class="eyebrow">01 · MATERIAL</p><h2>{{ snapshot.material_status_display }}</h2>
+      <dl class="compact-definition-list"><div><dt>Aktual pembelian</dt><dd>{{ snapshot.stages.MATERIAL_PURCHASE.actual_start_date|date:"d M Y"|default:"—" }}</dd></div><div><dt>Material tiba</dt><dd>{{ snapshot.stages.MATERIAL_PURCHASE.material_arrival_date|date:"d M Y"|default:"—" }}</dd></div></dl>
+    </article>
+    <article class="panel production-read-card">
+      <p class="eyebrow">02 · TRIAL</p><h2>{% if latest_trial %}R{{ latest_trial.revision }} · {{ latest_trial.get_status_display }}{% else %}Belum dimulai{% endif %}</h2>
+      <dl class="compact-definition-list"><div><dt>Tanggal trial</dt><dd>{{ latest_trial.trial_date|date:"d M Y"|default:"—" }}</dd></div><div><dt>Keputusan</dt><dd>{{ latest_trial.decided_at|date:"d M Y H:i"|default:"—" }}</dd></div></dl>
+    </article>
+    {% for entry in stage_entries %}
+    <article class="panel production-read-card">
+      <p class="eyebrow">{{ entry.step_number }} · CMT</p>
+      <div class="panel-header"><h2>{{ entry.stage.get_stage_display }}</h2><span class="status-badge {{ entry.timing.status_class }}">{{ entry.timing.status }}</span></div>
+      <div class="production-progress"><span style="width: {{ entry.stage.progress_percent }}%"></span></div>
+      <div class="cmt-mini-grid"><div><span>Tersedia</span><strong>{{ entry.quantity.available_qty|floatformat:"0g" }}</strong></div><div><span>Selesai</span><strong>{{ entry.quantity.completed_qty|floatformat:"0g" }}</strong></div><div><span>Sisa</span><strong>{{ entry.quantity.remaining_qty|floatformat:"0g" }}</strong></div></div>
+      <dl class="compact-definition-list"><div><dt>Target mulai</dt><dd>{{ entry.timing.target_start|date:"d M Y"|default:"—" }}</dd></div><div><dt>Target selesai</dt><dd>{{ entry.timing.target_end|date:"d M Y"|default:"—" }}</dd></div><div><dt>Aktual mulai</dt><dd>{{ entry.timing.actual_start|date:"d M Y"|default:"—" }}</dd></div><div><dt>Aktual selesai</dt><dd>{{ entry.timing.actual_end|date:"d M Y"|default:"—" }}</dd></div></dl>
+      {% include "production/_process_detail.html" with detail=entry.detail detail_id=entry.detail_id %}
+    </article>
+    {% endfor %}
+    <article class="panel production-read-card">
+      <p class="eyebrow">06 · QUALITY CONTROL</p>
+      <div class="panel-header"><h2>{% if snapshot.qc_open %}Terbuka untuk output Trim{% elif snapshot.inspected_qty > 0 %}Selesai untuk output tersedia{% else %}Menunggu output Trim{% endif %}</h2><span class="status-badge {{ snapshot.timing.QC.status_class }}">{{ snapshot.timing.QC.status }}</span></div>
+      <div class="cmt-mini-grid"><div><span>Trim</span><strong>{{ snapshot.trim_completed_qty|floatformat:"0g" }}</strong></div><div><span>Inspected</span><strong>{{ snapshot.inspected_qty|floatformat:"0g" }}</strong></div><div><span>Sisa QC</span><strong>{{ snapshot.remaining_qc_qty|floatformat:"0g" }}</strong></div></div>
+      <dl class="compact-definition-list"><div><dt>Qty QC Passed</dt><dd>{{ snapshot.passed_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Qty Rework &amp; Re-QC</dt><dd>{{ snapshot.rework_re_qc_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Qty Rejected</dt><dd>{{ snapshot.rejected_qty|floatformat:"0g" }} pcs</dd></div></dl>
+      <dl class="compact-definition-list"><div><dt>Target mulai</dt><dd>{{ snapshot.timing.QC.target_start|date:"d M Y"|default:"—" }}</dd></div><div><dt>Target selesai</dt><dd>{{ snapshot.timing.QC.target_end|date:"d M Y"|default:"—" }}</dd></div><div><dt>Aktual mulai</dt><dd>{{ snapshot.timing.QC.actual_start|date:"d M Y"|default:"—" }}</dd></div><div><dt>Aktual selesai</dt><dd>{{ snapshot.timing.QC.actual_end|date:"d M Y"|default:"—" }}</dd></div></dl>
+      {% include "production/_process_detail.html" with detail=qc_detail detail_id="process-detail-qc" %}
+    </article>
+    <article class="panel production-read-card" id="qc-follow-up">
+      <p class="eyebrow">06B · QC FOLLOW-UP</p>
+      <div class="panel-header"><h2>Rework dan Re-QC</h2><span class="pill">{{ qc_follow_up_rows.count }} record</span></div>
+      <p class="muted">Monitoring saja. Pencatatan tetap melalui Production Activity.</p>
+      <div class="table-wrap"><table><thead><tr><th>SKU</th><th>Qty</th><th>Status</th><th></th></tr></thead><tbody>
+        {% for item in qc_follow_up_rows %}<tr><td><span class="sku-tag">{{ item.po_line.sku.sku }}</span></td><td><strong>{{ item.open_qty|floatformat:"0g" }}</strong></td><td>{{ item.get_status_display }}</td><td>{% if item.status == 'AWAITING_REWORK' %}<a class="row-link" href="{% url 'production:activity' %}?production_order={{ production_order.id }}&follow_up={{ item.id }}&action=complete_rework#qc-follow-up">Catat Rework →</a>{% elif item.status == 'READY_RE_QC' %}<a class="row-link" href="{% url 'production:activity' %}?production_order={{ production_order.id }}&follow_up={{ item.id }}&action=re_qc#qc-follow-up">Catat Re-QC →</a>{% else %}<span class="muted">Selesai</span>{% endif %}</td></tr>
+        {% empty %}<tr><td colspan="4"><div class="empty-state compact-empty">Belum ada barang yang memerlukan tindak lanjut QC.</div></td></tr>{% endfor %}
+      </tbody></table></div>
+    </article>
+    <article class="panel production-read-card">
+      <p class="eyebrow">07 · WAREHOUSE HANDOFF</p>
+      <div class="panel-header"><h2>{{ snapshot.ready_to_deliver_qty|floatformat:"0g" }} pcs Siap Dikirim</h2><span class="status-badge {{ snapshot.timing.INBOUND.status_class }}">{{ snapshot.timing.INBOUND.status }}</span></div>
+      <dl class="compact-definition-list"><div><dt>QC Passed</dt><dd>{{ snapshot.passed_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Delivering</dt><dd>{{ snapshot.delivering_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Inbound</dt><dd>{{ snapshot.received_qty|floatformat:"0g" }} pcs</dd></div></dl>
+      <dl class="compact-definition-list"><div><dt>Target inbound</dt><dd>{{ snapshot.timing.INBOUND.target_start|date:"d M Y"|default:"—" }}</dd></div><div><dt>Aktual inbound</dt><dd>{{ snapshot.timing.INBOUND.actual_start|date:"d M Y"|default:"—" }}</dd></div></dl>
+      {% include "production/_process_detail.html" with detail=inbound_detail detail_id="process-detail-inbound" %}
+    </article>
+  </div>
+</section>
+
+<section class="panel section-gap" id="cogs-finalization">
+  <div class="panel-header"><div><p class="eyebrow">08 · COSTING GATE</p><h2>Finalisasi Quantity &amp; COGS</h2></div><span class="status-badge {{ cogs_finalization.status_class }}">{{ cogs_finalization.status }}</span></div>
+  <p class="muted">Selisih cutting dan reject dibebankan ke Parent SKU, lalu total biaya Parent SKU dibagi rata ke seluruh unit sellable di dalamnya. COGS snapshot PO tetap tersimpan sebagai nilai awal.</p>
+  <div class="cmt-mini-grid section-gap"><div><span>PO Qty</span><strong>{{ cogs_finalization.total_ordered_qty|floatformat:"0g" }}</strong></div><div><span>Final Sellable</span><strong>{{ cogs_finalization.total_sellable_qty|floatformat:"0g" }}</strong></div><div><span>Rejected</span><strong>{{ cogs_finalization.total_rejected_qty|floatformat:"0g" }}</strong></div><div><span>Cutting Shortage</span><strong>{{ cogs_finalization.total_shortage_qty|floatformat:"0g" }}</strong></div><div><span>Cutting Excess</span><strong>{{ cogs_finalization.total_excess_qty|floatformat:"0g" }}</strong></div></div>
+  <div class="table-wrap section-gap"><table><thead><tr><th>Parent SKU</th><th>SKU</th><th>Product</th><th>Size</th><th>PO Qty</th><th>Final Sellable</th><th>Rejected</th><th>Shortage</th><th>Excess</th><th>COGS Awal</th><th>COGS Final</th><th>Selisih</th></tr></thead><tbody>
+    {% for row in cogs_finalization.rows %}<tr><td><span class="sku-tag">{{ row.parent_sku }}</span></td><td><span class="sku-tag">{{ row.sku }}</span></td><td>{{ row.product_name }}</td><td>{{ row.size }}</td><td>{{ row.ordered_qty|floatformat:"0g" }}</td><td><strong>{{ row.sellable_qty|floatformat:"0g" }}</strong></td><td>{{ row.rejected_qty|floatformat:"0g" }}</td><td>{{ row.shortage_qty|floatformat:"0g" }}</td><td>{{ row.excess_qty|floatformat:"0g" }}</td><td>Rp {{ row.initial_unit_cogs|floatformat:"0g" }}</td><td><strong>Rp {{ row.final_unit_cogs|floatformat:"0g" }}</strong></td><td>{% if row.unit_cogs_increase > 0 %}+{% endif %}Rp {{ row.unit_cogs_increase|floatformat:"0g" }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  <div class="panel-header section-gap"><div><span class="muted">Total biaya PO</span><h2>Rp {{ cogs_finalization.total_po_cost|floatformat:"0g" }}</h2></div><div class="header-actions">
+    {% if cogs_finalization.approved %}<span class="pill">Approved by {{ cogs_finalization.approved.approved_by.username }} · {{ cogs_finalization.approved.approved_at|date:"d M Y H:i" }}</span>
+    {% elif cogs_finalization.can_approve %}<form method="post" action="{% url 'production:approve_cogs_finalization' production_order.id %}">{% csrf_token %}<button class="primary-button" type="submit" onclick="return confirm('Approve Final Quantity & COGS? Nilai ini akan mengunci finalisasi dan merevaluasi FIFO.')">Approve Final Quantity &amp; COGS</button></form>
+    {% elif cogs_finalization.ready %}<span class="pill">Menunggu approval Manager</span>{% endif %}
+  </div></div>
+  {% if cogs_finalization.blockers %}<div class="form-alert"><strong>Belum dapat di-approve:</strong><ul>{% for blocker in cogs_finalization.blockers %}<li>{{ blocker }}</li>{% endfor %}</ul></div>{% endif %}
+</section>
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">PO PRODUCT SCOPE</p><h2>{{ trial_product_count }} Parent SKU / Product</h2></div><span class="pill">{{ production_order.po.lines.count }} SKU line</span></div>
+  <p class="muted">Klik Parent SKU atau Product untuk melihat rincian SKU, Size, dan Qty pada Purchase Order.</p>
+  <div class="table-wrap">
+    <table class="po-product-scope-table">
+      <thead><tr><th>Parent SKU</th><th>Product</th><th>Size</th><th>Quantity</th></tr></thead>
+      <tbody>
+        {% for row in trial_products %}
+        <tr class="po-product-parent-row">
+          <td>
+            <button type="button" class="po-product-scope-toggle" data-po-product-toggle="{{ row.detail_id }}" aria-controls="{{ row.detail_id }}" aria-expanded="false">
+              <span class="sku-tag">{{ row.parent_sku }}</span><span class="po-product-scope-chevron" aria-hidden="true">⌄</span>
+            </button>
+          </td>
+          <td>
+            <button type="button" class="po-product-scope-toggle product-name-toggle" data-po-product-toggle="{{ row.detail_id }}" aria-controls="{{ row.detail_id }}" aria-expanded="false">
+              <strong>{{ row.product_name }}</strong><span class="po-product-scope-chevron" aria-hidden="true">⌄</span>
+            </button>
+          </td>
+          <td>{{ row.size_display }}</td>
+          <td><strong>{{ row.total_qty|floatformat:"0g" }} pcs</strong></td>
+        </tr>
+        <tr id="{{ row.detail_id }}" class="po-product-detail-row" hidden>
+          <td colspan="4">
+            <div class="po-product-detail-panel">
+              <p><strong>SKU Detail · {{ row.product_name }}</strong></p>
+              <table>
+                <thead><tr><th>SKU</th><th>Size</th><th>Qty</th></tr></thead>
+                <tbody>{% for sku_line in row.sku_lines %}<tr><td><span class="sku-tag">{{ sku_line.sku }}</span></td><td>{{ sku_line.size }}</td><td><strong>{{ sku_line.quantity|floatformat:"0g" }} pcs</strong></td></tr>{% endfor %}</tbody>
+              </table>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4"><div class="empty-state">Belum ada produk di Purchase Order.</div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if production_order.trials.all %}
+<section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">TRIAL HISTORY</p><h2>Riwayat Trial Production</h2></div><span class="pill">Tidak menimpa revisi lama</span></div><div class="table-wrap"><table><thead><tr><th>Revision</th><th>Status</th><th>Target</th><th>Trial</th><th>Catatan</th><th>Actor</th></tr></thead><tbody>{% for trial in production_order.trials.all %}<tr><td>R{{ trial.revision }}</td><td>{{ trial.get_status_display }}</td><td>{{ trial.target_trial_date|date:"d M Y"|default:"—" }}</td><td>{{ trial.trial_date|date:"d M Y"|default:"—" }}</td><td>{{ trial.notes|default:trial.decision_notes|default:"—"|linebreaksbr }}</td><td>{% if trial.decided_by %}{{ trial.decided_by.username }}{% elif trial.submitted_by %}{{ trial.submitted_by.username }}{% else %}{{ trial.started_by.username }}{% endif %}</td></tr>{% endfor %}</tbody></table></div></section>
+{% endif %}
+
+<section class="panel section-gap" id="audit-trail">
+  <div class="panel-header"><div><p class="eyebrow">AUDIT TRAIL</p><h2>Seluruh riwayat perubahan PO Production</h2></div><span class="pill">Append-only</span></div>
+  <p class="muted">Semua Activity dan koreksi yang berhubungan dengan PO ini muncul di sini. Activity asli tidak dapat diedit atau dihapus.</p>
+  <form method="get" action="{% url 'production:detail' production_order.id %}#audit-trail" class="inventory-filter-grid section-gap">
+    <label>Filter Activity
+      <select name="activity">
+        <option value="">Semua Activity</option>
+        {% for activity_label in audit_activity_choices %}<option value="{{ activity_label }}" {% if selected_audit_activity == activity_label %}selected{% endif %}>{{ activity_label }}</option>{% endfor %}
+      </select>
+    </label>
+    <button class="primary-button" type="submit">Terapkan</button>
+    {% if selected_audit_activity %}<a class="secondary-button" href="{% url 'production:detail' production_order.id %}#audit-trail">Reset</a>{% endif %}
+  </form>
+  <div class="table-wrap production-audit-wrap"><table><thead><tr><th>Waktu submit</th><th>Tanggal activity</th><th>Jenis</th><th>Activity</th><th>Qty</th><th>SKU</th><th>Keterangan</th><th>User</th></tr></thead><tbody>
+    {% for activity in activities %}<tr><td>{{ activity.occurred_at|date:"d M Y H:i" }}</td><td>{{ activity.activity_date|date:"d M Y"|default:"—" }}</td><td><span class="status-badge {{ activity.entry_kind_class }}">{{ activity.entry_kind_display }}</span></td><td>{{ activity.activity_label }}</td><td>{{ activity.quantity|floatformat:"0g"|default:"—" }}</td><td>{{ activity.sku|default:"—" }}</td><td>{{ activity.description }}</td><td>{{ activity.actor_username }}</td></tr>
+    {% empty %}<tr><td colspan="8"><div class="empty-state">Belum ada riwayat Production.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

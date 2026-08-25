@@ -14,6 +14,7 @@ urlpatterns = [
     path("traffic/", include("traffic.urls")),
     path("merchandising/", include("merchandising.urls")),
     path("purchasing/", include("purchasing.urls")),
+    path("production/", include("production.urls")),
     path("inventory/", include("inventory.urls")),
     path("reconciliation/", include("reconciliation.urls")),
     path("master-data/", include("master_data.urls")),

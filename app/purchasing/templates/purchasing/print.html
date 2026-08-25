@@ -1,1 +1,152 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><title>{{ po.po_number }}</title><style>@page{size:A4;margin:18mm}body{font:12px Arial;color:#111}h1{font-size:24px;margin:0 0 8px}.meta{margin:22px 0;line-height:1.8}table{width:100%;border-collapse:collapse}th,td{padding:9px;border:1px solid #bbb;text-align:left}th{background:#eee}.right{text-align:right}.print{margin:0 0 20px}@media print{.print{display:none}}</style></head><body><button class="print" onclick="window.print()">Print / Save PDF</button><h1>VOBIA PURCHASE ORDER</h1><strong>{{ po.po_number }}</strong><div class="meta">Supplier: {{ po.supplier.name }}<br>Alamat: {{ po.supplier.address|default:"—" }}<br>Need Month: {{ po.need_month|date:"F Y" }}<br>Required Arrival: {{ po.required_arrival|date:"d M Y"|default:"—" }}<br>Released: {{ po.released_at|date:"d M Y H:i" }}</div><table><thead><tr><th>SKU</th><th>Product</th><th class="right">Qty</th><th class="right">Unit COGS</th><th class="right">Total</th></tr></thead><tbody>{% for line in po.lines.all %}{% widthratio line.ordered_qty 1 line.cogs_snapshot as line_total %}<tr><td>{{ line.sku.sku }}</td><td>{{ line.sku.product_variant.product.name }}</td><td class="right">{{ line.ordered_qty|floatformat:"0g" }}</td><td class="right">Rp {{ line.cogs_snapshot|floatformat:"0g" }}</td><td class="right">Rp {{ line_total|floatformat:"0g" }}</td></tr>{% endfor %}</tbody></table><p style="margin-top:40px">Catatan: {{ po.notes|default:"—" }}</p></body></html>
+{% load static %}
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ po.po_number|default:"Draft PO" }} · Print</title>
+  <style>
+    :root{--ink:#111714;--muted:#66706b;--line:#aab2ae;--brand:#6b8f16;--paper:#fff;--screen:#e9ebe8}
+    *{box-sizing:border-box}
+    @page{size:A4;margin:14mm}
+    body{margin:0;background:var(--screen);color:var(--ink);font-family:Arial,Helvetica,sans-serif;font-size:10.5px;line-height:1.4}
+    .toolbar{position:sticky;top:0;z-index:4;display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;background:rgba(17,23,20,.92)}
+    .toolbar button,.toolbar a{border:1px solid #4b554f;border-radius:7px;padding:9px 14px;background:#fff;color:#111714;font-weight:700;text-decoration:none;cursor:pointer}
+    .toolbar .primary{border-color:#c8ef52;background:#c8ef52}
+    .sheet{width:210mm;min-height:297mm;margin:18px auto;padding:14mm;background:var(--paper);box-shadow:0 12px 40px rgba(0,0,0,.14)}
+    .top{display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:start}
+    .logo{display:block;width:138px;height:auto}
+    .document-title{text-align:right}
+    .document-title h1{margin:0 0 12px;font-size:22px;line-height:1;letter-spacing:-.45px;text-transform:uppercase}
+    .doc-meta{display:grid;grid-template-columns:1fr auto;gap:5px 18px;margin-left:auto;max-width:285px;text-align:left}
+    .doc-meta dt{color:#3f4743}.doc-meta dd{margin:0;text-align:right;font-weight:700}
+    .vendor-block{margin:15px 0 16px}
+    .label{margin:0 0 7px;color:#505954;font-size:8px;font-weight:800;letter-spacing:.8px;text-transform:uppercase}
+    .party h2{margin:0 0 4px;font-size:17px;line-height:1.1}
+    .party p{margin:2px 0;color:#303734}
+    .muted{color:var(--muted)!important}
+    .items{width:100%;border-collapse:collapse;border-top:1px solid var(--line);font-size:9.5px}
+    .items thead{display:table-header-group}
+    .items th{padding:9px 6px;border-bottom:1px solid var(--line);font-size:7.5px;letter-spacing:.45px;text-align:left;text-transform:uppercase}
+    .items td{padding:6px;border-bottom:1px solid #ccd1ce;vertical-align:top}
+    .items tr{break-inside:avoid}
+    .item-name{font-weight:700}.item-sku{margin-top:1px;color:var(--muted);font-size:8px}
+    .center{text-align:center!important}.right{text-align:right!important}.nowrap{white-space:nowrap}
+    .summary{display:flex;flex-direction:column;gap:0;margin-top:12px;break-inside:avoid}
+    .approval-block{order:2;margin-top:28px;padding-top:3px;font-size:9px}
+    .approval-list{display:grid;grid-template-columns:72px 1fr;gap:4px 10px;margin:0}
+    .approval-list dt{color:#4d5551}.approval-list dd{margin:0;font-weight:700}
+    .digital-sign-note{margin:10px 0 0;color:var(--muted);font-size:8px;font-style:italic}
+    .totals{order:1;align-self:flex-end;width:280px;border-collapse:collapse}
+    .totals th,.totals td{padding:5px 0;text-align:left}.totals td{text-align:right;font-weight:700}
+    .totals .grand th,.totals .grand td{border:1px solid #59615d;padding:10px 11px;font-size:14px}
+    .totals .grand th{border-right:0}.totals .grand td{border-left:0}
+    .summary.summary--compact{display:grid;grid-template-columns:1fr 280px;gap:46px;align-items:start}
+    .summary.summary--compact .approval-block{order:1;margin-top:0}
+    .summary.summary--compact .totals{order:2;align-self:start}
+    @media print{
+      body{background:#fff}
+      .toolbar{display:none}
+      .sheet{width:auto;min-height:auto;margin:0;padding:0;box-shadow:none}
+      a{color:inherit;text-decoration:none}
+    }
+    @media(max-width:850px){.sheet{width:100%;min-height:0;margin:0;padding:24px}.top{grid-template-columns:1fr}.document-title{text-align:left}.doc-meta{margin-left:0}.toolbar{position:static}.items{min-width:680px}.table-scroll{overflow:auto}.summary.summary--compact{display:flex}.summary.summary--compact .approval-block{order:2;margin-top:28px}.summary.summary--compact .totals{order:1;align-self:flex-end}}
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <a href="{% url 'purchasing:po_detail' po.id %}">Kembali</a>
+    <button class="primary" type="button" onclick="window.print()">Print / Save PDF</button>
+  </div>
+  <main class="sheet">
+    <section class="top">
+      <div>
+        <img class="logo" src="{% static 'img/logo-vobia.png' %}" alt="Vobia">
+      </div>
+      <div class="document-title">
+        <h1>Purchase Order</h1>
+        <dl class="doc-meta">
+          <dt>PO Number</dt><dd>{{ po.po_number|default:"Draft" }}</dd>
+          <dt>PO Date</dt><dd>{{ po_date|date:"d M Y" }}</dd>
+          <dt>Required Arrival</dt><dd>{{ po.required_arrival|date:"d M Y"|default:"—" }}</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="vendor-block">
+      <div class="party">
+        <p class="label">Vendor</p>
+        <h2>{{ po.supplier.name }}</h2>
+        {% if po.supplier.contact_name %}<p>{{ po.supplier.contact_name }}</p>{% endif %}
+        {% if po.supplier.address %}<p>{{ po.supplier.address }}</p>{% endif %}
+        {% if po.supplier.phone %}<p>{{ po.supplier.phone }}</p>{% endif %}
+        {% if po.supplier.email %}<p>{{ po.supplier.email }}</p>{% endif %}
+      </div>
+    </section>
+
+    <div class="table-scroll">
+      <table class="items">
+        <thead><tr><th>Item Description</th><th class="center">Qty</th><th class="center">Unit</th><th class="right">Unit COGS</th><th class="right">Total Cost</th></tr></thead>
+        <tbody>
+          {% for item in print_lines %}<tr>
+            <td><div class="item-name">{{ item.line.sku.product_variant.product.name }}</div><div class="item-sku">SKU: {{ item.line.sku.sku }}</div></td>
+            <td class="center">{{ item.line.ordered_qty|floatformat:"0g" }}</td>
+            <td class="center">Pcs</td>
+            <td class="right nowrap">{% if item.line.cogs_snapshot != None %}Rp {{ item.line.cogs_snapshot|floatformat:"0g" }}{% else %}—{% endif %}</td>
+            <td class="right nowrap">{% if item.line_total != None %}Rp {{ item.line_total|floatformat:"0g" }}{% else %}—{% endif %}</td>
+          </tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <section class="summary">
+      <div class="approval-block">
+        <dl class="approval-list">
+          <dt>Created By</dt><dd>{{ po.created_by.username }}</dd>
+          <dt>Checked By</dt><dd>—</dd>
+          <dt>Approved By</dt><dd>{{ po.released_by.username|default:"—" }}</dd>
+        </dl>
+        <p class="digital-sign-note">Create, Check &amp; Approve by Digital Sign</p>
+      </div>
+      <table class="totals">
+        <tr><th>Subtotal</th><td>Rp {{ subtotal|floatformat:"0g" }}</td></tr>
+        <tr><th>Total Qty</th><td>{{ total_qty|floatformat:"0g" }} pcs</td></tr>
+        <tr class="grand"><th>Total Cost</th><td>Rp {{ subtotal|floatformat:"0g" }}</td></tr>
+      </table>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const summary = document.querySelector('.summary');
+      const sheet = document.querySelector('.sheet');
+      const items = document.querySelector('.items');
+      if (!summary || !sheet || !items) return;
+
+      const setSummaryLayout = () => {
+        if (window.matchMedia('(max-width: 850px)').matches) {
+          summary.classList.remove('summary--compact');
+          return;
+        }
+
+        summary.classList.remove('summary--compact');
+        const sheetRect = sheet.getBoundingClientRect();
+        const sheetStyle = getComputedStyle(sheet);
+        const contentTop = sheetRect.top + parseFloat(sheetStyle.paddingTop || 0);
+        const a4ContentHeight = sheetRect.width * (269 / 210);
+        const usedHeight = Math.max(0, items.getBoundingClientRect().bottom - contentTop);
+        const remainingOnPage = a4ContentHeight - usedHeight;
+        const stackedHeight = summary.getBoundingClientRect().height + parseFloat(getComputedStyle(summary).marginTop || 0);
+
+        if (remainingOnPage < stackedHeight) {
+          summary.classList.add('summary--compact');
+        }
+      };
+
+      window.addEventListener('load', setSummaryLayout);
+      window.addEventListener('resize', setSummaryLayout);
+      window.addEventListener('beforeprint', setSummaryLayout);
+      setSummaryLayout();
+    })();
+  </script>
+</body>
+</html>

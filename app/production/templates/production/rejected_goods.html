@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Rejected Goods · Production{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">PRODUCTION · QUALITY CONTROL</p><h1>Rejected Goods</h1><p>Daftar barang yang diputuskan reject permanen dan tidak dapat dijual.</p></div>
+  <div class="header-actions"><a class="secondary-button" href="{% url 'production:monitoring' %}">Production Monitoring</a></div>
+</header>
+
+<section class="metric-grid">
+  <article class="metric-card"><span>Rejected Record</span><strong>{{ rows|length }}</strong><small>hasil QC final</small></article>
+  <article class="metric-card"><span>Rejected Qty</span><strong>{{ total_rejected_qty|floatformat:"0g" }}</strong><small>pcs tidak sellable</small></article>
+  <article class="metric-card"><span>Belum Dikirim</span><strong>{{ delivery_totals.NOT_SHIPPED|floatformat:"0g" }}</strong><small>pcs</small></article>
+  <article class="metric-card"><span>Sedang Dikirim</span><strong>{{ delivery_totals.IN_TRANSIT|floatformat:"0g" }}</strong><small>pcs</small></article>
+  <article class="metric-card"><span>Inbound</span><strong>{{ delivery_totals.INBOUND|floatformat:"0g" }}</strong><small>pcs diterima gudang</small></article>
+</section>
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">REJECTED LEDGER</p><h2>Seluruh Rejected Goods</h2></div><span class="pill">Otomatis dari QC</span></div>
+  <p class="muted">Data masuk otomatis ketika tindak lanjut QC atau Re-QC diputuskan Rejected.</p>
+  <div class="table-wrap"><table><thead><tr><th>Tanggal Reject</th><th>PO Production</th><th>Supplier</th><th>SKU</th><th>Product</th><th>Size</th><th>Qty</th><th>Alasan Gagal</th><th>Status Pengiriman</th><th>Dicatat oleh</th><th></th></tr></thead><tbody>
+    {% for row in rows %}<tr>
+      <td>{{ row.rejected_date|date:"d M Y" }}</td>
+      <td><strong>{{ row.item.po_line.po.po_number }}</strong></td>
+      <td>{{ row.item.po_line.po.supplier.name }}</td>
+      <td><span class="sku-tag">{{ row.item.po_line.sku.sku }}</span></td>
+      <td>{{ row.item.po_line.sku.product_variant.product.name }}</td>
+      <td>{{ row.item.po_line.sku.size|default:"—" }}</td>
+      <td><strong>{{ row.item.open_qty|floatformat:"0g" }} pcs</strong></td>
+      <td>{{ row.reason }}</td>
+      <td><span class="status-badge {% if row.item.delivery_status == 'INBOUND' %}ready{% elif row.item.delivery_status == 'IN_TRANSIT' %}parsing{% else %}blocked{% endif %}">{{ row.item.get_delivery_status_display }}</span></td>
+      <td>{{ row.actor.username }}</td>
+      <td><a class="row-link" href="{% url 'production:detail' row.item.po_line.po.production_order.id %}#qc-follow-up">Detail PO →</a></td>
+    </tr>{% empty %}<tr><td colspan="11"><div class="empty-state"><strong>Belum ada Rejected Goods.</strong><br>Barang akan muncul otomatis setelah keputusan QC final Rejected.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

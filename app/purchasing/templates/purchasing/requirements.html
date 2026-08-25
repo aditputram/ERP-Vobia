@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}PPIC Requirement · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">PPIC · REQUIREMENT</p><h1>PPIC Requirement</h1><p>Mengacu ke sheet PPIC Requirement (PPIC Generator) Vobia MD 2026. Hanya Final Approved Incoming yang boleh membentuk requirement.</p></div>
+  <a class="primary-button" href="{% url 'purchasing:generator' %}">Buka PO Generator</a>
+</header>
+
+<form method="get" class="panel inventory-filter section-gap" data-auto-submit>
+  <div class="inventory-filter-grid">
+    <label>Need Month<select name="need_month"><option value="">All Months</option>{% for month in need_month_options %}<option value="{{ month|date:'Y-m' }}" {% if selected_need_month == month|date:'Y-m' %}selected{% endif %}>{{ month|date:"F Y" }}</option>{% endfor %}</select></label>
+    <label>Product Status<select name="status"><option value="">All Product Status</option>{% for option in status_options %}<option value="{{ option.value }}" {% if selected_status == option.value %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+    <label>Category<select name="category"><option value="">All Categories</option>{% for option in category_options %}<option value="{{ option.value }}" {% if selected_category == option.value %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+    <a class="secondary-button" href="{% url 'purchasing:requirements' %}">Reset</a>
+  </div>
+</form>
+
+<section class="metric-grid section-gap">
+  <article class="metric-card"><span>Total requirement</span><strong>{{ total_approved|floatformat:"0g" }} pcs</strong><small>Final Approved Incoming</small></article>
+  <article class="metric-card"><span>Sudah dialokasikan</span><strong>{{ total_ordered|floatformat:"0g" }} pcs</strong><small>PO yang sudah dibuat</small></article>
+  <article class="metric-card"><span>Sisa requirement</span><strong>{{ total_remaining|floatformat:"0g" }} pcs</strong><small>Eligible ke PO Generator</small></article>
+  <article class="metric-card"><span>Requirement line</span><strong>{{ requirement_line_count|floatformat:"0g" }}</strong><small>Need Month + SKU</small></article>
+</section>
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">CANONICAL REQUIREMENT</p><h2>Daftar kebutuhan PPIC</h2></div><span class="pill">{% if selected_need_month_date %}{{ selected_need_month_date|date:"F Y" }} · {% endif %}Need Month + SKU</span></div>
+  {% if allocation_status_options %}
+  <form method="get" class="requirement-status-form report-filter" data-auto-submit>
+    <input type="hidden" name="need_month" value="{{ selected_need_month }}">
+    <input type="hidden" name="status" value="{{ selected_status }}">
+    <input type="hidden" name="category" value="{{ selected_category }}">
+    <div class="table-wrap"><table class="requirement-table"><thead><tr><th>Need Month</th><th>SKU</th><th>Product</th><th>Approved Qty</th><th>Ordered Qty</th><th>Remaining Qty</th><th class="requirement-status-heading">
+      <div class="filter-field multi-select-field requirement-status-select" data-multi-select data-all-label="All Status">
+        <span class="filter-label">Status</span>
+        <button class="multi-select-trigger" type="button" aria-expanded="false"><span data-filter-summary>{% if selected_allocation_statuses %}{{ selected_allocation_statuses|length }} selected{% else %}All Status{% endif %}</span><span aria-hidden="true">⌄</span></button>
+        <div class="multi-select-menu" data-filter-menu hidden>
+          <label class="multi-select-search">Search Status<input type="search" placeholder="Cari status..." autocomplete="off" data-filter-search></label>
+          <div class="multi-select-toolbar"><span data-filter-result-count>{{ allocation_status_options|length }} pilihan</span><button type="button" data-filter-clear>Clear All</button></div>
+          <div class="multi-select-options">{% for option in allocation_status_options %}<label class="multi-select-option"><input type="checkbox" name="allocation_status" value="{{ option.value }}" {% if option.value in selected_allocation_statuses %}checked{% endif %}><span>{{ option.label }}</span></label>{% endfor %}</div>
+        </div>
+      </div>
+    </th></tr></thead><tbody>
+    {% for row in requirements %}<tr><td>{{ row.need_month|date:"F Y" }}</td><td><span class="code-label">{{ row.sku.sku }}</span></td><td>{{ row.sku.product_variant.product.name }}</td><td>{{ row.approved_qty|floatformat:"0g" }}</td><td>{{ row.ordered_qty|floatformat:"0g" }}</td><td><strong>{{ row.remaining_qty|floatformat:"0g" }}</strong></td><td><span class="status-badge {% if row.ui_status == 'Open' %}ready{% elif row.ui_status == 'Fully Allocated' %}committed{% endif %}">{{ row.ui_status }}</span></td></tr>{% empty %}<tr><td colspan="7"><div class="empty-state">Tidak ada requirement dengan Status yang dipilih.</div></td></tr>{% endfor %}
+    </tbody></table></div>
+  </form>
+  {% else %}<div class="empty-state">Belum ada Final Approved Incoming yang membentuk PPIC Requirement.</div>{% endif %}
+</section>
+{% include "includes/multi_select_script.html" %}
+{% endblock %}

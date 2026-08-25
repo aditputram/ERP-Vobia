@@ -21,6 +21,19 @@ class LocalAuthenticationTests(TestCase):
         )
         self.login_url = reverse("accounts:login")
 
+    def test_login_page_uses_vobia_space_branding(self):
+        response = self.client.get(self.login_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "VOBIA SPACE")
+        self.assertContains(
+            response,
+            "Business Connected, tempat untuk bekerja, berkarya dan tertawa.",
+        )
+        self.assertContains(response, "Play For Legacy")
+        self.assertContains(response, "Masuk ke Vobia Space")
+        self.assertContains(response, "img/logo-vobia.png")
+
     def test_password_is_hashed(self):
         self.assertNotEqual(self.user.password, self.password)
         self.assertTrue(self.user.check_password(self.password))

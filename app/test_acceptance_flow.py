@@ -12,6 +12,8 @@ from master_data.models import Category, Product, ProductStatus, ProductVariant,
 from merchandising.models import ProjectionRule, ProjectionScenario
 from merchandising.services.builder import apply_rule
 from merchandising.services.workflows import approve_incoming_plan, approve_sales_projection, create_incoming_plan
+from production.models import ProductionStage, ProductionTrial
+from production.services import append_trial_note, decide_trial, ensure_production_order, start_trial, submit_trial, update_stage
 from purchasing.models import PPICRequirement
 from purchasing.services.workflows import create_draft_po, release_po
 from reconciliation.models import ReconciliationRun
@@ -70,6 +72,43 @@ class EndToEndAcceptanceFlowTests(TestCase):
         )
         po = release_po(draft.id, actor)
         po_line = po.lines.get()
+        production_order = ensure_production_order(po, actor=actor)
+        update_stage(
+            production_order=production_order,
+            stage_code=ProductionStage.Stage.MATERIAL_PURCHASE,
+            status=ProductionStage.Status.COMPLETE,
+            material_arrival_date=today,
+            progress_percent=100,
+            actor=actor,
+        )
+        start_trial(production_order=production_order, target_trial_date=today, actor=actor)
+        append_trial_note(
+            production_order=production_order,
+            note="Acceptance trial passed.",
+            actor=actor,
+        )
+        trial = submit_trial(
+            production_order=production_order,
+            trial_date=today,
+            actor=actor,
+        )
+        decide_trial(
+            trial=trial,
+            decision=ProductionTrial.Status.APPROVED,
+            decision_notes="Acceptance approval.",
+            actor=actor,
+        )
+        for stage_code in (
+            ProductionStage.Stage.CUT,
+            ProductionStage.Stage.MAKE,
+            ProductionStage.Stage.TRIM,
+        ):
+            update_stage(
+                production_order=production_order,
+                stage_code=stage_code,
+                completed_qty=Decimal("10"),
+                actor=actor,
+            )
         record_qc(
             po_line=po_line,
             inspected_at=timezone.now(),

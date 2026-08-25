@@ -16,17 +16,11 @@
     {% for row in requirements %}<tr><td><strong>{{ row.source }}</strong></td><td>{{ row.period_start|date:"d M Y" }} – {{ row.period_end|date:"d M Y" }}</td><td>{{ row.reason }}</td><td>{{ row.nonfinal_count|floatformat:"0g" }}</td><td>{{ row.nonfinal_statuses }}</td><td>{{ row.last_successful_import|date:"d M Y H:i"|default:"Belum pernah" }}</td><td>{{ row.last_cutoff|date:"d M Y"|default:"—" }}</td></tr>{% endfor %}
     </tbody></table></div>{% else %}<p class="muted">Tidak ada detail tambahan.</p>{% endif %}</div>
 </section>
-<section class="dashboard-grid section-gap">
-  <article class="panel span-two">
+<section class="panel section-gap">
     <div class="panel-header"><div><p class="eyebrow">IMPORT HISTORY</p><h2>Batch terbaru</h2></div></div>
     {% if batches %}<div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Source</th><th>File</th><th>Periode</th><th>Status</th><th>New</th><th>Status Update</th><th>Blocking</th><th></th></tr></thead><tbody>
     {% for batch in batches %}<tr><td>{{ batch.created_at|date:"d M Y, H:i" }}</td><td><strong>{{ batch.source }}</strong></td><td>{{ batch.raw_file.original_filename }}</td><td>{{ batch.data_start|date:"d M"|default:"-" }} – {{ batch.data_end|date:"d M Y"|default:"-" }}</td><td><span class="status-badge {{ batch.status|lower }}">{{ batch.get_status_display }}</span></td><td>{{ batch.new_rows|floatformat:"0g" }}</td><td>{{ batch.status_update_rows|floatformat:"0g" }}</td><td>{{ batch.blocking_issue_count|floatformat:"0g" }}</td><td><a class="row-link" href="{% url 'imports:sales_detail' batch.id %}">Review →</a></td></tr>{% endfor %}
     </tbody></table></div>{% else %}<div class="empty-state">Belum ada file Sales yang diunggah.</div>{% endif %}
-  </article>
-  <article class="panel">
-    <div class="panel-header"><div><p class="eyebrow">NON-MARKETPLACE</p><h2>Input transaksi manual</h2></div></div>
-    <form method="post" class="stack-form">{% csrf_token %}{{ manual_form.as_p }}<button class="primary-button" type="submit">Post transaksi</button></form>
-  </article>
 </section>
 {% comment %}Legacy standalone history replaced by combined layout above.{% endcomment %}
 {% comment %}

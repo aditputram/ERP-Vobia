@@ -6,6 +6,7 @@
   <label>Sales Date From<input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}"></label><label>Sales Date To<input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}"></label>
   {% include "sales/includes/multi_select_filter.html" with label="Source" name="source" options=sources selected=selected_sources all_label="All Sources" search_placeholder="Ketik source..." %}
   {% include "sales/includes/multi_select_filter.html" with label="Source Group" name="source_group" options=source_groups selected=selected_source_groups all_label="All Source Groups" search_placeholder="Ketik source group..." %}
+  {% include "sales/includes/multi_select_filter.html" with label="Status Produk" name="product_status" options=product_statuses selected=selected_product_statuses all_label="All Product Status" search_placeholder="Ketik status produk..." %}
   {% include "sales/includes/multi_select_filter.html" with label="Category" name="category" options=categories selected=selected_categories all_label="All Categories" search_placeholder="Ketik category..." %}
   {% include "sales/includes/multi_select_filter.html" with label="Product" name="product" options=products selected=selected_products all_label="All Products" search_placeholder="Ketik nama produk..." %}
   <a class="secondary-button" href="{% url 'sales:product_performance' %}">Reset</a>

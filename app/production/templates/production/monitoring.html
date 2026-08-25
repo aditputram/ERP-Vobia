@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Production Monitoring · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">PRODUCTION · READ ONLY</p><h1>Production Monitoring</h1><p>Memantau progres PO yang sudah memiliki Production Plan Active. Seluruh perubahan hanya melalui Production Activity.</p></div>
+  <div class="header-actions"><a class="primary-button" href="{% url 'production:activity' %}">Entry Production Activity</a><a class="secondary-button" href="{% url 'production:planning' %}">Production Plan</a></div>
+</header>
+<section class="panel inventory-filter">
+  <form method="get" class="inventory-filter-grid" data-preserve-scroll>
+    <label class="inventory-search-field">Cari PO / Vendor<input name="q" value="{{ query }}" placeholder="Ketik No. PO atau vendor..."></label>
+    <label>Tahap<select name="stage" data-auto-submit><option value="">Semua tahap</option><option value="MATERIAL_PURCHASE" {% if selected_stage == 'MATERIAL_PURCHASE' %}selected{% endif %}>Pembelian Material</option><option value="TRIAL" {% if selected_stage == 'TRIAL' %}selected{% endif %}>Trial Production</option><option value="CUT" {% if selected_stage == 'CUT' %}selected{% endif %}>Cut · Potong</option><option value="MAKE" {% if selected_stage == 'MAKE' %}selected{% endif %}>Make · Jahit</option><option value="TRIM" {% if selected_stage == 'TRIM' %}selected{% endif %}>Trim · Finishing</option><option value="READY_FOR_QC" {% if selected_stage == 'READY_FOR_QC' %}selected{% endif %}>Ready for QC</option><option value="QC_IN_PROGRESS" {% if selected_stage == 'QC_IN_PROGRESS' %}selected{% endif %}>QC In Progress</option><option value="QC_COMPLETE" {% if selected_stage == 'QC_COMPLETE' %}selected{% endif %}>QC Complete</option></select></label>
+    <label>Risk<select name="late" data-auto-submit><option value="">Semua</option><option value="1" {% if late == '1' %}selected{% endif %}>Late saja</option></select></label>
+    <button class="primary-button" type="submit">Terapkan</button><a class="secondary-button" href="{% url 'production:monitoring' %}">Reset</a>
+  </form>
+</section>
+<section class="panel section-gap" id="qc-follow-up">
+  <div class="panel-header">
+    <div><p class="eyebrow">QC FOLLOW-UP</p><h2>Barang yang perlu ditindaklanjuti</h2></div>
+    <div class="header-actions"><span class="pill">Rework {{ qc_rework_count }}</span><span class="pill">Re-QC {{ qc_ready_count }}</span><span class="pill">Rejected {{ qc_rejected_count }}</span></div>
+  </div>
+  <p class="muted">Kartu ini hanya untuk monitoring. Semua pencatatan Rework dan Re-QC dilakukan melalui Production Activity.</p>
+  <div class="table-wrap"><table><thead><tr><th>PO</th><th>SKU</th><th>Product</th><th>Qty</th><th>Status</th><th>Langkah berikutnya</th></tr></thead><tbody>
+    {% for item in qc_follow_up_rows %}<tr>
+      <td>{{ item.po_line.po.po_number }}</td>
+      <td><span class="sku-tag">{{ item.po_line.sku.sku }}</span></td>
+      <td>{{ item.po_line.sku.product_variant.product.name }}</td>
+      <td><strong>{{ item.open_qty|floatformat:"0g" }}</strong></td>
+      <td><span class="status-badge {% if item.status == 'REJECTED' %}blocked{% elif item.status == 'READY_RE_QC' %}ready{% else %}parsing{% endif %}">{{ item.get_status_display }}</span></td>
+      <td>
+        {% if item.status == 'AWAITING_REWORK' %}<a class="row-link" href="{% url 'production:activity' %}?production_order={{ item.po_line.po.production_order.id }}&follow_up={{ item.id }}&action=complete_rework#qc-follow-up">Catat Rework →</a>
+        {% elif item.status == 'READY_RE_QC' %}<a class="row-link" href="{% url 'production:activity' %}?production_order={{ item.po_line.po.production_order.id }}&follow_up={{ item.id }}&action=re_qc#qc-follow-up">Catat Re-QC →</a>
+        {% else %}<span class="muted">Keputusan final tercatat</span>{% endif %}
+      </td>
+    </tr>{% empty %}<tr><td colspan="6"><div class="empty-state">Tidak ada barang yang membutuhkan QC Follow-up.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">{{ rows|length }} ACTIVE PLAN</p><h2>Live progress per Purchase Order</h2></div><span class="pill">Monitoring tidak dapat mengubah data</span></div>
+  <div class="table-wrap production-monitor-wrap"><table class="production-table production-monitor-table"><thead><tr><th>Purchase Order</th><th>Passed Process</th><th>Next Process</th><th>Material</th><th>Trial</th><th>Cut</th><th>Make</th><th>Trim</th><th>QC</th><th>Inbound</th><th>Target</th><th>Risk</th><th></th></tr></thead><tbody>
+    {% for row in rows %}<tr>
+      <td><strong>{{ row.production_order.po.po_number }}</strong><small>{{ row.production_order.po.supplier.name }} · {{ row.ordered_qty|floatformat:"0g" }} pcs</small></td>
+      <td><span class="status-badge {% if row.current_code == 'QC_COMPLETE' %}ready{% else %}parsing{% endif %}">{{ row.passed_process_label }}</span></td>
+      <td><strong>{{ row.next_process_label }}</strong></td>
+      <td>{% if row.stages.MATERIAL_PURCHASE.material_arrival_date %}<strong class="state-done">Ready</strong><small>{{ row.stages.MATERIAL_PURCHASE.material_arrival_date|date:"d M" }}</small>{% elif row.stages.MATERIAL_PURCHASE.actual_start_date %}<strong>Ordered</strong>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{% if row.trial %}<strong>{{ row.trial.get_status_display }}</strong><small>R{{ row.trial.revision }}</small>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td><strong>{{ row.cmt_quantities.CUT.completed_qty|floatformat:"0g" }}</strong><small>/ {{ row.ordered_qty|floatformat:"0g" }}</small></td>
+      <td><strong>{{ row.cmt_quantities.MAKE.completed_qty|floatformat:"0g" }}</strong><small>/ {{ row.ordered_qty|floatformat:"0g" }}</small></td>
+      <td><strong>{{ row.cmt_quantities.TRIM.completed_qty|floatformat:"0g" }}</strong><small>/ {{ row.ordered_qty|floatformat:"0g" }}</small></td>
+      <td><strong>{{ row.inspected_qty|floatformat:"0g" }}</strong><small>Passed {{ row.passed_qty|floatformat:"0g" }}</small></td>
+      <td><strong>{{ row.received_qty|floatformat:"0g" }}</strong><small>Delivering {{ row.delivering_qty|floatformat:"0g" }} · Ready {{ row.ready_to_deliver_qty|floatformat:"0g" }}</small></td>
+      <td>{{ row.target_date|date:"d M Y"|default:"—" }}</td>
+      <td>{% if row.is_late %}<span class="status-badge blocked">Late</span>{% else %}<span class="status-badge ready">On track</span>{% endif %}</td>
+      <td><a class="row-link" href="{% url 'production:detail' row.production_order.id %}">Detail & Audit →</a></td>
+    </tr>{% empty %}<tr><td colspan="13"><div class="empty-state"><strong>Belum ada Production Plan Active.</strong><br>Aktifkan plan PO di Production Plan terlebih dahulu.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

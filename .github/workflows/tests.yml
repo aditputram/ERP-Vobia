@@ -1,0 +1,39 @@
+# 206 tes yang sudah ada hanya berguna kalau jalan sendiri. Ini satpam yang
+# membuat dua orang bisa mengerjakan repo yang sama tanpa saling merusak.
+name: Tes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Pemeriksaan Django
+        run: python manage.py check
+        working-directory: app
+        env:
+          VOBIA_USE_SQLITE: "1"
+          DJANGO_DEBUG: "1"
+      - name: Tes
+        run: python manage.py test --parallel auto
+        working-directory: app
+        env:
+          VOBIA_USE_SQLITE: "1"
+          DJANGO_DEBUG: "1"
+      - name: Pemeriksaan kesiapan produksi
+        run: python manage.py check --deploy --fail-level ERROR
+        working-directory: app
+        env:
+          VOBIA_USE_SQLITE: "1"
+          DJANGO_DEBUG: "0"
+          DJANGO_SECRET_KEY: ci-only-secret-key-panjang-dan-acak-untuk-pemeriksaan
+          DJANGO_ALLOWED_HOSTS: example.com

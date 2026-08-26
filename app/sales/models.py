@@ -1,5 +1,7 @@
 import uuid
 
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
@@ -116,6 +118,112 @@ class SalesOrderLine(models.Model):
 
     def __str__(self):
         return self.business_key
+
+
+class SalesPlanningScenario(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "DRAFT", "Draft"
+        APPROVED = "APPROVED", "Approved"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=180)
+    start_month = models.DateField()
+    end_month = models.DateField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_sales_planning_scenarios",
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="approved_sales_planning_scenarios",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def clean(self):
+        super().clean()
+        if self.start_month.day != 1 or self.end_month.day != 1:
+            raise ValidationError("Periode Scenario harus memakai tanggal pertama setiap bulan.")
+        if self.end_month < self.start_month:
+            raise ValidationError({"end_month": "Selesai tidak boleh sebelum Mulai."})
+
+    def __str__(self):
+        return self.name
+
+
+class SalesPlan(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    scenario = models.ForeignKey(
+        SalesPlanningScenario,
+        on_delete=models.PROTECT,
+        related_name="projections",
+    )
+    month = models.DateField()
+    product = models.ForeignKey(
+        "master_data.Product",
+        on_delete=models.PROTECT,
+        related_name="sales_plans",
+    )
+    gross_sales_target = models.DecimalField(max_digits=20, decimal_places=2, default=0)
+    quantity_target = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("scenario", "month", "product__name")
+        constraints = [
+            models.UniqueConstraint(fields=["scenario", "month", "product"], name="sales_unique_scenario_month_product_plan"),
+            models.CheckConstraint(condition=Q(gross_sales_target__gte=0), name="sales_plan_gross_nonnegative"),
+        ]
+        permissions = [("approve_sales_plan", "Can approve monthly sales plan")]
+
+    def clean(self):
+        super().clean()
+        if self.month.day != 1:
+            raise ValidationError({"month": "Bulan planning harus memakai tanggal pertama."})
+        if self.scenario_id and not self.scenario.start_month <= self.month <= self.scenario.end_month:
+            raise ValidationError({"month": "Bulan projection harus berada dalam periode Scenario."})
+
+    def __str__(self):
+        return f"{self.scenario} · {self.month:%b %Y} · {self.product}"
+
+
+class SalesPlanSKU(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    plan = models.ForeignKey(SalesPlan, on_delete=models.CASCADE, related_name="sku_targets")
+    sku = models.ForeignKey(
+        "master_data.SKU",
+        on_delete=models.PROTECT,
+        related_name="sales_plan_targets",
+    )
+    gross_sales_target = models.DecimalField(max_digits=20, decimal_places=2, default=0)
+    quantity_target = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("plan", "sku__sku")
+        constraints = [
+            models.UniqueConstraint(fields=["plan", "sku"], name="sales_unique_plan_sku_target"),
+            models.CheckConstraint(condition=Q(gross_sales_target__gte=0), name="sales_plan_sku_gross_nonnegative"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.plan_id and self.sku_id and self.plan.product_id != self.sku.product_variant.product_id:
+            raise ValidationError({"sku": "SKU harus berada di dalam Product Sales Plan."})
+
+    def __str__(self):
+        return f"{self.plan} · {self.sku}"
 
 
 class SalesStatusHistory(models.Model):

@@ -8,7 +8,7 @@
   {% include "sales/includes/multi_select_filter.html" with label="Source Group" name="source_group" options=source_groups selected=selected_source_groups all_label="All Source Groups" search_placeholder="Ketik source group..." %}
   {% include "sales/includes/multi_select_filter.html" with label="Status Produk" name="product_status" options=product_statuses selected=selected_product_statuses all_label="All Product Status" search_placeholder="Ketik status produk..." %}
   {% include "sales/includes/multi_select_filter.html" with label="Category" name="category" options=categories selected=selected_categories all_label="All Categories" search_placeholder="Ketik category..." %}
-  {% include "sales/includes/multi_select_filter.html" with label="Product" name="product" options=products selected=selected_products all_label="All Products" search_placeholder="Ketik nama produk..." %}
+  {% include "sales/includes/multi_select_filter.html" with label="Product" name="product" options=products selected=selected_products all_label="All Products" search_placeholder="Ketik nama produk..." enable_select_all=1 %}
   <a class="secondary-button" href="{% url 'sales:product_performance' %}">Reset</a>
 </form>
 <section class="metric-grid section-gap"><article class="metric-card"><span>Qty Sold</span><strong>{{ totals.qty|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Net Sales</span><strong class="metric-money">Rp {{ totals.net|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Gross Sales</span><strong class="metric-money">Rp {{ totals.gross|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Order</span><strong>{{ totals.orders|floatformat:"0g" }}</strong></article></section>
@@ -67,6 +67,13 @@
     root.dataset.dirty = 'true';
     updateSummary();
   }));
+  root.querySelector('[data-filter-select-visible]')?.addEventListener('click', () => {
+    options.filter(option => !option.hidden).forEach(option => {
+      option.querySelector('input[type="checkbox"]').checked = true;
+    });
+    root.dataset.dirty = 'true';
+    updateSummary();
+  });
   root.querySelector('[data-filter-clear]').addEventListener('click', () => {
     checks.forEach(check => { check.checked = false; });
     root.dataset.dirty = 'true';

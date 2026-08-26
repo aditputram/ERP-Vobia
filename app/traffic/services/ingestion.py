@@ -27,10 +27,10 @@ from ..models import (
 
 ALIASES = {
     "code": {"id produk", "kode produk", "product id", "kode produk shopee", "kode produk tiktok"},
-    "name": {"produk", "nama produk", "product", "product name"},
+    "name": {"nama", "produk", "nama produk", "product", "product name"},
     "views": {"jumlah produk dilihat", "dilihat", "product views", "impresi produk", "product impressions"},
     "clicks": {"produk diklik", "klik produk", "product clicks", "clicks"},
-    "visitors": {"pengunjung produk", "pengunjung", "kunjungan", "klik unik", "unique clicks", "unique visitors"},
+    "visitors": {"pengunjung produk", "pengunjung produk (kunjungan)", "pengunjung", "kunjungan", "klik unik", "unique clicks", "unique visitors"},
 }
 
 
@@ -54,6 +54,8 @@ def _count(value):
     if value in (None, ""):
         return 0
     text = str(value).strip().replace(".", "").replace(",", "")
+    if text in {"-", "—"}:
+        return 0
     try:
         number = Decimal(text)
     except InvalidOperation as exc:
@@ -76,14 +78,29 @@ def _read(path, detected_format):
     else:
         workbook = load_workbook(path, read_only=True, data_only=True)
         try:
-            rows = [list(row) for row in workbook.active.iter_rows(values_only=True)]
+            worksheet = workbook.active
+            if worksheet.calculate_dimension() == "A1:A1":
+                worksheet.reset_dimensions()
+            rows = [list(row) for row in worksheet.iter_rows(values_only=True)]
         finally:
             workbook.close()
     if not rows:
         raise ValidationError("File traffic kosong.")
-    headers = [_text(value) for value in rows[0]]
+    header_index = max(
+        range(min(20, len(rows))),
+        key=lambda index: sum(
+            any(alias in {_norm(value) for value in rows[index]} for alias in aliases)
+            for aliases in ALIASES.values()
+        ),
+    )
+    seen_headers = Counter()
+    headers = []
+    for value in rows[header_index]:
+        header = _text(value)
+        seen_headers[header] += 1
+        headers.append(header if seen_headers[header] == 1 else f"{header} [{seen_headers[header]}]")
     data = []
-    for row_number, values in enumerate(rows[1:], start=2):
+    for row_number, values in enumerate(rows[header_index + 1 :], start=header_index + 2):
         if not any(value not in (None, "") for value in values):
             continue
         padded = list(values) + [None] * max(0, len(headers) - len(values))
@@ -124,6 +141,8 @@ def parse_batch(batch):
     staged = []
     code_counts = Counter()
     for row_number, source in rows:
+        if all(_text(source.get(resolved[field])) in {"", "-", "—"} for field in ("views", "clicks", "visitors")):
+            continue
         try:
             code = _text(source.get(resolved["code"]))
             views = _count(source.get(resolved["views"]))
@@ -136,7 +155,8 @@ def parse_batch(batch):
             TrafficImportIssue.objects.create(batch=batch, severity="ERROR", code="MISSING_PRODUCT_CODE", field_name="code", message=f"Row {row_number}: kode produk kosong.", is_blocking=True)
             continue
         mappings = MarketplaceProductMapping.objects.filter(source=batch.source, marketplace_product_code=code, is_active=True).select_related("product")
-        product = mappings.first().product if mappings.count() == 1 else None
+        mapping_count = mappings.count()
+        product = mappings.first().product if mapping_count == 1 else None
         row = StagedTrafficRow.objects.create(
             batch=batch,
             row_number=row_number,
@@ -150,8 +170,10 @@ def parse_batch(batch):
         )
         staged.append(row)
         code_counts[code] += 1
-        if mappings.count() != 1:
-            TrafficImportIssue.objects.create(batch=batch, staged_row=row, severity="ERROR", code="PRODUCT_MAPPING_NOT_UNIQUE", field_name="code", message="Kode marketplace harus memetakan tepat ke satu Product canonical.", is_blocking=True)
+        if mapping_count == 0:
+            TrafficImportIssue.objects.create(batch=batch, staged_row=row, severity="WARNING", code="PRODUCT_MAPPING_MISSING", field_name="code", message="Kode marketplace belum dipetakan. Traffic tetap diimpor berdasarkan ID produk marketplace.")
+        elif mapping_count > 1:
+            TrafficImportIssue.objects.create(batch=batch, staged_row=row, severity="WARNING", code="PRODUCT_MAPPING_AMBIGUOUS", field_name="code", message="Kode marketplace memetakan ke lebih dari satu Product canonical. Traffic tetap diimpor berdasarkan ID produk marketplace.")
     for row in staged:
         if code_counts[row.marketplace_product_code] > 1:
             TrafficImportIssue.objects.create(batch=batch, staged_row=row, severity="ERROR", code="DUPLICATE_PRODUCT_CODE", field_name="code", message="Kode produk muncul lebih dari sekali. Pilih/ekspor hanya baris utama product agar traffic variasi tidak terduplikasi.", is_blocking=True)
@@ -179,6 +201,14 @@ def create_traffic_import(uploaded_file, source, period_start, period_end, actor
     dataset_type = RawFile.DatasetType.TRAFFIC_SHOPEE if source == TrafficPeriodState.Source.SHOPEE else RawFile.DatasetType.TRAFFIC_TIKTOK
     duplicate = RawFile.objects.filter(dataset_type=dataset_type, checksum_sha256=checksum).first()
     if duplicate:
+        existing = duplicate.traffic_batches.filter(
+            source=source,
+            period_start=period_start,
+            period_end=period_end,
+            status__in=[TrafficImportBatch.Status.BLOCKED, TrafficImportBatch.Status.READY],
+        ).first()
+        if existing:
+            return parse_batch(existing)
         raise DuplicateRawFile(duplicate)
     relative = Path("traffic") / source.lower() / str(period_start.year) / f"{period_start.month:02d}" / f"{uuid.uuid4()}.{extension}"
     absolute = Path(settings.PRIVATE_UPLOAD_ROOT) / relative

@@ -58,6 +58,7 @@ from .services.planning_activity import (
     planning_activity_snapshot,
 )
 from sales.services.manual import create_manual_sale
+from sales.models import SalesPlan, SalesPlanningScenario, SalesPlanSKU
 
 
 class MerchandisingCalculationTests(TestCase):
@@ -1630,6 +1631,35 @@ class MerchandisingReportViewTests(TestCase):
         second_incoming = IncomingPlan.objects.get(sales_projection=second_projection)
         self.assertEqual(first_incoming.proposed_incoming, Decimal("11"))
         self.assertEqual(second_incoming.proposed_incoming, Decimal("14"))
+
+        sales_scenario = SalesPlanningScenario.objects.create(
+            name="Sales Target Reference",
+            start_month=current_month,
+            end_month=current_month,
+            created_by=self.user,
+        )
+        first_sales_plan = SalesPlan.objects.create(
+            scenario=sales_scenario,
+            month=current_month,
+            product=first_projection.sku.product_variant.product,
+            quantity_target=70,
+        )
+        SalesPlanSKU.objects.create(
+            plan=first_sales_plan,
+            sku=first_projection.sku,
+            quantity_target=70,
+        )
+        second_sales_plan = SalesPlan.objects.create(
+            scenario=sales_scenario,
+            month=current_month,
+            product=second_projection.sku.product_variant.product,
+            quantity_target=90,
+        )
+        SalesPlanSKU.objects.create(
+            plan=second_sales_plan,
+            sku=second_projection.sku,
+            quantity_target=90,
+        )
         draft_response = self.client.get(
             "/merchandising/planning-builder/",
             {"view_draft": scenario.id},
@@ -1673,16 +1703,26 @@ class MerchandisingReportViewTests(TestCase):
                 "draft_metric": "sales",
             },
         )
-        self.assertEqual(len(matrix_response.context["draft_matrix_headers"]), 4)
+        self.assertEqual(len(matrix_response.context["draft_matrix_headers"]), 5)
         self.assertEqual(
             [header["metric"] for header in matrix_response.context["draft_matrix_headers"]],
-            ["historical_sales", "historical_sales", "historical_sales", "sales"],
+            ["historical_sales", "historical_sales", "historical_sales", "sales_target", "sales"],
         )
         self.assertEqual(
             [row["cells"][3]["value"] for row in matrix_response.context["draft_sku_matrix_rows"]],
+            [Decimal("70"), Decimal("90")],
+        )
+        self.assertEqual(
+            [row["cells"][4]["value"] for row in matrix_response.context["draft_sku_matrix_rows"]],
             [Decimal("7"), Decimal("9")],
         )
-        self.assertEqual(matrix_response.context["draft_matrix_summary"]["cells"][3]["value"], Decimal("16"))
+        self.assertEqual(matrix_response.context["draft_matrix_summary"]["cells"][3]["value"], Decimal("160"))
+        self.assertEqual(matrix_response.context["draft_matrix_summary"]["cells"][4]["value"], Decimal("16"))
+        self.assertContains(matrix_response, "Target Sales (Sales) QTY")
+        self.assertEqual(
+            [row["cells"][3]["value"] for row in matrix_response.context["draft_parent_matrix_rows"]],
+            [Decimal("70"), Decimal("90")],
+        )
 
         financial_matrix_response = self.client.get(
             "/merchandising/planning-builder/",
@@ -1695,7 +1735,7 @@ class MerchandisingReportViewTests(TestCase):
         )
         self.assertEqual(
             [header["submetric"] for header in financial_matrix_response.context["draft_matrix_headers"]],
-            ["qty", "qty", "qty", "qty", "cogs", "gross", "net"],
+            ["qty", "qty", "qty", "qty", "qty", "cogs", "gross", "net"],
         )
         first_financial_row = next(
             row
@@ -1705,7 +1745,7 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(
             [cell["value"] for cell in first_financial_row["cells"]],
             [
-                Decimal("2"), Decimal("2"), Decimal("2"), Decimal("7"),
+                Decimal("2"), Decimal("2"), Decimal("2"), Decimal("70"), Decimal("7"),
                 Decimal("700000"), Decimal("1400000"), Decimal("1358000"),
             ],
         )
@@ -1724,7 +1764,7 @@ class MerchandisingReportViewTests(TestCase):
             [header["metric"] for header in stock_chain_response.context["draft_matrix_headers"]],
             [
                 "historical_sales", "historical_sales", "historical_sales",
-                "beginning", "sales", "ending", "incoming_recommendation",
+                "beginning", "sales_target", "sales", "ending", "incoming_recommendation",
             ],
         )
         stock_rows = {
@@ -1736,6 +1776,7 @@ class MerchandisingReportViewTests(TestCase):
             [
                 Decimal("2"), Decimal("2"), Decimal("2"),
                 first_projection.beginning_qty + Decimal("11"),
+                Decimal("70"),
                 Decimal("7"),
                 first_projection.beginning_qty + Decimal("11") - Decimal("7"),
                 Decimal("11"),

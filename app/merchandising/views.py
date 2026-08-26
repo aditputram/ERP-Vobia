@@ -14,6 +14,7 @@ from django.views.decorators.http import require_POST
 
 from inventory.services.fifo import inventory_balance
 from master_data.models import Category, Product, ProductStatus, Subcategory
+from sales.models import SalesPlanSKU
 
 from .forms import IncomingMonthCloseForm, ProjectionBuilderForm, ProjectionScenarioForm
 from .models import (
@@ -144,6 +145,27 @@ def _active_batch():
 
 def _getlist(request, key):
     return [value for value in request.GET.getlist(key) if value]
+
+
+def _latest_sales_target_qty(projections):
+    """Return the latest saved Sales target for each SKU-month in scope."""
+    projections = list(projections)
+    sku_ids = {row.sku_id for row in projections}
+    months = {row.month for row in projections}
+    targets = {}
+    rows = SalesPlanSKU.objects.filter(
+        sku_id__in=sku_ids,
+        plan__month__in=months,
+    ).select_related("plan").order_by(
+        "sku_id",
+        "plan__month",
+        "-updated_at",
+        "-created_at",
+        "-pk",
+    )
+    for row in rows:
+        targets.setdefault((row.sku_id, row.plan.month), Decimal(row.quantity_target))
+    return targets
 
 
 def _filtered_snapshots(request, batch):
@@ -708,6 +730,7 @@ def planning_builder(request):
             draft_incoming_plans = list(IncomingPlan.objects.filter(
                 scenario=viewed_draft_scenario,
             ).select_related("sales_projection"))
+            draft_sales_target_qty = _latest_sales_target_qty(draft_projections)
             draft_skus = list({row.sku_id: row.sku for row in draft_projections}.values())
             draft_baseline_by_sku = {
                 row.sku_id: row.baseline_qty
@@ -760,6 +783,7 @@ def planning_builder(request):
                 selected_submetrics=selected_draft_submetrics,
                 history_months=draft_history_months,
                 history_by_sku=draft_history_by_sku,
+                sales_target_by_sku_month=draft_sales_target_qty,
             )
             draft_parent_matrix_rows, _, _ = build_draft_matrix(
                 draft_projections,
@@ -770,6 +794,7 @@ def planning_builder(request):
                 selected_submetrics=selected_draft_submetrics,
                 history_months=draft_history_months,
                 history_by_sku=draft_history_by_sku,
+                sales_target_by_sku_month=draft_sales_target_qty,
             )
             projected_months = {row.month for row in draft_projections}
             draft_missing_months = [

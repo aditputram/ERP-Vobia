@@ -249,6 +249,7 @@ def build_draft_matrix(
     selected_submetrics=("qty",),
     history_months=(),
     history_by_sku=None,
+    sales_target_by_sku_month=None,
 ):
     """Pivot saved SKU-month projections into a horizontal planning matrix."""
     if grain not in {"sku", "parent_sku"}:
@@ -273,6 +274,8 @@ def build_draft_matrix(
     projections = list(projections)
     history_months = list(history_months or [])
     history_by_sku = history_by_sku or {}
+    include_sales_target = sales_target_by_sku_month is not None
+    sales_target_by_sku_month = sales_target_by_sku_month or {}
     plans_by_projection = {
         plan.sales_projection_id: plan for plan in (incoming_plans or [])
     }
@@ -443,6 +446,15 @@ def build_draft_matrix(
                 if submetric == "net" and metric != "sales":
                     continue
                 submetric_label, kind = submetric_meta[submetric]
+                if include_sales_target and metric == "sales" and submetric == "qty":
+                    headers.append({
+                        "month": month,
+                        "month_label": month.strftime("%b %Y"),
+                        "metric": "sales_target",
+                        "submetric": "qty",
+                        "label": "Target Sales (Sales) QTY",
+                        "kind": "number",
+                    })
                 headers.append({
                     "month": month,
                     "month_label": month.strftime("%b %Y"),
@@ -466,6 +478,26 @@ def build_draft_matrix(
                             for sku_id in row_sku_ids
                         ),
                         Decimal("0"),
+                    ),
+                    "kind": header["kind"],
+                    "metric": header["metric"],
+                    "submetric": header["submetric"],
+                    "month_key": header["month"].strftime("%Y-%m"),
+                    "growth_pct": None,
+                    "baseline_value": None,
+                    "editable": None,
+                })
+                continue
+            if header["metric"] == "sales_target":
+                target_values = [
+                    sales_target_by_sku_month.get((sku_id, header["month"]))
+                    for sku_id in row_sku_ids
+                ]
+                cells.append({
+                    "value": (
+                        sum(target_values, Decimal("0"))
+                        if target_values and all(value is not None for value in target_values)
+                        else None
                     ),
                     "kind": header["kind"],
                     "metric": header["metric"],
@@ -570,6 +602,17 @@ def build_draft_matrix(
                     for sku_id in unique_sku_ids
                 ),
                 Decimal("0"),
+            )
+            growth_pct = None
+        elif header["metric"] == "sales_target":
+            target_values = [
+                sales_target_by_sku_month.get((sku_id, header["month"]))
+                for sku_id in unique_sku_ids
+            ]
+            value = (
+                sum(target_values, Decimal("0"))
+                if target_values and all(item is not None for item in target_values)
+                else None
             )
             growth_pct = None
         else:

@@ -109,13 +109,15 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.querySelectorAll('form[data-dirty-submit]').forEach(form => {
-    const submitButton = form.querySelector('[data-dirty-submit-button]');
+    const submitButtons = [...document.querySelectorAll('[data-dirty-submit-button]')]
+      .filter(button => button.form === form);
     const controls = [...form.querySelectorAll('input, select, textarea')].filter(control => (
       !['hidden', 'submit', 'button'].includes(control.type)
+      && control.form === form
       && !control.disabled
       && !control.hasAttribute('data-dirty-ignore')
     ));
-    if (!submitButton || !controls.length) return;
+    if (!submitButtons.length || !controls.length) return;
 
     const controlValue = control => (
       ['checkbox', 'radio'].includes(control.type) ? String(control.checked) : control.value
@@ -123,8 +125,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const savedValues = new Map(controls.map(control => [control, controlValue(control)]));
     const syncDirtyState = () => {
       const hasChanges = controls.some(control => controlValue(control) !== savedValues.get(control));
-      submitButton.disabled = !hasChanges;
-      submitButton.setAttribute('aria-disabled', String(!hasChanges));
+      submitButtons.forEach(button => {
+        button.disabled = !hasChanges;
+        button.setAttribute('aria-disabled', String(!hasChanges));
+      });
     };
 
     controls.forEach(control => {

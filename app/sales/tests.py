@@ -1,17 +1,22 @@
 from datetime import date, datetime
 from decimal import Decimal
+from io import BytesIO
 import uuid
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from accounts.models import User
 from inventory.models import InventoryException, InventoryMovement
-from master_data.models import Category, Product, ProductStatus, ProductVariant, SKU
+from imports.models import RawFile
+from master_data.models import Category, MarketplaceProductMapping, Product, ProductStatus, ProductVariant, SKU
+from merchandising.models import MerchandisingMonthlySnapshot, MerchandisingSnapshotBatch
+from traffic.models import TrafficImportBatch, TrafficProductMetric
 
-from .models import SalesOrder, SalesOrderLine
+from .models import SalesOrder, SalesOrderLine, SalesPlan, SalesPlanSKU, SalesPlanningScenario
 
 
 class SalesReportRouteTests(TestCase):
@@ -19,11 +24,404 @@ class SalesReportRouteTests(TestCase):
         self.user = User.objects.create_superuser(username="vobiasuperadmin", password="strong-test-password")
         self.client.force_login(self.user)
 
+    def _planning_product(self, code="PLAN-PRODUCT"):
+        status, _ = ProductStatus.objects.get_or_create(code="PLAN-ACTIVE", defaults={"name": "Active"})
+        category, _ = Category.objects.get_or_create(code="PLAN-CATEGORY", defaults={"name": "Planning Category"})
+        product = Product.objects.create(code=code, name=f"Product {code}", status=status, category=category)
+        variant = ProductVariant.objects.create(product=product, name="Default")
+        sku = SKU.objects.create(sku=f"SKU-{code}", product_variant=variant, current_retail_price=Decimal("100000"))
+        return product, sku
+
     def test_sales_report_routes_render(self):
-        for name in ("sales:product_performance", "sales:pareto", "sales:transactions", "sales:input_transaction"):
+        for name in ("sales:planning_builder", "sales:product_performance", "sales:pareto", "sales:transactions", "sales:input_transaction"):
             with self.subTest(name=name):
                 response = self.client.get(reverse(name))
                 self.assertEqual(response.status_code, 200)
+
+    def test_sales_route_keeps_sales_navigation_when_other_tab_selected_operation(self):
+        session = self.client.session
+        session["active_module"] = "operation"
+        session.save()
+
+        response = self.client.get(reverse("sales:planning_builder"))
+
+        self.assertContains(response, reverse("sales:planning_builder"))
+        self.assertNotContains(response, reverse("merchandising:planning_builder"))
+        self.assertContains(response, ">Sales<")
+
+    def test_sales_planning_scenario_builds_monthly_projections_then_approves(self):
+        product, sku = self._planning_product()
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="PLAN-ACTUAL-1",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 5, 10, 0)),
+            order_date=date(2026, 9, 5),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku=sku,
+            sku_code_snapshot="PLAN-SKU",
+            product_name_snapshot="Planning Product",
+            quantity=2,
+            net_unit_price=Decimal("90000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("200000"),
+            total_net_sales=Decimal("180000"),
+        )
+        created = self.client.post(reverse("sales:planning_builder"), {
+            "form_name": "scenario",
+            "name": "Sales Plan Sep-Oct 2026",
+            "start_month": "2026-09",
+            "end_month": "2026-10",
+        }, follow=True)
+        scenario = SalesPlanningScenario.objects.get(name="Sales Plan Sep-Oct 2026")
+        self.assertEqual(scenario.status, SalesPlanningScenario.Status.DRAFT)
+        self.assertContains(created, "SCENARIO LIBRARY")
+
+        plan = SalesPlan.objects.create(
+            scenario=scenario,
+            month=date(2026, 9, 1),
+            product=product,
+            gross_sales_target=Decimal("250000"),
+            quantity_target=2,
+        )
+        target = SalesPlanSKU.objects.create(
+            plan=plan,
+            sku=sku,
+            gross_sales_target=Decimal("250000"),
+            quantity_target=2,
+        )
+        payload = {
+            "form_name": "projection",
+            "scenario": str(scenario.id),
+            "month": "2026-09",
+            f"qty_{target.id}": "3",
+        }
+
+        saved = self.client.post(reverse("sales:planning_builder"), payload, follow=True)
+        plan.refresh_from_db()
+        self.assertEqual(plan.gross_sales_target, Decimal("300000"))
+        product_row = saved.context["rows"][0]
+        self.assertEqual(product_row["product"], product)
+        self.assertEqual(product_row["actual"]["gross"], Decimal("200000"))
+        self.assertEqual(product_row["gross_gap"], Decimal("-100000"))
+
+        incomplete = self.client.post(reverse("sales:planning_builder"), {
+            "form_name": "approval", "scenario": str(scenario.id), "month": "2026-09",
+        }, follow=True)
+        scenario.refresh_from_db()
+        self.assertEqual(scenario.status, SalesPlanningScenario.Status.DRAFT)
+        self.assertContains(incomplete, "Projection belum lengkap untuk: Oct 2026")
+
+        october_plan = SalesPlan.objects.create(
+            scenario=scenario,
+            month=date(2026, 10, 1),
+            product=product,
+            gross_sales_target=Decimal("400000"),
+            quantity_target=4,
+        )
+        SalesPlanSKU.objects.create(
+            plan=october_plan,
+            sku=sku,
+            gross_sales_target=Decimal("400000"),
+            quantity_target=4,
+        )
+
+        approved = self.client.post(reverse("sales:planning_builder"), {
+            "form_name": "approval", "scenario": str(scenario.id), "month": "2026-10",
+        }, follow=True)
+        scenario.refresh_from_db()
+        self.assertEqual(scenario.status, SalesPlanningScenario.Status.APPROVED)
+        self.assertEqual(scenario.approved_by, self.user)
+        self.assertContains(approved, "approved dan seluruh projection dikunci")
+
+    def test_sales_projection_builder_previews_three_months_then_saves_selected_product(self):
+        product, sku = self._planning_product("BUILDER-PRODUCT")
+        product.parent_sku = "PARENT-BUILDER"
+        product.save(update_fields=["parent_sku"])
+        SKU.objects.create(
+            sku="SKU-BUILDER-PRODUCT-L",
+            product_variant=sku.product_variant,
+            size="L",
+        )
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="BUILDER-AUGUST-1",
+            order_datetime=timezone.make_aware(datetime(2026, 8, 5, 10, 0)),
+            order_date=date(2026, 8, 5),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku=sku,
+            sku_code_snapshot="BUILDER-SKU",
+            product_name_snapshot="Builder Product",
+            quantity=10,
+            net_unit_price=Decimal("90000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("1000000"),
+            total_net_sales=Decimal("900000"),
+        )
+        batch = MerchandisingSnapshotBatch.objects.create(
+            source_workbook_id="sales-builder-tiering",
+            source_file_name="sales-builder-tiering.xlsx",
+            source_sha256="b" * 64,
+            imported_by=self.user,
+            row_count=2,
+            is_active=True,
+        )
+        for source_row, snapshot_month in enumerate((date(2026, 7, 1), date(2026, 8, 1)), start=1):
+            MerchandisingMonthlySnapshot.objects.create(
+                batch=batch,
+                sku=sku,
+                source_row=source_row,
+                month=snapshot_month,
+                status_snapshot="Active",
+                product_snapshot=product.name,
+                category_snapshot=product.category.name,
+                retail_price_snapshot=Decimal("100000"),
+                ending_qty=Decimal("100") if snapshot_month.month == 7 else Decimal("0"),
+            )
+        scenario = SalesPlanningScenario.objects.create(
+            name="Sales Builder September 2026",
+            start_month=date(2026, 9, 1),
+            end_month=date(2026, 9, 1),
+            created_by=self.user,
+        )
+        payload = {
+            "form_name": "builder",
+            "action": "preview",
+            "scenario": str(scenario.id),
+            "month": "2026-09",
+            "product_status": str(product.status_id),
+            "category": str(product.category_id),
+            "product": [str(product.id)],
+            "planning_activity": "ALL",
+            "method": "INCREASE_PERCENT",
+            "parameter": "10",
+            "reason": "Target campaign September",
+        }
+
+        preview = self.client.post(reverse("sales:planning_builder"), payload)
+
+        self.assertEqual(preview.status_code, 200)
+        self.assertContains(preview, "PROJECTION PREVIEW")
+        row = preview.context["builder_preview"]["rows"][0]
+        self.assertEqual(row["product"], product)
+        self.assertEqual([cell["month"] for cell in row["history"]], [date(2026, 6, 1), date(2026, 7, 1), date(2026, 8, 1)])
+        self.assertEqual(row["history"][-1]["qty"], Decimal("62"))
+        self.assertTrue(row["history"][-1]["is_projection"])
+        self.assertEqual(row["target_gross"], Decimal("6800000"))
+        self.assertEqual(row["target_qty"], 68)
+        self.assertEqual(preview.context["builder_preview"]["parent_rows"][0]["parent_sku"], "PARENT-BUILDER")
+        self.assertEqual(len(preview.context["builder_preview"]["sku_rows"]), 2)
+        self.assertEqual(sum(cell["target_qty"] for cell in preview.context["builder_preview"]["sku_rows"]), 68)
+        self.assertContains(preview, "Parent SKU (Sum)")
+        self.assertContains(preview, 'data-sales-preview-grain-panel="sku"')
+        self.assertContains(preview, "Cancel Preview")
+
+        payload["action"] = "save"
+        payload[f"target_qty_{sku.id}"] = "15"
+        for sku_row in preview.context["builder_preview"]["sku_rows"]:
+            payload.setdefault(f"target_qty_{sku_row['sku'].id}", str(sku_row["target_qty"]))
+        saved = self.client.post(reverse("sales:planning_builder"), payload, follow=True)
+        plan = SalesPlan.objects.get(scenario=scenario, month=date(2026, 9, 1), product=product)
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(plan.gross_sales_target, Decimal("1500000"))
+        self.assertEqual(plan.quantity_target, 15)
+        self.assertEqual(plan.sku_targets.get(sku=sku).quantity_target, 15)
+        self.assertContains(saved, "Preview September 2026 tersimpan")
+        self.assertContains(saved, 'name="draft_grain"')
+        self.assertContains(saved, "Parent SKU (Sum)")
+        self.assertContains(saved, "Close Draft")
+        self.assertContains(saved, "Save Draft", count=2)
+        self.assertContains(saved, 'id="sales-scenario-draft-form"')
+        self.assertContains(saved, 'data-dirty-submit')
+        self.assertContains(saved, 'data-dirty-submit-button', count=2)
+        self.assertContains(saved, 'disabled aria-disabled="true"', count=2)
+        self.assertContains(saved, 'form="sales-scenario-draft-form"')
+        self.assertContains(saved, 'data-preview-table-scroll', count=2)
+        self.assertContains(saved, 'data-draft-selection-delete-form')
+        self.assertContains(saved, 'data-draft-row-select')
+        self.assertContains(saved, 'title="Delete Selected SKU From Draft"')
+        self.assertNotContains(saved, "Qty Gap")
+        self.assertNotContains(saved, "Gross Gap")
+        self.assertEqual(
+            [header["month"] for header in saved.context["draft_history_headers"]],
+            [date(2026, 6, 1), date(2026, 7, 1), date(2026, 8, 1)],
+        )
+        self.assertEqual(saved.context["rows"][0]["history"][-1]["qty"], Decimal("62"))
+        self.assertEqual(saved.context["draft_parent_rows"][0]["parent_sku"], "PARENT-BUILDER")
+        self.assertEqual(saved.context["draft_parent_rows"][0]["target_qty"], 15)
+
+        closed = self.client.get(reverse("sales:planning_builder"), {
+            "scenario": str(scenario.id),
+            "month": "2026-09",
+            "close_draft": "1",
+        })
+        self.assertEqual(closed.status_code, 200)
+        self.assertNotContains(closed, 'id="draft-projection"')
+        self.assertContains(closed, 'id="scenario-library"')
+
+    def test_sales_projection_parent_sku_view_sums_multiple_products(self):
+        first, _ = self._planning_product("PARENT-SUM-A")
+        second, _ = self._planning_product("PARENT-SUM-B")
+        Product.objects.filter(id__in=[first.id, second.id]).update(parent_sku="PARENT-SUM")
+        scenario = SalesPlanningScenario.objects.create(
+            name="Parent Summary",
+            start_month=date(2026, 9, 1),
+            end_month=date(2026, 9, 1),
+            created_by=self.user,
+        )
+
+        preview = self.client.post(reverse("sales:planning_builder"), {
+            "form_name": "builder",
+            "action": "preview",
+            "scenario": str(scenario.id),
+            "month": "2026-09",
+            "product": [str(first.id), str(second.id)],
+            "planning_activity": "ALL",
+            "method": "SAME_AS_LAST_MONTH",
+        })
+
+        self.assertEqual(preview.status_code, 200)
+        parent_rows = preview.context["builder_preview"]["parent_rows"]
+        self.assertEqual(len(parent_rows), 1)
+        self.assertEqual(parent_rows[0]["parent_sku"], "PARENT-SUM")
+        self.assertEqual(parent_rows[0]["product_count"], 2)
+        self.assertEqual(parent_rows[0]["sku_count"], 2)
+
+    def test_sales_scenario_draft_deletes_selected_sku_or_parent_across_all_months(self):
+        product, first_sku = self._planning_product("DELETE-DRAFT")
+        product.parent_sku = "PARENT-DELETE"
+        product.save(update_fields=["parent_sku"])
+        second_sku = SKU.objects.create(
+            sku="SKU-DELETE-DRAFT-L",
+            product_variant=first_sku.product_variant,
+            size="L",
+            current_retail_price=Decimal("100000"),
+        )
+        scenario = SalesPlanningScenario.objects.create(
+            name="Delete Draft Rows",
+            start_month=date(2026, 9, 1),
+            end_month=date(2026, 10, 1),
+            created_by=self.user,
+        )
+        for month in (date(2026, 9, 1), date(2026, 10, 1)):
+            plan = SalesPlan.objects.create(
+                scenario=scenario,
+                month=month,
+                product=product,
+                gross_sales_target=Decimal("3000000"),
+                quantity_target=30,
+            )
+            SalesPlanSKU.objects.create(
+                plan=plan,
+                sku=first_sku,
+                gross_sales_target=Decimal("1000000"),
+                quantity_target=10,
+            )
+            SalesPlanSKU.objects.create(
+                plan=plan,
+                sku=second_sku,
+                gross_sales_target=Decimal("2000000"),
+                quantity_target=20,
+            )
+
+        deleted_sku = self.client.post(reverse("sales:planning_builder"), {
+            "form_name": "delete_selection",
+            "scenario": str(scenario.id),
+            "month": "2026-09",
+            "selection_grain": "sku",
+            "selected_item": [str(first_sku.id)],
+        }, follow=True)
+        self.assertEqual(deleted_sku.status_code, 200)
+        self.assertFalse(SalesPlanSKU.objects.filter(plan__scenario=scenario, sku=first_sku).exists())
+        self.assertEqual(SalesPlanSKU.objects.filter(plan__scenario=scenario, sku=second_sku).count(), 2)
+        self.assertEqual(
+            set(SalesPlan.objects.filter(scenario=scenario).values_list("quantity_target", flat=True)),
+            {20},
+        )
+
+        deleted_parent = self.client.post(reverse("sales:planning_builder"), {
+            "form_name": "delete_selection",
+            "scenario": str(scenario.id),
+            "month": "2026-09",
+            "selection_grain": "parent_sku",
+            "selected_item": ["PARENT-DELETE"],
+        }, follow=True)
+        self.assertEqual(deleted_parent.status_code, 200)
+        self.assertFalse(SalesPlanSKU.objects.filter(plan__scenario=scenario).exists())
+        self.assertFalse(SalesPlan.objects.filter(scenario=scenario).exists())
+        self.assertContains(deleted_parent, "berhasil dihapus dari seluruh bulan Scenario Draft")
+
+    def test_transaction_export_uses_active_filters_and_exports_all_columns(self):
+        for source, source_label, order_number, order_day in (
+            (SalesOrder.Source.SHOPEE, "Shopee", "EXPORT-SHOPEE", date(2026, 8, 10)),
+            (SalesOrder.Source.TIKTOK, "Tiktok", "EXPORT-TIKTOK", date(2026, 8, 11)),
+        ):
+            order = SalesOrder.objects.create(
+                source=source,
+                source_label=source_label,
+                order_number=order_number,
+                order_datetime=timezone.make_aware(datetime.combine(order_day, datetime.min.time())),
+                order_date=order_day,
+                current_status="Selesai",
+                source_status="Selesai",
+                is_final=True,
+                first_seen_batch_id=uuid.uuid4(),
+                latest_batch_id=uuid.uuid4(),
+            )
+            SalesOrderLine.objects.create(
+                order=order,
+                sku_code_snapshot=f"SKU-{source_label}",
+                product_name_snapshot=f"Product {source_label}",
+                variant_name_snapshot="M",
+                quantity=2,
+                net_unit_price=Decimal("90000"),
+                retail_price_snapshot=Decimal("100000"),
+                sales_cogs_snapshot=Decimal("50000"),
+                total_gross_sales=Decimal("200000"),
+                total_net_sales=Decimal("180000"),
+                total_cogs=Decimal("100000"),
+                gpm=Decimal("80000"),
+                gpm_rate=Decimal("0.44444444"),
+            )
+
+        response = self.client.get(reverse("sales:transactions"), {
+            "date_from": "2026-08-01",
+            "date_to": "2026-08-31",
+            "source": "Shopee",
+            "q": "EXPORT",
+            "export": "xlsx",
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn("vobia-transactions_2026-08-01_2026-08-31.xlsx", response["Content-Disposition"])
+        workbook = load_workbook(BytesIO(response.content), read_only=True, data_only=True)
+        rows = list(workbook["Transactions"].iter_rows(values_only=True))
+        self.assertEqual(rows[0][0:5], ("Order Date", "Order Datetime", "Shipped Datetime", "Source", "Order Number"))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][3], "Shopee")
+        self.assertEqual(rows[1][4], "EXPORT-SHOPEE")
+        self.assertEqual(rows[1][16], 2)
+        self.assertEqual(rows[1][20], 180000)
+        self.assertNotIn("EXPORT-TIKTOK", {cell for row in rows for cell in row})
 
     def test_report_filters_use_auto_apply_without_apply_buttons(self):
         for name in ("sales:dashboard", "sales:product_performance", "sales:pareto"):
@@ -424,6 +822,88 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(response.context["totals"]["net"], Decimal("300000"))
         self.assertContains(response, "2 selected")
         self.assertContains(response, 'data-filter-search')
+        self.assertContains(response, 'data-filter-select-visible')
+
+    def test_product_performance_links_product_to_parent_traffic_listing(self):
+        status = ProductStatus.objects.create(code="TRAFFIC", name="Regular")
+        category = Category.objects.create(code="PANTS", name="Pants")
+        product = Product.objects.create(code="PARENT-1", parent_sku="PARENT-1", name="Denim Product", status=status, category=category)
+        second_product = Product.objects.create(code="PARENT-2", parent_sku="PARENT-2", name="Denim Product 2", status=status, category=category)
+        variant = ProductVariant.objects.create(product=product, name="Blue")
+        second_variant = ProductVariant.objects.create(product=second_product, name="Black")
+        sku = SKU.objects.create(sku="DENIM.M", product_variant=variant, size="M")
+        second_sku = SKU.objects.create(sku="DENIM2.M", product_variant=second_variant, size="M")
+        MarketplaceProductMapping.objects.create(source="Tiktok", marketplace_product_code="TIKTOK-PARENT", product=product)
+        MarketplaceProductMapping.objects.create(source="Tiktok", marketplace_product_code="TIKTOK-PARENT", product=second_product)
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.TIKTOK,
+            source_label="Tiktok",
+            order_number="TRAFFIC-LINK-1",
+            order_datetime=timezone.make_aware(datetime(2026, 8, 10, 10, 0)),
+            order_date=date(2026, 8, 10),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku=sku,
+            product_name_snapshot=product.name,
+            quantity=1,
+            net_unit_price=Decimal("100000"),
+            total_gross_sales=Decimal("100000"),
+            total_net_sales=Decimal("100000"),
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku=second_sku,
+            product_name_snapshot=second_product.name,
+            quantity=1,
+            net_unit_price=Decimal("100000"),
+            total_gross_sales=Decimal("100000"),
+            total_net_sales=Decimal("100000"),
+        )
+        raw = RawFile.objects.create(
+            dataset_type=RawFile.DatasetType.TRAFFIC_TIKTOK,
+            original_filename="traffic.csv",
+            storage_path="tests/traffic.csv",
+            checksum_sha256="a" * 64,
+            byte_size=1,
+            detected_format="csv",
+            uploaded_by=self.user,
+        )
+        batch = TrafficImportBatch.objects.create(
+            raw_file=raw,
+            source="Tiktok",
+            period_start=date(2026, 8, 1),
+            period_end=date(2026, 8, 25),
+            status=TrafficImportBatch.Status.COMMITTED,
+        )
+        for key, name in (("LISTING", "Parent Traffic Listing"), ("PRODUCT", product.name)):
+            TrafficProductMetric.objects.create(
+                source="Tiktok",
+                period_start=date(2026, 8, 1),
+                period_end=date(2026, 8, 25),
+                product=product if key == "PRODUCT" else None,
+                traffic_product_key=key,
+                marketplace_product_code_snapshot="TIKTOK-PARENT",
+                product_name_snapshot=name,
+                views=100,
+                clicks=20,
+                visitors=10,
+                source_batch=batch,
+            )
+
+        by_product = self.client.get(reverse("sales:product_performance"), {
+            "date_from": "2026-08-01",
+            "date_to": "2026-08-25",
+            "source": "Tiktok",
+            "product": [product.name, second_product.name],
+        })
+        self.assertEqual(by_product.context["selected_products"], [product.name, second_product.name])
+        self.assertEqual(by_product.context["traffic_totals"], {"views": 100, "clicks": 20, "visitors": 10})
 
     def test_product_performance_accepts_multiple_product_status_filters(self):
         for index, (product_status, net) in enumerate((

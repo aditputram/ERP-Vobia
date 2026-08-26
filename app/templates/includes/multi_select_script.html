@@ -48,6 +48,13 @@
       root.dataset.dirty = 'true';
       updateSummary();
     }));
+    root.querySelector('[data-filter-select-visible]')?.addEventListener('click', () => {
+      options.filter(option => !option.hidden).forEach(option => {
+        option.querySelector('input[type="checkbox"]').checked = true;
+      });
+      root.dataset.dirty = 'true';
+      updateSummary();
+    });
     root.querySelector('[data-filter-clear]').addEventListener('click', () => {
       checks.forEach(check => { check.checked = false; });
       root.dataset.dirty = 'true';

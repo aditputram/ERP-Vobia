@@ -1,5 +1,85 @@
-{% extends "base.html" %}{% block title %}Return Log · Vobia ERP{% endblock %}{% block content %}
-<header class="page-header"><div><p class="eyebrow">WAREHOUSE · RETURN LOG</p><h1>Physical Return</h1><p>Status marketplace hanya membuat expected return. Stock bertambah kembali setelah fisik diterima dan kondisinya Sellable; cost dipulihkan ke FIFO layer transaksi asal.</p></div></header>
-<section class="dashboard-grid"><article class="panel"><div class="panel-header"><div><p class="eyebrow">RECEIPT</p><h2>Catat barang return</h2></div></div><form method="post" class="stack-form">{% csrf_token %}{{ form.as_p }}<button class="primary-button" type="submit">Record physical return</button></form></article><article class="panel span-two"><div class="panel-header"><div><p class="eyebrow">EXPECTED</p><h2>Menunggu penerimaan fisik</h2></div></div><div class="table-wrap"><table><thead><tr><th>Order</th><th>Source</th><th>SKU</th><th>Expected Qty</th><th>Status</th></tr></thead><tbody>{% for row in expected_returns %}<tr><td>{{ row.sales_line.order.order_number }}</td><td>{{ row.sales_line.order.display_source }}</td><td>{{ row.sales_line.sku.sku }}</td><td>{{ row.expected_qty|floatformat:"0g" }}</td><td>{{ row.get_status_display }}</td></tr>{% empty %}<tr><td colspan="5"><div class="empty-state">Tidak ada expected return terbuka.</div></td></tr>{% endfor %}</tbody></table></div></article></section>
-<section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">RETURN HISTORY</p><h2>Physical receipts</h2></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Order</th><th>SKU</th><th>Qty</th><th>Condition</th><th>Stock impact</th><th>Warehouse</th><th>Recorded by</th></tr></thead><tbody>{% for row in receipts %}<tr><td>{{ row.received_date|date:"d M Y" }}</td><td>{{ row.sales_line.order.order_number }}</td><td>{{ row.sales_line.sku.sku }}</td><td>{{ row.quantity|floatformat:"0g" }}</td><td>{{ row.get_condition_display }}</td><td>{% if row.condition == 'SELLABLE' %}<span class="status-badge ready">FIFO restored</span>{% else %}<span class="status-badge">No stock</span>{% endif %}</td><td>{{ row.warehouse.name }}</td><td>{{ row.recorded_by.username }}</td></tr>{% empty %}<tr><td colspan="8"><div class="empty-state">Belum ada physical return receipt.</div></td></tr>{% endfor %}</tbody></table></div></section>
+{% extends "base.html" %}
+{% block title %}Return Log · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">WAREHOUSE · RETURN LOG</p>
+    <h1>Catatan Barang Retur</h1>
+    <p>Pilih Source dan No. Pesanan untuk menampilkan seluruh SKU yang diharapkan kembali.</p>
+  </div>
+</header>
+
+<form method="get" class="panel inventory-filter" data-auto-submit>
+  <div class="inventory-filter-grid">
+    <label>Source
+      <select name="source">
+        <option value="">Pilih Source</option>
+        {% for source in source_options %}<option value="{{ source }}" {% if selected_source == source %}selected{% endif %}>{{ source }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>No. Pesanan
+      <input type="search" name="order_number" list="return-order-options" value="{{ selected_order.order_number|default:'' }}" placeholder="Cari No. Pesanan" autocomplete="off" data-auto-search {% if not selected_source %}disabled{% endif %}>
+      <datalist id="return-order-options">
+        {% for order in order_options %}<option value="{{ order.order_number }}">{% endfor %}
+      </datalist>
+    </label>
+    <a class="secondary-button" href="{% url 'inventory:return_log' %}">Clear</a>
+  </div>
+</form>
+
+{% if selected_order %}
+<section class="panel section-gap">
+  <div class="panel-header">
+    <div>
+      <p class="eyebrow">SALES RETURN RECEIPT</p>
+      <h2>{{ selected_order.order_number }}</h2>
+      <p class="muted">{{ selected_order.display_source }} · {{ return_rows|length }} SKU</p>
+    </div>
+  </div>
+  <form method="post" class="stack-form" data-single-submit>
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="form-alert">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="inventory-filter-grid">
+      {% for field in form %}
+      <label>{{ field.label }}{{ field }}{% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</label>
+      {% endfor %}
+    </div>
+    <div class="table-wrap warehouse-table-wrap">
+      <table>
+        <thead><tr><th>SKU</th><th>Product</th><th>Quantity Sales</th><th>Expected Return</th><th>Quantity Return</th></tr></thead>
+        <tbody>
+          {% for row in return_rows %}
+          <tr>
+            <td><span class="code-label">{{ row.line.sku.sku }}</span></td>
+            <td><strong>{{ row.line.sku.product_variant.product.name }}</strong><small class="table-subtext">{{ row.line.sku.product_variant.name }} · {{ row.line.sku.size|default:"—" }}</small></td>
+            <td>{{ row.line.quantity|floatformat:"0g" }} pcs</td>
+            <td>{{ row.expected_qty|floatformat:"0g" }} pcs<small class="table-subtext">Received {{ row.returned_qty|floatformat:"0g" }} · Remaining {{ row.remaining_qty|floatformat:"0g" }}</small></td>
+            <td>{% if row.remaining_qty %}<input type="number" name="quantity_{{ row.line.id }}" min="1" max="{{ row.remaining_qty|floatformat:'0' }}" value="{% for key,value in submitted_quantities.items %}{% if key == row.line.id|stringformat:'s' %}{{ value }}{% endif %}{% endfor %}" placeholder="0" inputmode="numeric">{% else %}<span class="status-badge ready">Received</span>{% endif %}</td>
+          </tr>
+          {% empty %}<tr><td colspan="5"><div class="empty-state">Pesanan ini tidak memiliki SKU yang dapat diterima.</div></td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if return_rows %}<button class="primary-button" type="submit" data-loading-label="Receiving...">Receive Sales Return</button>{% endif %}
+  </form>
+</section>
+{% else %}
+<section class="panel section-gap"><div class="empty-state">Pilih Source, lalu pilih No. Pesanan untuk melihat SKU return.</div></section>
+{% endif %}
+
+<section class="panel section-gap" id="marketplace-claims">
+  <div class="panel-header"><div><p class="eyebrow">MARKETPLACE CLAIM</p><h2>Tindak Lanjut Retur Bermasalah</h2><p class="muted">Damaged, Defective, Missing/Lost, dan Wrong Item yang dapat diajukan untuk kompensasi.</p></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Source</th><th>Order</th><th>SKU</th><th>Product</th><th>Qty</th><th>Condition</th><th>Status Tindak Lanjut</th></tr></thead><tbody>
+    {% for row in claim_receipts %}<tr><td>{{ row.received_date|date:"d M Y" }}</td><td>{{ row.sales_line.order.display_source }}</td><td>{{ row.sales_line.order.order_number }}</td><td>{{ row.sales_line.sku.sku }}</td><td>{{ row.sales_line.sku.product_variant.product.name }}</td><td>{{ row.quantity|floatformat:"0g" }}</td><td>{{ row.get_condition_display }}</td><td><form method="post" class="inline-form">{% csrf_token %}<input type="hidden" name="action" value="update_follow_up"><input type="hidden" name="receipt_id" value="{{ row.id }}"><select name="follow_up_status">{% for value,label in follow_up_status_options %}<option value="{{ value }}" {% if row.follow_up_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><button class="secondary-button" type="submit">Update</button></form></td></tr>
+    {% empty %}<tr><td colspan="8"><div class="empty-state">Belum ada retur bermasalah yang perlu ditindaklanjuti.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">RETURN HISTORY</p><h2>Sales Return Received</h2></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Source</th><th>Order</th><th>SKU</th><th>Qty</th><th>Condition</th><th>Stock Impact</th><th>Warehouse</th><th>Received By</th></tr></thead><tbody>
+    {% for row in receipts %}<tr><td>{{ row.received_date|date:"d M Y" }}</td><td>{{ row.sales_line.order.display_source }}</td><td>{{ row.sales_line.order.order_number }}</td><td>{{ row.sales_line.sku.sku }}</td><td>{{ row.quantity|floatformat:"0g" }}</td><td>{{ row.get_condition_display }}</td><td>{% if row.condition == 'SELLABLE' %}<span class="status-badge ready">FIFO restored</span>{% else %}<span class="status-badge">No stock</span>{% endif %}</td><td>{{ row.warehouse.name }}</td><td>{{ row.recorded_by.username }}</td></tr>
+    {% empty %}<tr><td colspan="9"><div class="empty-state">Belum ada Sales Return yang diterima.</div></td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
 {% endblock %}

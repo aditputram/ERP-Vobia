@@ -168,6 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
       let searchTimer;
       control.addEventListener('input', () => {
         window.clearTimeout(searchTimer);
+        if (control.list && ![...control.list.options].some(option => option.value === control.value)) return;
         searchTimer = window.setTimeout(submit, 500);
       });
     });

@@ -436,12 +436,25 @@ class PhysicalReturnReceipt(models.Model):
         WRONG_ITEM = "WRONG_ITEM", "Wrong Item"
         WAITING_INSPECTION = "WAITING_INSPECTION", "Waiting Inspection"
 
+    class FollowUpStatus(models.TextChoices):
+        NOT_SUBMITTED = "NOT_SUBMITTED", "Belum Diajukan"
+        SUBMITTED = "SUBMITTED", "Diajukan ke Marketplace"
+        IN_REVIEW = "IN_REVIEW", "Diproses Marketplace"
+        APPROVED = "APPROVED", "Kompensasi Disetujui"
+        REJECTED = "REJECTED", "Kompensasi Ditolak"
+        COMPENSATED = "COMPENSATED", "Kompensasi Diterima"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     sales_line = models.ForeignKey("sales.SalesOrderLine", on_delete=models.PROTECT, related_name="physical_returns")
     received_date = models.DateField()
     quantity = models.DecimalField(max_digits=18, decimal_places=4)
     warehouse = models.ForeignKey("master_data.Warehouse", on_delete=models.PROTECT, related_name="physical_returns")
     condition = models.CharField(max_length=30, choices=Condition.choices)
+    follow_up_status = models.CharField(
+        max_length=30,
+        choices=FollowUpStatus.choices,
+        default=FollowUpStatus.NOT_SUBMITTED,
+    )
     notes = models.TextField(blank=True)
     recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)

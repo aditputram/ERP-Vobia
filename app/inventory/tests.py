@@ -19,11 +19,12 @@ from production.models import ProductionStage
 from production.services import ensure_production_order
 from sales.models import SalesOrder, SalesOrderLine
 
-from .models import FIFOAllocation, FIFOLayer, FIFOOpeningImportBatch, FIFOOpeningSnapshot, InboundReceipt, InventoryException, InventoryMovement, PhysicalReturnReceipt, QCFollowUp
+from .models import ExpectedReturn, FIFOAllocation, FIFOLayer, FIFOOpeningImportBatch, FIFOOpeningSnapshot, InboundReceipt, InventoryException, InventoryMovement, PhysicalReturnReceipt, QCFollowUp
 from .services.aging import po_aging_snapshot, refresh_po_close
 from .services.fifo import (
     inventory_balance,
     complete_qc_rework,
+    create_expected_return,
     post_adjustment,
     post_opening,
     post_sales_out,
@@ -449,6 +450,98 @@ class InventoryWorkflowTests(TestCase):
         )
         self.assertIsNone(no_movement)
         self.assertEqual(inventory_balance(self.sku), Decimal("5"))
+
+    def test_return_log_filters_order_and_receives_multiple_skus(self):
+        first_line = self._sales_line(number="RETURN-ORDER-1", quantity=4)
+        first_line.order.current_status = "Retur"
+        first_line.order.source_label = "Shopee Vobia"
+        first_line.order.save(update_fields=["current_status", "source_label"])
+        create_expected_return(first_line)
+
+        second_sku = SKU.objects.create(
+            sku="SKU-RETURN-2",
+            product_variant=self.sku.product_variant,
+            size="L",
+            current_retail_price=Decimal("200000"),
+            current_master_cogs=Decimal("100000"),
+        )
+        second_line = SalesOrderLine.objects.create(
+            order=first_line.order,
+            sku=second_sku,
+            quantity=2,
+            net_unit_price=Decimal("180000"),
+            retail_price_snapshot=Decimal("200000"),
+            sales_cogs_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("400000"),
+            total_net_sales=Decimal("360000"),
+            total_cogs=Decimal("200000"),
+            gpm=Decimal("160000"),
+            gpm_rate=Decimal("0.4"),
+        )
+        create_expected_return(second_line)
+
+        other_line = self._sales_line(number="RETURN-ORDER-TIKTOK", quantity=1)
+        other_line.order.current_status = "Retur"
+        other_line.order.source = SalesOrder.Source.TIKTOK
+        other_line.order.source_label = "TikTok Vobia"
+        other_line.order.save(update_fields=["current_status", "source", "source_label"])
+        create_expected_return(other_line)
+
+        self.client.force_login(self.user)
+        url = (
+            f"{reverse('inventory:return_log')}?source=Shopee%20Vobia"
+            "&order_number=RETURN-ORDER-1"
+        )
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_order"], first_line.order)
+        self.assertEqual(len(response.context["return_rows"]), 2)
+        self.assertContains(response, "RETURN-ORDER-1")
+        self.assertNotContains(response, "RETURN-ORDER-TIKTOK")
+        self.assertContains(response, "SKU-1")
+        self.assertContains(response, "SKU-RETURN-2")
+        self.assertContains(response, "Quantity Sales")
+        self.assertContains(response, "Expected Return")
+        self.assertContains(response, f'name="quantity_{first_line.id}"')
+        self.assertContains(response, "Receive Sales Return")
+        self.assertNotContains(response, "Waiting Inspection")
+
+        response = self.client.post(
+            url,
+            {
+                "received_date": "2026-09-20",
+                "warehouse": str(self.warehouse.id),
+                "condition": PhysicalReturnReceipt.Condition.DAMAGED,
+                "notes": "Diterima dari marketplace.",
+                f"quantity_{first_line.id}": "2",
+                f"quantity_{second_line.id}": "2",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(PhysicalReturnReceipt.objects.filter(sales_line__order=first_line.order).count(), 2)
+        first_line.expected_return.refresh_from_db()
+        second_line.expected_return.refresh_from_db()
+        self.assertEqual(first_line.expected_return.status, ExpectedReturn.Status.PARTIALLY_RECEIVED)
+        self.assertEqual(second_line.expected_return.status, ExpectedReturn.Status.RECEIVED)
+        self.assertFalse(InventoryMovement.objects.filter(movement_type=InventoryMovement.MovementType.RETURN_IN).exists())
+
+        receipt = PhysicalReturnReceipt.objects.filter(sales_line=first_line).get()
+        response = self.client.post(
+            url,
+            {
+                "action": "update_follow_up",
+                "receipt_id": str(receipt.id),
+                "follow_up_status": PhysicalReturnReceipt.FollowUpStatus.SUBMITTED,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        receipt.refresh_from_db()
+        self.assertEqual(receipt.follow_up_status, PhysicalReturnReceipt.FollowUpStatus.SUBMITTED)
+        response = self.client.get(url)
+        self.assertContains(response, "Tindak Lanjut Retur Bermasalah")
+        self.assertContains(response, "Diajukan ke Marketplace")
 
     def test_po_aging_closes_only_after_full_inbound_and_layer_depletion(self):
         record_qc(

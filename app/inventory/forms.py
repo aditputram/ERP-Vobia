@@ -6,8 +6,6 @@ from django.utils import timezone
 
 from master_data.models import SKU, Warehouse
 from purchasing.models import PurchaseOrderLine
-from sales.models import SalesOrderLine
-
 from .models import InventoryException, InventoryMovement, PhysicalReturnReceipt, QCInspection
 
 
@@ -133,14 +131,34 @@ class DeliveryReceiveForm(forms.Form):
 
 
 class ReturnForm(forms.Form):
-    sales_line = forms.ModelChoiceField(
-        queryset=SalesOrderLine.objects.filter(order__current_status="Retur").select_related("order", "sku")
+    received_date = forms.DateField(
+        label="Tanggal diterima",
+        initial=timezone.localdate,
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
     )
-    received_date = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}))
-    quantity = forms.IntegerField(min_value=1)
-    warehouse = forms.ModelChoiceField(queryset=Warehouse.objects.filter(is_active=True))
-    condition = forms.ChoiceField(choices=PhysicalReturnReceipt.Condition.choices)
-    notes = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}))
+    warehouse = forms.ModelChoiceField(
+        label="Gudang penerima",
+        queryset=Warehouse.objects.filter(is_active=True),
+    )
+    condition = forms.ChoiceField(
+        label="Kondisi barang",
+        choices=[
+            choice
+            for choice in PhysicalReturnReceipt.Condition.choices
+            if choice[0] != PhysicalReturnReceipt.Condition.WAITING_INSPECTION
+        ],
+        initial=PhysicalReturnReceipt.Condition.SELLABLE,
+    )
+    notes = forms.CharField(
+        label="Catatan",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.is_bound:
+            self.fields["warehouse"].initial = self.fields["warehouse"].queryset.filter(code="MAIN").first()
 
 
 class AdjustmentForm(forms.Form):

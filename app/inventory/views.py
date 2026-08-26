@@ -1,9 +1,11 @@
 from decimal import Decimal
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.http import HttpResponseNotAllowed
 from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
@@ -13,12 +15,12 @@ from django.utils.dateparse import parse_date
 
 from master_data.models import Category, Product, ProductStatus, SKU, Warehouse
 from purchasing.models import PurchaseOrder, PurchaseOrderLine
+from sales.models import SalesOrder
 
 from imports.services.storage import DuplicateRawFile
 
 from .forms import AdjustmentForm, DeliveryReceiveForm, FIFOOpeningImportUploadForm, InboundForm, OpeningForm, QCForm, ReturnForm, WarehouseForm
 from .models import (
-    ExpectedReturn,
     FIFOLayer,
     FIFOOpeningImportBatch,
     FIFOOpeningImportIssue,
@@ -29,7 +31,7 @@ from .models import (
     QCInspection,
 )
 from .services.aging import po_aging_snapshot, refresh_po_close
-from .services.fifo import CUTOVER_DATE, inventory_balance, post_adjustment, post_opening, qc_approved_qty, receive_rejected_goods_delivery, record_inbound, record_physical_return, record_qc
+from .services.fifo import CUTOVER_DATE, create_expected_return, inventory_balance, post_adjustment, post_opening, qc_approved_qty, receive_rejected_goods_delivery, record_inbound, record_physical_return, record_qc
 from .services.opening_import import approve_opening_import, create_opening_import
 from .services.reporting import filtered_skus, inventory_parent_summary_rows, inventory_summary_rows, movement_ledger_rows, parent_movement_ledger_rows
 from production.models import ProductionActivity
@@ -415,19 +417,145 @@ def inbound(request):
 
 @login_required
 def return_log(request):
+    return_orders = SalesOrder.objects.filter(
+        current_status="Retur",
+        lines__sku__isnull=False,
+    ).distinct()
+    source_options = sorted(
+        {source_label or source for source_label, source in return_orders.values_list("source_label", "source")},
+        key=str.casefold,
+    )
+    selected_source = request.GET.get("source", "").strip()
+    if selected_source not in source_options:
+        selected_source = ""
+    filtered_orders = return_orders.none()
+    if selected_source:
+        filtered_orders = return_orders.filter(
+            Q(source_label=selected_source) | Q(source_label="", source=selected_source)
+        ).order_by("-order_datetime", "order_number")
+
+    selected_order_number = request.GET.get("order_number", "").strip()
+    selected_order = (
+        filtered_orders.filter(order_number=selected_order_number).first()
+        if selected_order_number
+        else None
+    )
+    return_rows = []
+    if selected_order:
+        lines = selected_order.lines.filter(sku__isnull=False).select_related(
+            "sku__product_variant__product",
+            "expected_return",
+        ).annotate(returned_qty=Sum("physical_returns__quantity"))
+        for line in lines:
+            expected = getattr(line, "expected_return", None)
+            expected_qty = expected.expected_qty if expected else Decimal(line.quantity)
+            returned_qty = line.returned_qty or Decimal("0")
+            return_rows.append(
+                {
+                    "line": line,
+                    "expected_qty": expected_qty,
+                    "returned_qty": returned_qty,
+                    "remaining_qty": max(expected_qty - returned_qty, Decimal("0")),
+                }
+            )
+
     form = ReturnForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
-        try:
-            _, movement = record_physical_return(actor=request.user, **form.cleaned_data)
-        except ValidationError as exc:
-            form.add_error(None, exc)
+    submitted_quantities = {}
+    claim_conditions = [
+        PhysicalReturnReceipt.Condition.DAMAGED,
+        PhysicalReturnReceipt.Condition.DEFECTIVE,
+        PhysicalReturnReceipt.Condition.MISSING,
+        PhysicalReturnReceipt.Condition.WRONG_ITEM,
+    ]
+    if request.method == "POST" and request.POST.get("action") == "update_follow_up":
+        receipt = get_object_or_404(
+            PhysicalReturnReceipt,
+            pk=request.POST.get("receipt_id"),
+            condition__in=claim_conditions,
+        )
+        follow_up_status = request.POST.get("follow_up_status")
+        valid_statuses = {value for value, _ in PhysicalReturnReceipt.FollowUpStatus.choices}
+        if follow_up_status not in valid_statuses:
+            messages.error(request, "Status tindak lanjut tidak valid.")
         else:
-            detail = "stock/FIFO dipulihkan" if movement else "tidak menambah stock karena kondisi non-sellable"
-            messages.success(request, f"Physical Return dicatat; {detail}.")
-            return redirect("inventory:return_log")
-    expected = ExpectedReturn.objects.exclude(status=ExpectedReturn.Status.RECEIVED).select_related("sales_line__order", "sales_line__sku")[:300]
-    receipts = PhysicalReturnReceipt.objects.select_related("sales_line__order", "sales_line__sku", "warehouse", "recorded_by").order_by("-received_date", "-created_at")[:300]
-    return render(request, "inventory/returns.html", {"form": form, "expected_returns": expected, "receipts": receipts})
+            receipt.follow_up_status = follow_up_status
+            receipt.save(update_fields=["follow_up_status"])
+            messages.success(request, "Status tindak lanjut marketplace diperbarui.")
+        return redirect(f"{request.get_full_path()}#marketplace-claims")
+
+    if request.method == "POST":
+        if not selected_order:
+            form.add_error(None, "Pilih Source dan No. Pesanan terlebih dahulu.")
+        entries = []
+        for row in return_rows:
+            field_name = f"quantity_{row['line'].id}"
+            raw_quantity = request.POST.get(field_name, "").strip()
+            submitted_quantities[str(row["line"].id)] = raw_quantity
+            if not raw_quantity:
+                continue
+            try:
+                quantity = int(raw_quantity)
+            except ValueError:
+                form.add_error(None, f"Qty Return {row['line'].sku.sku} harus berupa bilangan bulat.")
+                continue
+            if quantity <= 0 or Decimal(quantity) > row["remaining_qty"]:
+                form.add_error(
+                    None,
+                    f"Qty Return {row['line'].sku.sku} harus 1–{row['remaining_qty']:.0f} pcs.",
+                )
+                continue
+            entries.append((row["line"], quantity))
+        if not entries:
+            form.add_error(None, "Isi minimal satu Qty Return.")
+
+        if form.is_valid() and selected_order and entries:
+            restored_count = 0
+            try:
+                with transaction.atomic():
+                    for sales_line, quantity in entries:
+                        create_expected_return(sales_line)
+                        _, movement = record_physical_return(
+                            sales_line=sales_line,
+                            quantity=quantity,
+                            actor=request.user,
+                            **form.cleaned_data,
+                        )
+                        restored_count += int(movement is not None)
+            except ValidationError as exc:
+                form.add_error(None, exc)
+            else:
+                messages.success(
+                    request,
+                    f"Sales Return diterima untuk {len(entries)} SKU; "
+                    f"{restored_count} SKU memulihkan stock/FIFO.",
+                )
+                query = urlencode({"source": selected_source, "order_number": selected_order.order_number})
+                return redirect(f"{reverse('inventory:return_log')}?{query}")
+
+    receipt_rows = PhysicalReturnReceipt.objects.select_related(
+        "sales_line__order",
+        "sales_line__sku__product_variant__product",
+        "warehouse",
+        "recorded_by",
+    ).order_by("-received_date", "-created_at")
+    receipts = receipt_rows[:300]
+    claim_receipts = receipt_rows.filter(condition__in=claim_conditions)[:300]
+    return render(
+        request,
+        "inventory/returns.html",
+        {
+            "form": form,
+            "source_options": source_options,
+            "selected_source": selected_source,
+            "order_options": filtered_orders,
+            "selected_order": selected_order,
+            "return_rows": return_rows,
+            "submitted_quantities": submitted_quantities,
+            "receipts": receipts,
+            "claim_receipts": claim_receipts,
+            "follow_up_status_options": PhysicalReturnReceipt.FollowUpStatus.choices,
+        },
+    )
 
 
 @login_required

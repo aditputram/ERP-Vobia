@@ -34,6 +34,16 @@ if not SECRET_KEY:
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
 
+# Render menyediakan hostname layanan lewat environment. Dimasukkan otomatis
+# supaya deploy pertama tidak gagal hanya karena host belum didaftarkan manual.
+RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
+if RENDER_EXTERNAL_HOSTNAME:
+    if RENDER_EXTERNAL_HOSTNAME not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+    render_origin = f"https://{RENDER_EXTERNAL_HOSTNAME}"
+    if render_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(render_origin)
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -57,6 +67,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # WhiteNoise menyajikan CSS/JS langsung dari aplikasi, jadi tidak perlu
+    # server file terpisah. Wajib tepat setelah SecurityMiddleware.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -90,6 +103,30 @@ if USE_SQLITE:
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": PROJECT_ROOT / "data" / "vobia_erp.sqlite3",
+        }
+    }
+elif os.getenv("DATABASE_URL", "").strip():
+    # Render (dan kebanyakan hosting) memberi satu DATABASE_URL. Diurai sendiri
+    # supaya tidak perlu menambah pustaka baru.
+    from urllib.parse import unquote, urlparse
+
+    url = urlparse(os.environ["DATABASE_URL"].strip())
+    if url.scheme not in {"postgres", "postgresql"}:
+        raise ImproperlyConfigured("DATABASE_URL harus PostgreSQL.")
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": (url.path or "/").lstrip("/"),
+            "USER": unquote(url.username or ""),
+            "PASSWORD": unquote(url.password or ""),
+            "HOST": url.hostname or "",
+            "PORT": str(url.port or 5432),
+            "CONN_MAX_AGE": 60,
+            "OPTIONS": {
+                "connect_timeout": 5,
+                # database terkelola mewajibkan TLS
+                "sslmode": os.getenv("POSTGRES_SSLMODE", "require"),
+            },
         }
     }
 else:
@@ -129,11 +166,33 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = PROJECT_ROOT / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
-PRIVATE_UPLOAD_ROOT = PROJECT_ROOT / "data" / "private_uploads"
+# Di server: nama berkas diberi sidik jari + dikompresi, jadi browser boleh
+# menyimpannya lama dan tidak pernah menyajikan versi basi. Di lokal/tes tidak
+# dipakai karena butuh `collectstatic` lebih dulu.
+_static_backend = (
+    "django.contrib.staticfiles.storage.StaticFilesStorage"
+    if (DEBUG or USE_SQLITE)
+    else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+)
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": _static_backend},
+}
+# Bukti impor adalah dokumen audit. Di hosting, folder aplikasi terhapus setiap
+# deploy — jadi lokasinya diarahkan ke disk permanen lewat environment.
+PRIVATE_UPLOAD_ROOT = Path(
+    os.getenv("VOBIA_PRIVATE_UPLOAD_ROOT", str(PROJECT_ROOT / "data" / "private_uploads"))
+)
 MASTER_IMPORT_MAX_BYTES = 25 * 1024 * 1024
 MASTER_IMPORT_MAX_ROWS = 5000
 SALES_IMPORT_MAX_ROWS = 100000
 SALES_IMPORT_COMMIT_ENABLED = env_bool("SALES_IMPORT_COMMIT_ENABLED", True)
+
+# Halaman /account/setup/ hanya untuk komputer lokal. Di balik proxy hosting,
+# alamat pengirim bisa terbaca sebagai localhost sehingga penjaganya lolos —
+# jadi di server halaman ini dimatikan dan akun pertama dibuat lewat perintah
+# `manage.py create_superadmin`.
+ALLOW_INITIAL_SETUP_PAGE = env_bool("VOBIA_ALLOW_INITIAL_SETUP", DEBUG or USE_SQLITE)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "accounts.User"

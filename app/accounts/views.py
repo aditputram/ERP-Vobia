@@ -32,6 +32,14 @@ class InitialSuperadminSetupView(View):
     local_addresses = {"127.0.0.1", "::1"}
 
     def dispatch(self, request, *args, **kwargs):
+        # Di server, alamat pengirim yang terlihat adalah proxy hosting — bisa
+        # terbaca localhost sehingga penjaga di bawah lolos. Karena itu halaman
+        # ini mati kecuali sengaja dinyalakan; akun pertama di server dibuat
+        # lewat `manage.py create_superadmin`.
+        if not getattr(settings, "ALLOW_INITIAL_SETUP_PAGE", False):
+            return HttpResponseForbidden(
+                "Halaman setup dimatikan di server. Gunakan perintah create_superadmin."
+            )
         if request.META.get("REMOTE_ADDR", "") not in self.local_addresses:
             return HttpResponseForbidden("Initial setup hanya tersedia dari localhost.")
         if get_user_model().objects.exists():

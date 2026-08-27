@@ -1,0 +1,56 @@
+# Cetak biru layanan Render. Region Singapore dipilih sengaja: server dan
+# database harus berdekatan, dan penggunanya di Jakarta. Salah region = setiap
+# klik membayar ratusan milidetik perjalanan data.
+services:
+  - type: web
+    name: vobia-erp
+    runtime: python
+    region: singapore
+    plan: starter            # jangan free: layanan tidur 15 menit & database gratis kedaluwarsa 30 hari
+    branch: main
+    buildCommand: ./build.sh
+    # migrasi dijalankan sebelum versi baru menerima lalu lintas
+    preDeployCommand: python app/manage.py migrate --noinput
+    startCommand: gunicorn config.wsgi:application --chdir app --config gunicorn.conf.py
+    healthCheckPath: /healthz
+    disk:
+      # bukti impor adalah dokumen audit — harus di luar folder aplikasi supaya
+      # tidak ikut terhapus setiap deploy
+      name: vobia-evidence
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: VOBIA_USE_SQLITE
+        value: "0"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_SECURE_SSL_REDIRECT
+        value: "1"
+      - key: DJANGO_SECURE_HSTS_SECONDS
+        value: "31536000"
+      # dinyalakan hanya setelah domain final ditetapkan
+      - key: DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS
+        value: "0"
+      - key: DJANGO_SECURE_HSTS_PRELOAD
+        value: "0"
+      # halaman /account/setup/ dimatikan di server; akun pertama dibuat lewat
+      # Render Shell: python app/manage.py setup_superadmin
+      - key: VOBIA_ALLOW_INITIAL_SETUP
+        value: "0"
+      - key: VOBIA_PRIVATE_UPLOAD_ROOT
+        value: /var/data/private_uploads
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vobia-erp-db
+          property: connectionString
+
+databases:
+  - name: vobia-erp-db
+    databaseName: vobia_erp
+    user: vobia_erp
+    region: singapore
+    plan: basic-256mb        # bukan free: database gratis kedaluwarsa 30 hari

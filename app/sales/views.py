@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -8,7 +9,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Case, CharField, Count, F, Q, Sum, Value, When
+from django.db.models import Case, CharField, Count, F, Max, Min, Q, Sum, Value, When
 from django.http import HttpResponse, JsonResponse
 from django.db.models.functions import TruncMonth
 from django.shortcuts import get_object_or_404, redirect, render
@@ -348,6 +349,10 @@ def _create_sales_planning_scenario(request):
     return scenario
 
 
+def _planned_sales_product_ids(month):
+    return SalesPlan.objects.filter(month=month).values_list("product_id", flat=True)
+
+
 def _selected_sales_planning_products(request, month):
     activity = request.POST.get("planning_activity", "ACTIVE")
     if activity not in {"ACTIVE", "INACTIVE", "ALL"}:
@@ -356,7 +361,7 @@ def _selected_sales_planning_products(request, month):
         Product.objects.filter(is_active=True).select_related("status", "category", "subcategory"),
         activity,
         planning_activity_snapshot(target_month=month),
-    )
+    ).exclude(id__in=_planned_sales_product_ids(month))
     filters = {
         "product_status": request.POST.get("product_status", ""),
         "category": request.POST.get("category", ""),
@@ -367,13 +372,81 @@ def _selected_sales_planning_products(request, month):
             products = products.filter(**{f"{field if field != 'product_status' else 'status'}_id": value})
     selected_ids = list(dict.fromkeys(value for value in request.POST.getlist("product") if value))
     if selected_ids:
+        if SalesPlan.objects.filter(month=month, product_id__in=selected_ids).exists():
+            raise ValidationError(
+                "Product sudah memiliki Sales Projection pada bulan ini. "
+                "Ubah target melalui Scenario Draft yang sudah ada."
+            )
         products = products.filter(id__in=selected_ids)
         if products.count() != len(selected_ids):
             raise ValidationError("Product harus sesuai dengan filter yang dipilih.")
     products = list(products.order_by("name", "code"))
     if not products:
-        raise ValidationError("Tidak ada Product yang cocok dengan filter Projection.")
+        raise ValidationError(
+            "Tidak ada Product yang tersedia. Product sesuai filter mungkin sudah "
+            "memiliki Sales Projection pada bulan ini."
+        )
     return products, activity, filters, selected_ids
+
+
+def _sales_planning_totals(parent_rows, history_months):
+    history = [
+        {
+            "month": month,
+            "qty": sum(row["history"][index]["qty"] for row in parent_rows),
+            "gross": sum((row["history"][index]["gross"] for row in parent_rows), Decimal("0")),
+        }
+        for index, month in enumerate(history_months)
+    ]
+    qty = sum(row["target_qty"] for row in parent_rows)
+    baseline = Decimal(history[-1]["qty"]) if history else Decimal("0")
+    return {
+        "history": history,
+        "qty": qty,
+        "gross": sum((row["target_gross"] for row in parent_rows), Decimal("0")),
+        "sku_count": sum(row["sku_count"] for row in parent_rows),
+        "baseline_qty": baseline,
+        "growth_pct": (Decimal(qty) - baseline) / baseline * 100 if baseline else None,
+    }
+
+
+def _sales_plan_summary(request):
+    targets = SalesPlanSKU.objects.all()
+    bounds = targets.aggregate(start=Min("plan__month"), end=Max("plan__month"))
+    default_month = _shift_month(timezone.localdate().replace(day=1), 1)
+    start = _sales_planning_month(request.GET.get("summary_start")) or bounds["start"] or default_month
+    end = _sales_planning_month(request.GET.get("summary_end")) or bounds["end"] or start
+    error = ""
+    if any(request.GET.get(key) and not _sales_planning_month(request.GET[key]) for key in ("summary_start", "summary_end")):
+        error = "Start Month dan End Month harus berupa bulan yang valid."
+    elif start > end:
+        error = "End Month tidak boleh sebelum Start Month."
+    targets = targets.none() if error else targets.filter(plan__month__range=(start, end))
+    filters = []
+    params = [("summary_start", f"{start:%Y-%m}"), ("summary_end", f"{end:%Y-%m}")]
+    for name, label, field, model in (
+        ("summary_status", "Product Status", "plan__product__status_id", ProductStatus),
+        ("summary_category", "Category", "plan__product__category_id", Category),
+        ("summary_subcategory", "Subcategory", "plan__product__subcategory_id", Subcategory),
+        ("summary_product", "Product", "plan__product_id", Product),
+    ):
+        options = [
+            {"value": str(row["id"]), "label": row["name"]}
+            for row in model.objects.filter(pk__in=targets.values_list(field, flat=True)).order_by("name", "id").values("id", "name")
+        ]
+        selected = list(dict.fromkeys(_valid_multi_values(request, name, [option["value"] for option in options])))
+        filters.append({"name": name, "label": label, "options": options, "selected": selected, "all_label": f"All {label}"})
+        if selected:
+            targets = targets.filter(**{f"{field}__in": selected})
+            params.extend((name, value) for value in selected)
+    rows = list(targets.order_by("plan__month").values(month=F("plan__month")).annotate(
+        qty=Sum("quantity_target"), gross=Sum("gross_sales_target"),
+    ))
+    return {
+        "start": start, "end": end, "error": error, "filters": filters, "params": params, "rows": rows,
+        "qty": sum(row["qty"] for row in rows),
+        "gross": sum((row["gross"] for row in rows), Decimal("0")),
+    }
 
 
 def _sales_projection_preview(request, scenario, month):
@@ -475,6 +548,7 @@ def _sales_projection_preview(request, scenario, month):
         "rows": sku_rows,
         "parent_rows": parent_rows,
         "sku_rows": sku_rows,
+        "totals": _sales_planning_totals(parent_rows, history_months),
         "scenario": scenario,
         "month": month,
         "history_months": history_months,
@@ -495,6 +569,9 @@ def _sales_projection_preview(request, scenario, month):
 
 def _save_sales_projection_preview(request, preview):
     scenario = preview["scenario"]
+    submitted_skus = {key.removeprefix("target_qty_") for key in request.POST if key.startswith("target_qty_")}
+    if submitted_skus != {str(row["sku"].id) for row in preview["sku_rows"]}:
+        raise ValidationError("Pilihan Product sudah berubah. Buat Preview ulang sebelum menyimpan target.")
     targets = []
     for row in preview["sku_rows"]:
         raw_qty = request.POST.get(f"target_qty_{row['sku'].id}")
@@ -517,9 +594,16 @@ def _save_sales_projection_preview(request, preview):
         product_targets = {}
         for row in targets:
             product_targets.setdefault(row["product"].id, []).append(row)
+        # Serialize claims of the same products across different Sales scenarios.
+        list(Product.objects.select_for_update().filter(pk__in=product_targets).order_by("pk"))
+        if SalesPlan.objects.filter(month=preview["month"], product_id__in=product_targets).exists():
+            raise ValidationError(
+                "Product sudah memiliki Sales Projection pada bulan ini. "
+                "Ubah target melalui Scenario Draft yang sudah ada."
+            )
         for product_rows in product_targets.values():
             product = product_rows[0]["product"]
-            plan, _ = SalesPlan.objects.get_or_create(
+            plan = SalesPlan(
                 scenario=scenario,
                 month=preview["month"],
                 product=product,
@@ -529,15 +613,14 @@ def _save_sales_projection_preview(request, preview):
             plan.full_clean()
             plan.save()
             for row in product_rows:
-                target, _ = SalesPlanSKU.objects.update_or_create(
+                target = SalesPlanSKU(
                     plan=plan,
                     sku=row["sku"],
-                    defaults={
-                        "gross_sales_target": row["target_gross"],
-                        "quantity_target": row["target_qty"],
-                    },
+                    gross_sales_target=row["target_gross"],
+                    quantity_target=row["target_qty"],
                 )
                 target.full_clean()
+                target.save()
         record_audit(
             actor=request.user,
             action="sales_projection_builder_saved",
@@ -560,10 +643,16 @@ def _save_sales_projection(request, scenario, month):
     if month not in _scenario_months(scenario):
         raise ValidationError("Bulan projection berada di luar periode Scenario.")
 
+    months = [_sales_planning_month(value) for value in request.POST.getlist("draft_month")] or [month]
+    if any(value not in _scenario_months(scenario) for value in months):
+        raise ValidationError("Bulan projection berada di luar periode Scenario.")
+
     targets = list(
-        SalesPlanSKU.objects.filter(plan__scenario=scenario, plan__month=month)
+        SalesPlanSKU.objects.filter(plan__scenario=scenario, plan__month__in=months)
         .select_related("plan", "sku", "sku__product_variant__product")
     )
+    if {key.removeprefix("qty_") for key in request.POST if key.startswith("qty_")} != {str(target.id) for target in targets}:
+        raise ValidationError("Isi Draft telah berubah. Muat ulang sebelum menyimpan agar target lain tidak tertimpa.")
     values = []
     for target in targets:
         try:
@@ -607,7 +696,7 @@ def _save_sales_projection(request, scenario, month):
             entity_id=scenario.id,
             after_values={
                 "scenario": scenario.name,
-                "month": month.isoformat(),
+                "months": [value.isoformat() for value in sorted(set(months))],
                 "skus": len(values),
                 "gross_sales_target": str(sum((value[1] for value in values), Decimal("0"))),
                 "quantity_target": sum(value[2] for value in values),
@@ -728,7 +817,7 @@ def planning_filter_options(request):
         Product.objects.filter(is_active=True),
         activity,
         planning_activity_snapshot(target_month=month),
-    )
+    ).exclude(id__in=_planned_sales_product_ids(month))
     status_id = request.GET.get("product_status", "")
     category_id = request.GET.get("category", "")
     subcategory_id = request.GET.get("subcategory", "")
@@ -799,7 +888,10 @@ def planning_builder(request):
             pass
         elif scenario:
             month = month if month in _scenario_months(scenario) else scenario.start_month
-            return redirect(f"{reverse('sales:planning_builder')}?scenario={scenario.id}&month={month:%Y-%m}#draft-projection")
+            params = [("scenario", str(scenario.id)), ("month", f"{month:%Y-%m}")]
+            for name in ("draft_month", "draft_metric", "draft_grain", "summary_start", "summary_end", "summary_status", "summary_category", "summary_subcategory", "summary_product"):
+                params.extend((name, value) for value in request.POST.getlist(name))
+            return redirect(f"{reverse('sales:planning_builder')}?{urlencode(params)}#draft-projection")
         else:
             return redirect("sales:planning_builder")
 
@@ -816,8 +908,14 @@ def planning_builder(request):
     selected_month = forced_month or _sales_planning_month(request.GET.get("month"))
     if selected_month not in scenario_months:
         selected_month = scenario_months[0] if scenario_months else None
+    selected_draft_months = sorted({
+        month for value in request.GET.getlist("draft_month")
+        if (month := _sales_planning_month(value)) in scenario_months
+    }) or ([selected_month] if selected_month else [])
+    draft_metric_options = [("qty", "Qty"), ("gross", "Gross Sales")]
+    selected_draft_metrics = [key for key, _ in draft_metric_options if key in request.GET.getlist("draft_metric")] or ["qty", "gross"]
     targets = list(
-        SalesPlanSKU.objects.filter(plan__scenario=viewed_scenario, plan__month=selected_month)
+        SalesPlanSKU.objects.filter(plan__scenario=viewed_scenario, plan__month__in=selected_draft_months)
         .select_related(
             "plan",
             "sku",
@@ -829,22 +927,34 @@ def planning_builder(request):
         )
         .order_by("sku__product_variant__product__name", "sku__sku")
     ) if viewed_scenario else []
-    skus = [target.sku for target in targets]
-    actuals = _sales_actuals_by_sku(skus, [selected_month]) if selected_month and skus else {}
+    skus = list({target.sku_id: target.sku for target in targets}.values())
+    target_lookup = {(target.sku_id, target.plan.month): target for target in targets}
+    actuals = _sales_actuals_by_sku(skus, selected_draft_months) if skus else {}
     draft_history_months, draft_histories = (
-        _sales_history_by_sku(skus, selected_month, viewed_scenario)
-        if selected_month and skus else ([], {})
+        _sales_history_by_sku(skus, selected_draft_months[0], viewed_scenario)
+        if selected_draft_months and skus else ([], {})
     )
     rows = []
-    for target in targets:
-        product = target.sku.product_variant.product
-        actual = actuals.get((target.sku_id, selected_month), {"gross": Decimal("0"), "qty": 0})
+    for sku in skus:
+        product = sku.product_variant.product
+        cells = []
+        for month in selected_draft_months:
+            target = target_lookup.get((sku.id, month))
+            cells.append({"month": month, "target": target,
+                          "qty": target.quantity_target if target else None,
+                          "gross": target.gross_sales_target if target else None})
+        target = next(cell["target"] for cell in cells if cell["target"])
+        actual = {
+            key: sum((actuals.get((sku.id, month), {}).get(key, 0) for month in selected_draft_months), Decimal("0"))
+            for key in ("qty", "gross")
+        }
         rows.append({
             "plan": target.plan,
             "target": target,
-            "sku": target.sku,
+            "sku": sku,
             "product": product,
-            "history": draft_histories.get(target.sku_id, []),
+            "history": draft_histories.get(sku.id, []),
+            "targets": cells,
             "actual": actual,
             "gross_gap": actual["gross"] - target.gross_sales_target,
             "qty_gap": actual["qty"] - target.quantity_target,
@@ -865,11 +975,16 @@ def planning_builder(request):
                 {"month": history_month, "qty": 0, "gross": Decimal("0")}
                 for history_month in draft_history_months
             ],
+            "targets": [{"month": month, "qty": None, "gross": None} for month in selected_draft_months],
         })
         group["product_names"].add(row["product"].name)
         group["sku_count"] += 1
-        group["target_qty"] += row["target"].quantity_target
-        group["target_gross"] += row["target"].gross_sales_target
+        for index, cell in enumerate(row["targets"]):
+            if cell["target"] is not None:
+                group["target_qty"] += cell["qty"]
+                group["target_gross"] += cell["gross"]
+                group["targets"][index]["qty"] = (group["targets"][index]["qty"] or 0) + cell["qty"]
+                group["targets"][index]["gross"] = (group["targets"][index]["gross"] or Decimal("0")) + cell["gross"]
         group["actual_qty"] += row["actual"]["qty"]
         group["actual_gross"] += row["actual"]["gross"]
         for index, history in enumerate(row["history"]):
@@ -883,10 +998,13 @@ def planning_builder(request):
         draft_parent_rows.append(group)
     draft_parent_rows.sort(key=lambda row: row["parent_sku"])
 
-    target_totals = {
-        "gross": sum((row["target"].gross_sales_target for row in rows), Decimal("0")),
-        "qty": sum(row["target"].quantity_target for row in rows),
-    }
+    target_totals = _sales_planning_totals(draft_parent_rows, draft_history_months)
+    target_totals["targets"] = [
+        {"month": month,
+         "qty": sum(row["targets"][index]["qty"] or 0 for row in draft_parent_rows),
+         "gross": sum((row["targets"][index]["gross"] or Decimal("0") for row in draft_parent_rows), Decimal("0"))}
+        for index, month in enumerate(selected_draft_months)
+    ]
     actual_totals = {
         "gross": sum((row["actual"]["gross"] for row in rows), Decimal("0")),
         "qty": sum(row["actual"]["qty"] for row in rows),
@@ -903,10 +1021,17 @@ def planning_builder(request):
         ]
     default_month = _shift_month(timezone.localdate().replace(day=1), 1)
     return render(request, "sales/planning_builder.html", {
+        "plan_summary": _sales_plan_summary(request),
         "scenarios": scenarios,
         "viewed_scenario": viewed_scenario,
         "scenario_months": scenario_months,
         "selected_month": selected_month,
+        "selected_draft_months": selected_draft_months,
+        "draft_metric_options": draft_metric_options,
+        "selected_draft_metrics": selected_draft_metrics,
+        "show_draft_qty": "qty" in selected_draft_metrics,
+        "show_draft_gross": "gross" in selected_draft_metrics,
+        "selected_draft_grain": "parent_sku" if request.GET.get("draft_grain") == "parent_sku" else "sku",
         "rows": rows,
         "draft_parent_rows": draft_parent_rows,
         "draft_history_headers": [
@@ -937,7 +1062,9 @@ def planning_builder(request):
         "product_statuses": ProductStatus.objects.filter(is_active=True).order_by("name"),
         "categories": Category.objects.filter(is_active=True).order_by("name"),
         "subcategories": Subcategory.objects.filter(is_active=True).select_related("category").order_by("name"),
-        "product_options": Product.objects.filter(is_active=True).order_by("name", "code"),
+        "product_options": Product.objects.filter(is_active=True).exclude(
+            id__in=_planned_sales_product_ids(selected_month),
+        ).order_by("name", "code"),
     })
 
 

@@ -1,0 +1,15 @@
+<tfoot>
+  <tr data-sales-planning-total data-baseline-qty="{{ totals.baseline_qty|floatformat:'4u' }}">
+    {% if status == 'DRAFT' %}<td class="draft-selection-col"></td>{% endif %}
+    <td colspan="{{ identity_columns }}"><strong>Total</strong></td>
+    {% if show_sku_count %}<td>{{ totals.sku_count|floatformat:"0g" }}</td>{% endif %}
+    {% for history in totals.history %}{% if not matrix or show_draft_qty %}<td>{{ history.qty|floatformat:"0g" }}</td>{% endif %}{% if not matrix or show_draft_gross %}<td>Rp {{ history.gross|floatformat:"0g" }}</td>{% endif %}{% endfor %}
+    {% if matrix %}
+      {% for cell in totals.targets %}{% if show_draft_qty %}<td data-draft-matrix-total-qty data-month="{{ cell.month|date:'Y-m' }}">{{ cell.qty|floatformat:"0g" }}</td>{% endif %}{% if show_draft_gross %}<td data-draft-matrix-total-gross data-month="{{ cell.month|date:'Y-m' }}">Rp {{ cell.gross|floatformat:"0g" }}</td>{% endif %}{% endfor %}
+    {% else %}
+    <td data-sales-total-qty>{{ totals.qty|floatformat:"0g" }}</td>
+    <td data-sales-total-gross>Rp {{ totals.gross|floatformat:"0g" }}</td>
+    {% if show_growth %}<td data-sales-total-growth>{% if totals.growth_pct != None %}{% if totals.growth_pct > 0 %}+{% endif %}{{ totals.growth_pct|floatformat:"2g" }}%{% else %}—{% endif %}</td>{% endif %}
+    {% endif %}
+  </tr>
+</tfoot>

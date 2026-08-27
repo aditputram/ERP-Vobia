@@ -4,7 +4,8 @@ from io import BytesIO
 import uuid
 
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.db import IntegrityError, transaction
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
@@ -12,11 +13,12 @@ from openpyxl import load_workbook
 from accounts.models import User
 from inventory.models import InventoryException, InventoryMovement
 from imports.models import RawFile
-from master_data.models import Category, MarketplaceProductMapping, Product, ProductStatus, ProductVariant, SKU
+from master_data.models import Category, MarketplaceProductMapping, Product, ProductStatus, ProductVariant, SKU, Subcategory
 from merchandising.models import MerchandisingMonthlySnapshot, MerchandisingSnapshotBatch
 from traffic.models import TrafficImportBatch, TrafficProductMetric
 
 from .models import SalesOrder, SalesOrderLine, SalesPlan, SalesPlanSKU, SalesPlanningScenario
+from .views import _sales_planning_totals, _save_sales_projection_preview
 
 
 class SalesReportRouteTests(TestCase):
@@ -37,6 +39,141 @@ class SalesReportRouteTests(TestCase):
             with self.subTest(name=name):
                 response = self.client.get(reverse(name))
                 self.assertEqual(response.status_code, 200)
+
+    def test_sales_plan_summary_aggregates_saved_targets_with_cascading_filters(self):
+        product, sku = self._planning_product("SUMMARY-PANTS")
+        second_sku = SKU.objects.create(sku="SUMMARY-PANTS-L", product_variant=sku.product_variant, size="L")
+        other, other_sku = self._planning_product("SUMMARY-SHIRT")
+        other.status = ProductStatus.objects.create(code="SUMMARY-SEASONAL", name="Seasonal")
+        other.category = Category.objects.create(code="SUMMARY-SHIRT", name="Shirts")
+        other.subcategory = Subcategory.objects.create(category=other.category, code="LINEN", name="Linen")
+        other.save()
+        product.subcategory = Subcategory.objects.create(category=product.category, code="DENIM", name="Denim")
+        product.save()
+        scenario = SalesPlanningScenario.objects.create(name="Summary Draft", start_month=date(2026, 9, 1), end_month=date(2026, 10, 1), created_by=self.user)
+        approved = SalesPlanningScenario.objects.create(name="Summary Approved", start_month=date(2026, 10, 1), end_month=date(2026, 10, 1), created_by=self.user, status=SalesPlanningScenario.Status.APPROVED)
+        september = SalesPlan.objects.create(scenario=scenario, product=product, month=date(2026, 9, 1), quantity_target=999)
+        october = SalesPlan.objects.create(scenario=scenario, product=product, month=date(2026, 10, 1))
+        other_plan = SalesPlan.objects.create(scenario=approved, product=other, month=date(2026, 10, 1))
+        for plan, item, qty, gross in [(september, sku, 10, 1000), (september, second_sku, 2, 200), (october, sku, 3, 300), (other_plan, other_sku, 5, 1000)]:
+            SalesPlanSKU.objects.create(plan=plan, sku=item, quantity_target=qty, gross_sales_target=gross)
+        context = {"scenario": scenario.id, "month": "2026-09", "draft_month": ["2026-09", "2026-10"], "draft_metric": "qty", "draft_grain": "parent_sku"}
+        page = self.client.get(reverse("sales:planning_builder"), context)
+        summary = page.context["plan_summary"]
+        self.assertEqual(summary["rows"], [
+            {"month": date(2026, 9, 1), "qty": 12, "gross": Decimal("1200")},
+            {"month": date(2026, 10, 1), "qty": 8, "gross": Decimal("1300")},
+        ])
+        self.assertEqual((summary["qty"], summary["gross"]), (20, Decimal("2500")))
+        self.assertLess(page.content.decode().index('id="sales-plan-summary"'), page.content.decode().index('01 · SCENARIO'))
+        filtered = self.client.get(reverse("sales:planning_builder"), {
+            **context, "summary_start": "2026-10", "summary_end": "2026-10", "summary_product": [str(other.id)],
+        })
+        self.assertEqual(filtered.context["plan_summary"]["qty"], 5)
+        self.assertEqual(filtered.context["target_totals"]["qty"], 15)  # Summary does not filter the draft.
+        self.assertEqual(filtered.context["selected_draft_months"], [date(2026, 9, 1), date(2026, 10, 1)])
+        cascade = self.client.get(reverse("sales:planning_builder"), {
+            **context, "summary_status": str(product.status_id), "summary_category": str(other.category_id),
+            "summary_subcategory": str(other.subcategory_id), "summary_product": str(other.id),
+        }).context["plan_summary"]
+        self.assertEqual(cascade["qty"], 15)
+        self.assertEqual([option["value"] for option in cascade["filters"][1]["options"]], [str(product.category_id)])
+        self.assertEqual([option["value"] for option in cascade["filters"][2]["options"]], [str(product.subcategory_id)])
+        self.assertEqual([option["value"] for option in cascade["filters"][3]["options"]], [str(product.id)])
+        self.assertTrue(all(not row["selected"] for row in cascade["filters"][1:]))
+        multi = self.client.get(reverse("sales:planning_builder"), {**context, "summary_product": [str(product.id), str(other.id), str(product.id)]}).context["plan_summary"]
+        self.assertEqual(multi["qty"], 20)
+        self.assertEqual(SalesPlanSKU.objects.count(), 4)
+
+    def test_sales_plan_summary_validates_month_range_and_empty_data(self):
+        for filters in ({"summary_start": "2026-11", "summary_end": "2026-09"}, {"summary_start": "bad-month"}):
+            page = self.client.get(reverse("sales:planning_builder"), filters)
+            self.assertEqual(page.status_code, 200)
+            self.assertTrue(page.context["plan_summary"]["error"])
+            self.assertEqual(page.context["plan_summary"]["rows"], [])
+        empty = self.client.get(reverse("sales:planning_builder"), {"summary_start": "2027-01", "summary_end": "2027-12"})
+        self.assertContains(empty, "Belum ada target tersimpan untuk filter ini")
+        self.assertEqual(empty.context["plan_summary"]["qty"], 0)
+        self.assertFalse(empty.context["plan_summary"]["error"])
+
+    def test_sales_draft_matrix_months_metrics_and_scoped_save(self):
+        first, sku = self._planning_product("MATRIX-A")
+        second, second_sku = self._planning_product("MATRIX-B")
+        Product.objects.filter(pk__in=[first.pk, second.pk]).update(parent_sku="MATRIX-PARENT")
+        scenario = SalesPlanningScenario.objects.create(
+            name="Matrix months", start_month=date(2026, 9, 1), end_month=date(2026, 12, 1), created_by=self.user,
+        )
+        targets = []
+        for product, item, month, qty in [(first, sku, 9, 10), (first, sku, 10, 20), (second, second_sku, 10, 5), (first, sku, 11, 30)]:
+            plan = SalesPlan.objects.create(scenario=scenario, product=product, month=date(2026, month, 1), quantity_target=qty, gross_sales_target=qty * 100000)
+            targets.append(SalesPlanSKU.objects.create(plan=plan, sku=item, quantity_target=qty, gross_sales_target=qty * 100000))
+        filters = {"scenario": scenario.id, "month": "2026-12", "draft_month": ["2026-10", "2026-09", "2026-10"], "draft_metric": ["qty"]}
+        page = self.client.get(reverse("sales:planning_builder"), filters)
+        self.assertEqual(page.context["selected_draft_months"], [date(2026, 9, 1), date(2026, 10, 1)])
+        self.assertEqual(len(page.context["rows"]), 2)
+        self.assertEqual(len(page.context["draft_parent_rows"]), 1)
+        self.assertEqual(page.context["target_totals"]["qty"], 35)
+        self.assertEqual(page.context["target_totals"]["gross"], 3500000)
+        self.assertEqual(page.context["target_totals"]["sku_count"], 2)
+        self.assertEqual([cell["qty"] for cell in page.context["target_totals"]["targets"]], [10, 25])
+        self.assertEqual(page.context["draft_history_headers"][0]["month"], date(2026, 6, 1))
+        self.assertIsNone(page.context["rows"][1]["targets"][0]["target"])
+        self.assertContains(page, "Target September 2026")
+        self.assertContains(page, "Target Oktober 2026")
+        self.assertNotIn('<th>Gross Sales</th>', page.content.decode().split('id="draft-projection"', 1)[1])
+        self.assertContains(page, '<tfoot>', count=3)  # Summary plus both draft grains.
+        gross_page = self.client.get(reverse("sales:planning_builder"), {**filters, "draft_metric": "gross", "draft_grain": "parent_sku"})
+        self.assertNotContains(gross_page, '<th>Sales Qty</th>')
+        self.assertContains(gross_page, f'type="hidden" name="qty_{targets[0].id}" value="10"')
+        self.assertEqual(gross_page.context["selected_draft_grain"], "parent_sku")
+        both = self.client.get(reverse("sales:planning_builder"), {**filters, "draft_metric": ["qty", "gross"]})
+        self.assertContains(both, '<th>Sales Qty</th>')
+        self.assertContains(both, '<th>Gross Sales</th>')
+        payload = {**filters, "form_name": "projection", "draft_grain": "parent_sku",
+                   **{f"qty_{target.id}": target.quantity_target + 1 for target in targets[:3]}}
+        saved = self.client.post(reverse("sales:planning_builder"), payload, follow=True)
+        self.assertEqual(saved.context["selected_draft_months"], page.context["selected_draft_months"])
+        self.assertEqual(saved.context["target_totals"]["qty"], 38)
+        self.assertEqual(saved.context["selected_draft_metrics"], ["qty"])
+        self.assertEqual(saved.context["selected_draft_grain"], "parent_sku")
+        for target, expected in zip(targets, [11, 21, 6, 30]):
+            target.refresh_from_db()
+            self.assertEqual(target.quantity_target, expected)
+            target.plan.refresh_from_db()
+            self.assertEqual(target.plan.quantity_target, expected)
+        # No field may silently zero an omitted target or edit an unselected month.
+        stale = {**payload}
+        del stale[f"qty_{targets[0].id}"]
+        self.assertContains(self.client.post(reverse("sales:planning_builder"), stale, follow=True), "Isi Draft telah berubah")
+        invalid = {**payload, f"qty_{targets[0].id}": "88", f"qty_{targets[1].id}": "-1"}
+        self.client.post(reverse("sales:planning_builder"), invalid)
+        targets[0].refresh_from_db()
+        self.assertEqual(targets[0].quantity_target, 11)
+        outside = {**payload, f"qty_{targets[3].id}": "99"}
+        self.assertContains(self.client.post(reverse("sales:planning_builder"), outside, follow=True), "Isi Draft telah berubah")
+        targets[3].refresh_from_db()
+        self.assertEqual(targets[3].quantity_target, 30)
+
+    def test_sales_planning_totals_sum_all_rows_and_weight_growth(self):
+        months = [date(2026, 6, 1), date(2026, 7, 1), date(2026, 8, 1)]
+        groups = [
+            {"sku_count": 6, "target_qty": 20, "target_gross": Decimal("2000"),
+             "history": [{"qty": 10, "gross": Decimal("1000")} for _ in months]},
+            {"sku_count": 7, "target_qty": 30, "target_gross": Decimal("6000"),
+             "history": [{"qty": 30, "gross": Decimal("6000")} for _ in months]},
+        ]
+        totals = _sales_planning_totals(groups, months)
+        self.assertEqual(totals["sku_count"], 13)
+        self.assertEqual(totals["qty"], 50)
+        self.assertEqual(totals["gross"], Decimal("8000"))
+        self.assertEqual(totals["growth_pct"], Decimal("25"))
+        self.assertEqual(totals["history"], [
+            {"month": month, "qty": 40, "gross": Decimal("7000")} for month in months
+        ])
+        empty = _sales_planning_totals([], months)
+        self.assertEqual(empty["qty"], 0)
+        self.assertEqual(empty["gross"], 0)
+        self.assertIsNone(empty["growth_pct"])
 
     def test_sales_route_keeps_sales_navigation_when_other_tab_selected_operation(self):
         session = self.client.session
@@ -228,8 +365,18 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(len(preview.context["builder_preview"]["sku_rows"]), 2)
         self.assertEqual(sum(cell["target_qty"] for cell in preview.context["builder_preview"]["sku_rows"]), 68)
         self.assertContains(preview, "Parent SKU (Sum)")
-        self.assertContains(preview, 'data-sales-preview-grain-panel="sku"')
+        self.assertContains(preview, 'data-preview-grain-panel="sku"')
+        self.assertContains(preview, 'data-preview-grain-panel="parent_sku"')
+        self.assertContains(preview, 'data-preview-grain-selector')
+        self.assertContains(preview, 'name="preview_grain"', count=2)
+        self.assertContains(preview, 'data-preview-table-scroll', count=2)
         self.assertContains(preview, "Cancel Preview")
+        self.assertContains(preview, 'data-sales-planning-total', count=3)  # Two footers and the refresh selector.
+        self.assertContains(preview, '<tfoot>', count=2)
+        totals = preview.context["builder_preview"]["totals"]
+        self.assertEqual(totals["qty"], 68)
+        self.assertEqual(totals["gross"], Decimal("6800000"))
+        self.assertEqual(totals["history"][-1]["qty"], Decimal("62"))
 
         payload["action"] = "save"
         payload[f"target_qty_{sku.id}"] = "15"
@@ -264,6 +411,10 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(saved.context["rows"][0]["history"][-1]["qty"], Decimal("62"))
         self.assertEqual(saved.context["draft_parent_rows"][0]["parent_sku"], "PARENT-BUILDER")
         self.assertEqual(saved.context["draft_parent_rows"][0]["target_qty"], 15)
+        self.assertContains(saved, '<tfoot>', count=3)
+        self.assertEqual(saved.context["target_totals"]["qty"], 15)
+        self.assertEqual(saved.context["target_totals"]["gross"], Decimal("1500000"))
+        self.assertEqual(saved.context["target_totals"]["history"][-1]["qty"], Decimal("62"))
 
         closed = self.client.get(reverse("sales:planning_builder"), {
             "scenario": str(scenario.id),
@@ -273,6 +424,126 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(closed.status_code, 200)
         self.assertNotContains(closed, 'id="draft-projection"')
         self.assertContains(closed, 'id="scenario-library"')
+
+    def test_sales_builder_excludes_saved_products_only_for_the_selected_month(self):
+        draft_product, draft_sku = self._planning_product("DRAFT-TARGET")
+        approved_product, _ = self._planning_product("APPROVED-TARGET")
+        available_product, _ = self._planning_product("AVAILABLE-TARGET")
+        planned_subcategory = Subcategory.objects.create(
+            category=draft_product.category, code="PLANNED", name="Planned subcategory",
+        )
+        available_subcategory = Subcategory.objects.create(
+            category=draft_product.category, code="AVAILABLE", name="Available subcategory",
+        )
+        Product.objects.filter(pk__in=[draft_product.pk, approved_product.pk]).update(subcategory=planned_subcategory)
+        Product.objects.filter(pk=available_product.pk).update(subcategory=available_subcategory)
+        scenario = SalesPlanningScenario.objects.create(
+            name="October targets", start_month=date(2026, 10, 1),
+            end_month=date(2026, 11, 1), created_by=self.user,
+        )
+        approved = SalesPlanningScenario.objects.create(
+            name="Other approved scenario", start_month=date(2026, 10, 1),
+            end_month=date(2026, 10, 1), created_by=self.user,
+            status=SalesPlanningScenario.Status.APPROVED,
+        )
+        plan = SalesPlan.objects.create(scenario=scenario, month=date(2026, 10, 1), product=draft_product)
+        SalesPlanSKU.objects.create(plan=plan, sku=draft_sku, quantity_target=0)
+        SalesPlan.objects.create(scenario=approved, month=date(2026, 10, 1), product=approved_product)
+        filters = {
+            "target_month": "2026-10", "planning_activity": "ALL",
+            "product_status": str(draft_product.status_id), "category": str(draft_product.category_id),
+        }
+        options = self.client.get(reverse("sales:planning_filter_options"), filters).json()
+        self.assertEqual([row["id"] for row in options["products"]], [str(available_product.id)])
+        self.assertIn(str(draft_product.category_id), [row["id"] for row in options["categories"]])
+        self.assertEqual([row["id"] for row in options["subcategories"]], [str(available_subcategory.id)])
+        stale_subcategory = self.client.get(reverse("sales:planning_filter_options"), {
+            **filters, "subcategory": str(planned_subcategory.id),
+        }).json()
+        self.assertEqual(stale_subcategory, options)
+        next_month = self.client.get(reverse("sales:planning_filter_options"), {
+            **filters, "target_month": "2026-11",
+        }).json()
+        self.assertEqual(len(next_month["products"]), 3)
+        page = self.client.get(reverse("sales:planning_builder"), {"scenario": scenario.id, "month": "2026-10"})
+        self.assertEqual(list(page.context["product_options"]), [available_product])
+        preview = self.client.post(reverse("sales:planning_builder"), {
+            "form_name": "builder", "action": "preview", "scenario": scenario.id,
+            "month": "2026-10", "planning_activity": "ALL", "method": "SAME_AS_LAST_MONTH",
+        })
+        self.assertEqual({row["product"].id for row in preview.context["builder_preview"]["sku_rows"]}, {available_product.id})
+        # The category disappears only when its last eligible product is planned.
+        SalesPlan.objects.create(scenario=scenario, month=date(2026, 10, 1), product=available_product)
+        completed = self.client.get(reverse("sales:planning_filter_options"), filters).json()
+        self.assertEqual(completed, {"categories": [], "subcategories": [], "products": []})
+        future = self.client.get(reverse("sales:planning_filter_options"), {
+            **filters, "target_month": "2026-11",
+        }).json()
+        self.assertEqual([row["id"] for row in future["categories"]], [str(draft_product.category_id)])
+        self.assertEqual(len(future["subcategories"]), 2)
+        self.assertEqual(len(future["products"]), 3)
+
+    def test_sales_builder_duplicate_submission_cannot_overwrite_existing_target(self):
+        product, sku = self._planning_product("DUPLICATE-TARGET")
+        scenario = SalesPlanningScenario.objects.create(
+            name="Original target", start_month=date(2026, 10, 1),
+            end_month=date(2026, 11, 1), created_by=self.user,
+        )
+        other_scenario = SalesPlanningScenario.objects.create(
+            name="Different scenario", start_month=date(2026, 10, 1),
+            end_month=date(2026, 11, 1), created_by=self.user,
+        )
+        payload = {
+            "form_name": "builder", "action": "save", "scenario": str(scenario.id),
+            "month": "2026-10", "product": str(product.id),
+            "planning_activity": "ALL", "method": "SAME_AS_LAST_MONTH", f"target_qty_{sku.id}": "12",
+        }
+        self.assertEqual(self.client.post(reverse("sales:planning_builder"), payload).status_code, 302)
+        target = SalesPlanSKU.objects.get(sku=sku)
+        for scenario_id in (scenario.id, other_scenario.id):
+            for action in ("preview", "save"):
+                response = self.client.post(reverse("sales:planning_builder"), {
+                    **payload, "scenario": scenario_id, "action": action, f"target_qty_{sku.id}": "99",
+                }, follow=True)
+                self.assertContains(response, "Product sudah memiliki Sales Projection pada bulan ini")
+        target.refresh_from_db()
+        self.assertEqual(target.quantity_target, 12)
+        self.assertEqual(SalesPlan.objects.count(), 1)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            SalesPlan.objects.create(scenario=other_scenario, month=date(2026, 10, 1), product=product)
+        # Revising the existing draft remains the supported edit path.
+        self.client.post(reverse("sales:planning_builder"), {
+            "form_name": "projection", "scenario": scenario.id, "month": "2026-10", f"qty_{target.id}": "15",
+        })
+        target.refresh_from_db()
+        self.assertEqual(target.quantity_target, 15)
+        self.client.post(reverse("sales:planning_builder"), {**payload, "month": "2026-11"})
+        self.assertEqual(SalesPlan.objects.count(), 2)
+
+    def test_sales_builder_rechecks_stale_preview_atomically(self):
+        product, sku = self._planning_product("STALE-TARGET")
+        new_product, new_sku = self._planning_product("STILL-AVAILABLE")
+        scenario = SalesPlanningScenario.objects.create(
+            name="Stale preview", start_month=date(2026, 10, 1),
+            end_month=date(2026, 10, 1), created_by=self.user,
+        )
+        payload = {
+            "form_name": "builder", "action": "preview", "scenario": scenario.id,
+            "month": "2026-10", "planning_activity": "ALL", "method": "SAME_AS_LAST_MONTH",
+        }
+        preview = self.client.post(reverse("sales:planning_builder"), payload).context["builder_preview"]
+        plan = SalesPlan.objects.create(scenario=scenario, month=date(2026, 10, 1), product=product, quantity_target=7)
+        target = SalesPlanSKU.objects.create(plan=plan, sku=sku, quantity_target=7)
+        save_payload = {**payload, "action": "save", f"target_qty_{sku.id}": "99", f"target_qty_{new_sku.id}": "10"}
+        request = RequestFactory().post(reverse("sales:planning_builder"), save_payload)
+        request.user = self.user
+        with self.assertRaisesMessage(ValidationError, "Product sudah memiliki Sales Projection"):
+            _save_sales_projection_preview(request, preview)
+        response = self.client.post(reverse("sales:planning_builder"), save_payload, follow=True)
+        self.assertContains(response, "Pilihan Product sudah berubah")
+        self.assertFalse(SalesPlan.objects.filter(product=new_product).exists())
+        target.refresh_from_db()
+        self.assertEqual(target.quantity_target, 7)
 
     def test_sales_projection_parent_sku_view_sums_multiple_products(self):
         first, _ = self._planning_product("PARENT-SUM-A")

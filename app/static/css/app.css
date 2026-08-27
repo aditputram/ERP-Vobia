@@ -369,8 +369,12 @@ tbody tr:last-child td { border-bottom: 0; }
 [data-preview-grain-panel][hidden], [data-draft-grain-panel][hidden] { display: none; }
 .preview-table-wrap { overflow: auto; scrollbar-gutter: stable; }
 .preview-table-wrap thead th { position: sticky; top: 0; z-index: 3; background: var(--surface); }
-.preview-table-wrap tfoot td { position: sticky; bottom: 0; z-index: 3; border-top: 2px solid #c8dc7e; border-bottom: 0; background: #f0f7d8; color: #27300d; font-weight: 850; }
+.preview-table-wrap tfoot td, #projection-preview [data-sales-planning-total] td { position: sticky; bottom: 0; z-index: 3; border-top: 2px solid #c8dc7e; border-bottom: 0; background: #f0f7d8; color: #27300d; font-weight: 850; }
 .planning-history-baseline { background: #f7fbe7 !important; color: #526b10; font-weight: 850; }
+.sales-draft-matrix table { width: max-content; min-width: 100%; }
+.sales-draft-matrix th, .sales-draft-matrix td { white-space: nowrap; }
+.sales-draft-matrix input[type="number"] { width: 100px; }
+.sales-draft-matrix thead th { position: static; }
 
 .auth-page { background: var(--nav); }
 .auth-layout { min-height: 100vh; display: grid; grid-template-columns: minmax(420px, 1.05fr) minmax(440px, .95fr); }

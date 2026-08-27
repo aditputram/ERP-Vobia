@@ -1,0 +1,38 @@
+<div class="table-wrap preview-table-wrap sales-draft-matrix" data-preview-table-scroll>
+  <table class="draft-selection-table">
+    <thead>
+      <tr>
+        {% if viewed_scenario.status == 'DRAFT' %}<th class="draft-selection-col" rowspan="2"><input type="checkbox" data-draft-select-all data-selection-grain="{{ grain }}" data-dirty-ignore aria-label="Select All {% if parent_view %}Parent SKU{% else %}SKU{% endif %}"></th>{% endif %}
+        {% if not parent_view %}<th rowspan="2">SKU</th>{% endif %}<th rowspan="2">Parent SKU</th><th rowspan="2">Product</th><th rowspan="2">{% if parent_view %}SKU{% else %}Size{% endif %}</th>
+        {% for header in draft_history_headers %}<th colspan="{{ selected_draft_metrics|length }}">{{ header.month|date:"F Y" }}</th>{% endfor %}
+        {% for month in selected_draft_months %}<th colspan="{{ selected_draft_metrics|length }}">Target {{ month|date:"F Y" }}</th>{% endfor %}
+      </tr>
+      <tr>
+        {% for header in draft_history_headers %}{% if show_draft_qty %}<th>{% if header.is_projection %}Projection{% else %}Actual{% endif %} Qty</th>{% endif %}{% if show_draft_gross %}<th>{% if header.is_projection %}Projection{% else %}Actual{% endif %} Gross</th>{% endif %}{% endfor %}
+        {% for month in selected_draft_months %}{% if show_draft_qty %}<th>Sales Qty</th>{% endif %}{% if show_draft_gross %}<th>Gross Sales</th>{% endif %}{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in matrix_rows %}
+      <tr {% if parent_view %}data-sales-draft-parent-row data-parent-sku="{{ row.parent_sku }}"{% else %}data-sales-draft-sku-row data-parent-sku="{{ row.product.parent_sku|default:row.product.code }}" data-gross-per-qty="{{ row.sku.current_retail_price|floatformat:'4u' }}"{% endif %}>
+        {% if viewed_scenario.status == 'DRAFT' %}<td class="draft-selection-col"><input type="checkbox" form="sales-draft-selection-delete-form" name="selected_item" value="{% if parent_view %}{{ row.parent_sku }}{% else %}{{ row.sku.id }}{% endif %}" data-draft-row-select data-selection-grain="{{ grain }}" aria-label="Select {% if parent_view %}Parent SKU {{ row.parent_sku }}{% else %}SKU {{ row.sku.sku }}{% endif %}"></td>{% endif %}
+        {% if parent_view %}<td><span class="code-label">{{ row.parent_sku }}</span></td><td><strong>{{ row.product_name }}</strong></td><td>{{ row.sku_count|floatformat:"0g" }}</td>
+        {% else %}<td><span class="code-label">{{ row.sku.sku }}</span></td><td>{{ row.product.parent_sku|default:row.product.code }}</td><td><strong>{{ row.product.name }}</strong><small class="table-subtext">{{ row.sku.product_variant.name }}</small></td><td>{{ row.sku.size|default:"—" }}</td>{% endif %}
+        {% for history in row.history %}{% if show_draft_qty %}<td>{{ history.qty|floatformat:"0g" }}</td>{% endif %}{% if show_draft_gross %}<td>Rp {{ history.gross|floatformat:"0g" }}</td>{% endif %}{% endfor %}
+        {% for cell in row.targets %}
+          {% if show_draft_qty %}<td>
+            {% if parent_view %}<strong data-draft-matrix-parent-qty data-month="{{ cell.month|date:'Y-m' }}">{{ cell.qty|floatformat:"0g"|default:"—" }}</strong>
+            {% elif cell.target %}<input type="number" min="0" step="1" name="qty_{{ cell.target.id }}" value="{{ cell.qty|floatformat:'0u' }}" data-draft-matrix-qty data-month="{{ cell.month|date:'Y-m' }}" aria-label="Target Qty {{ row.sku.sku }} {{ cell.month|date:'Y-m' }}" {% if viewed_scenario.status == 'APPROVED' %}disabled{% endif %}>
+            {% else %}—{% endif %}
+          </td>{% endif %}
+          {% if show_draft_gross %}<td>
+            {% if not show_draft_qty and not parent_view and cell.target %}<input type="hidden" name="qty_{{ cell.target.id }}" value="{{ cell.qty|floatformat:'0u' }}" data-draft-matrix-qty data-month="{{ cell.month|date:'Y-m' }}">{% endif %}
+            <strong {% if parent_view %}data-draft-matrix-parent-gross{% else %}data-draft-matrix-gross{% endif %} data-month="{{ cell.month|date:'Y-m' }}">{% if cell.gross != None %}Rp {{ cell.gross|floatformat:"0g" }}{% else %}—{% endif %}</strong>
+          </td>{% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+    {% include "sales/includes/planning_totals.html" with totals=target_totals identity_columns=identity_columns show_sku_count=parent_view status=viewed_scenario.status matrix=True %}
+  </table>
+</div>

@@ -1,0 +1,17 @@
+<section class="panel section-gap" id="sales-plan-summary">
+  <div class="panel-header"><div><p class="eyebrow">SALES PLAN OVERVIEW</p><h2>Summary Plan</h2><p class="muted">Target tersimpan dari seluruh Scenario Draft dan Approved. Tidak termasuk sales aktual atau preview yang belum disimpan.</p></div><span class="pill">{{ plan_summary.rows|length }} bulan</span></div>
+  <form id="sales-plan-summary-filters" class="report-filter" method="get" action="{% url 'sales:planning_builder' %}#sales-plan-summary" data-auto-submit>
+    <input type="hidden" name="scenario" value="{{ viewed_scenario.id|default:'' }}"><input type="hidden" name="month" value="{{ selected_month|date:'Y-m' }}"><input type="hidden" name="draft_grain" value="{{ selected_draft_grain }}">
+    {% for month in selected_draft_months %}<input type="hidden" name="draft_month" value="{{ month|date:'Y-m' }}">{% endfor %}{% for metric in selected_draft_metrics %}<input type="hidden" name="draft_metric" value="{{ metric }}">{% endfor %}{% if close_draft %}<input type="hidden" name="close_draft" value="1">{% endif %}
+    <label>Start Month<input type="month" name="summary_start" value="{{ plan_summary.start|date:'Y-m' }}" required></label>
+    <label>End Month<input type="month" name="summary_end" value="{{ plan_summary.end|date:'Y-m' }}" required></label>
+    {% for filter in plan_summary.filters %}{% include "purchasing/includes/generator_multi_select.html" with label=filter.label name=filter.name options=filter.options selected=filter.selected all_label=filter.all_label search_placeholder="Cari pilihan..." %}{% endfor %}
+  </form>
+  {% if plan_summary.error %}<div class="form-alert" role="alert">{{ plan_summary.error }}</div>{% endif %}
+  <div class="table-wrap preview-table-wrap section-gap" style="max-height: 480px;">
+    <table aria-label="Summary Plan bulanan"><thead><tr><th>Month</th><th>Qty</th><th>Gross Sales</th></tr></thead>
+      <tbody>{% for row in plan_summary.rows %}<tr><td>{{ row.month|date:"F Y" }}</td><td>{{ row.qty|floatformat:"0g" }}</td><td>Rp {{ row.gross|floatformat:"0g" }}</td></tr>{% empty %}<tr><td colspan="3"><div class="empty-state">{% if plan_summary.error %}Periksa kembali periode Summary Plan.{% else %}Belum ada target tersimpan untuk filter ini.{% endif %}</div></td></tr>{% endfor %}</tbody>
+      {% if plan_summary.rows %}<tfoot><tr><td>Total</td><td>{{ plan_summary.qty|floatformat:"0g" }}</td><td>Rp {{ plan_summary.gross|floatformat:"0g" }}</td></tr></tfoot>{% endif %}
+    </table>
+  </div>
+</section>

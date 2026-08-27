@@ -181,7 +181,7 @@ class SalesPlan(models.Model):
     class Meta:
         ordering = ("scenario", "month", "product__name")
         constraints = [
-            models.UniqueConstraint(fields=["scenario", "month", "product"], name="sales_unique_scenario_month_product_plan"),
+            models.UniqueConstraint(fields=["month", "product"], name="sales_unique_month_product_plan"),
             models.CheckConstraint(condition=Q(gross_sales_target__gte=0), name="sales_plan_gross_nonnegative"),
         ]
         permissions = [("approve_sales_plan", "Can approve monthly sales plan")]

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Koneksi Instagram · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">MARKETING / KONEKSI</p><h1>Koneksi Instagram</h1><p>Kelola token akun Instagram @vobia.id.</p></div><a class="secondary-button" href="{% url 'dashboard:instagram_dashboard' %}">Buka Social Media Report</a></header>
+<section class="panel narrow-panel">
+  <div class="panel-header"><div><p class="eyebrow">KONEKSI AKUN</p><h2>Instagram · @vobia.id</h2></div></div>
+  {% if error %}<div class="message error" role="alert">{{ error }}</div>{% endif %}
+  {% if status %}
+  <p><strong>Token tersimpan · identitas akun terverifikasi</strong></p>
+  <p>Akun: @{{ status.username }} · ID {{ status.account_id }}</p>
+  <p>Uji terakhir: {{ status.verified_at }}</p>
+  <p>{% if status.insights_ok %}Uji akses Insights berhasil.{% else %}Akun terhubung, tetapi uji Insights belum berhasil. Izin atau dukungan metrik perlu diperiksa.{% endif %}</p>
+  <p class="muted">Ini hasil uji terakhir, bukan jaminan token masih berlaku. Token kedaluwarsa perlu diganti.</p>
+  {% else %}<p><strong>Belum terhubung ke ERP</strong></p>{% endif %}
+  <form method="post" autocomplete="off" class="stack-form">
+    {% csrf_token %}
+    <p><label for="{{ form.access_token.id_for_label }}">{{ form.access_token.label }}</label>{{ form.access_token }}</p>
+    <p><label>{{ form.consent }} {{ form.consent.label }}</label></p>
+    <p class="muted">Token tidak ditampilkan kembali. Tombol ini mengirim token hanya ke graph.instagram.com melalui HTTPS; tidak memposting konten, membalas DM, atau mengubah iklan.</p>
+    <button class="primary-button" type="submit">Hubungkan &amp; Uji Koneksi</button>
+  </form>
+  <p class="muted">Penyimpanan lokal: file privat di luar Git, hanya dapat dibaca akun OS pemilik. File belum dienkripsi; bukan konfigurasi production. Token lama diganti hanya setelah token baru lolos uji identitas.</p>
+</section>
+<section class="panel narrow-panel section-gap"><h2>TikTok</h2><p>Ditunda sampai koneksi Instagram selesai.</p></section>
+{% endblock %}

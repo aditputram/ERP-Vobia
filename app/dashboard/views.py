@@ -44,8 +44,8 @@ MODULES = (
         "name": "Marketing",
         "eyebrow": "BRAND & CAMPAIGN",
         "description": "Campaign, content plan, performance marketing, dan kalender peluncuran.",
-        "status": "Segera hadir",
-        "available": False,
+        "status": "Instagram Report",
+        "available": True,
         "accent": "coral",
         "image": "img/modules/module-marketing.jpg",
         "image_position": "center 52%",
@@ -103,6 +103,8 @@ def enter_module(request, module_slug):
     )
     if module_slug == "sales":
         return redirect("sales:dashboard")
+    if module_slug == "marketing":
+        return redirect("dashboard:instagram_dashboard")
     return redirect("merchandising:overview")
 
 

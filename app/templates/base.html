@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
     <title>{% block title %}Vobia ERP{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260827-02">
-    <script src="{% static 'js/app.js' %}?v=20260826-01" defer></script>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260829-04">
+    <script src="{% static 'js/app.js' %}?v=20260829-02" defer></script>
 </head>
 <body>
     <div class="app-shell">
@@ -17,17 +17,16 @@
             </a>
 
             <a class="module-switcher" href="{% url 'dashboard:index' %}">
-                <span>{% if request.resolver_match.url_name == 'instagram_connection' or request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'campaign_list' or request.resolver_match.url_name == 'campaign_create' or request.resolver_match.url_name == 'campaign_edit' or request.resolver_match.url_name == 'campaign_detail' %}Marketing{% elif request.session.active_module == 'operation' and request.resolver_match.namespace != 'sales' and request.resolver_match.namespace != 'traffic' and '/imports/sales/' not in request.path %}Operation{% else %}Sales{% endif %}</span>
+                <span>{% if request.resolver_match.url_name == 'instagram_connection' or request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'campaign_list' or request.resolver_match.url_name == 'campaign_create' or request.resolver_match.url_name == 'campaign_edit' or request.resolver_match.url_name == 'campaign_detail' or 'partnership_' in request.resolver_match.url_name %}Marketing{% elif request.session.active_module == 'operation' and request.resolver_match.namespace != 'sales' and request.resolver_match.namespace != 'traffic' and '/imports/sales/' not in request.path %}Operation{% else %}Sales{% endif %}</span>
                 <small>Ganti modul</small>
             </a>
 
             <nav class="navigation" aria-label="Navigasi utama">
-                {% if request.resolver_match.url_name == 'instagram_connection' or request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'campaign_list' or request.resolver_match.url_name == 'campaign_create' or request.resolver_match.url_name == 'campaign_edit' or request.resolver_match.url_name == 'campaign_detail' %}
+                {% if request.resolver_match.url_name == 'instagram_connection' or request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'campaign_list' or request.resolver_match.url_name == 'campaign_create' or request.resolver_match.url_name == 'campaign_edit' or request.resolver_match.url_name == 'campaign_detail' or 'partnership_' in request.resolver_match.url_name %}
                 <span class="nav-label">MARKETING</span>
                 <a class="nav-item {% if request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'instagram_connection' %}active{% endif %}" href="{% url 'dashboard:instagram_dashboard' %}">Dashboard</a>
                 <a class="nav-item {% if request.resolver_match.url_name == 'campaign_list' or request.resolver_match.url_name == 'campaign_create' or request.resolver_match.url_name == 'campaign_edit' or request.resolver_match.url_name == 'campaign_detail' %}active{% endif %}" href="{% url 'dashboard:campaign_list' %}">Campaign/Project</a>
-                <span class="nav-item" aria-disabled="true">Partnership · belum aktif</span>
-                <span class="nav-item" aria-disabled="true">Performance Marketing · belum aktif</span>
+                <a class="nav-item {% if 'partnership_' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'dashboard:partnership_list' %}">Partnership</a>
                 <span class="nav-item" aria-disabled="true">Upcoming Collection · belum aktif</span>
                 {% elif request.session.active_module == 'operation' and request.resolver_match.namespace != 'sales' and request.resolver_match.namespace != 'traffic' and '/imports/sales/' not in request.path %}
                 <span class="nav-label">OPERATION</span>

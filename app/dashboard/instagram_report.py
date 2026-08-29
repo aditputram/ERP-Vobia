@@ -4,6 +4,7 @@ import json
 import math
 import os
 import tempfile
+import calendar
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone as dt_timezone
 from urllib.parse import urlparse
@@ -39,7 +40,8 @@ CACHE_SECONDS = 3600
 
 
 class PeriodForm(forms.Form):
-    period = forms.ChoiceField(label="Periode", choices=[(str(days), f"{days} days") for days in (7, 14, 30, 60, 90)] + [("custom", "Custom")])
+    period = forms.ChoiceField(label="Periode", choices=[(str(days), f"{days} days") for days in (7, 14, 30, 60, 90)] + [("month", "Month"), ("month_mtd", "Month (MTD)"), ("custom", "Custom")])
+    month = forms.DateField(required=False, label="Bulan", input_formats=["%Y-%m"], widget=forms.DateInput(format="%Y-%m", attrs={"type": "month"}))
     date_from = forms.DateField(required=False, label="Dari tanggal", widget=forms.DateInput(attrs={"type": "date"}))
     date_to = forms.DateField(required=False, label="Sampai tanggal", widget=forms.DateInput(attrs={"type": "date"}))
 
@@ -50,13 +52,25 @@ class PeriodForm(forms.Form):
             if data.get("period") != "custom":
                 data.pop("date_from", None)
                 data.pop("date_to", None)
+            if data.get("period") not in {"month", "month_mtd"}:
+                data.pop("month", None)
         super().__init__(data, *args, **kwargs)
 
     def clean(self):
         cleaned = super().clean()
         today = timezone.now().date()
         preset = cleaned.get("period")
-        if preset and preset != "custom":
+        if preset in {"month", "month_mtd"}:
+            selected = cleaned.get("month")
+            if not selected and "month" not in self.errors:
+                self.add_error("month", "Pilih bulan.")
+            elif selected:
+                cleaned["date_from"] = selected.replace(day=1)
+                last_day = calendar.monthrange(selected.year, selected.month)[1]
+                cutoff_day = min((today - timedelta(days=1)).day, last_day)
+                is_current_month = (selected.year, selected.month) == (today.year, today.month)
+                cleaned["date_to"] = selected.replace(day=cutoff_day if preset == "month_mtd" or is_current_month else last_day)
+        elif preset and preset != "custom":
             cleaned["date_from"] = today - timedelta(days=int(preset))
             cleaned["date_to"] = today - timedelta(days=1)
         start, end = cleaned.get("date_from"), cleaned.get("date_to")
@@ -72,6 +86,22 @@ class PeriodForm(forms.Form):
             if end >= today or start < today - timedelta(days=90):
                 raise forms.ValidationError("Pilih hari lengkap sebelum hari ini, dalam 90 hari terakhir.")
         return cleaned
+
+
+def previous_period(start, end, period):
+    if period in {"month", "month_mtd"}:
+        previous_end = start - timedelta(days=1)
+        previous_start = previous_end.replace(day=1)
+        if period == "month_mtd":
+            previous_end = previous_end.replace(day=min(end.day, calendar.monthrange(previous_end.year, previous_end.month)[1]))
+        return previous_start, previous_end
+    duration = (end - start).days + 1
+    previous_end = start - timedelta(days=1)
+    return previous_end - timedelta(days=duration - 1), previous_end
+
+
+def growth(current, previous):
+    return (current - previous) / previous * 100 if current is not None and previous is not None and previous > 0 else None
 
 
 def numeric(value):
@@ -158,9 +188,6 @@ def fetch_report(start, end):
     pairs = [(metric, dimension) for metric in DEMOGRAPHICS for dimension in DIMENSIONS]
     with ThreadPoolExecutor(max_workers=4) as pool:
         demographics = list(pool.map(demographic, pairs))
-    if any(not item["rows"] for item in demographics):
-        warnings.append("Sebagian demografi kosong/tidak tersedia dari Meta; bisa terkait ambang privasi atau izin API.")
-
     # Fetch the whole paginated library before filtering publication dates. Never trust a next URL with credentials.
     media, seen_ids, seen_cursors = [], set(), set()
     cursor = None
@@ -325,13 +352,21 @@ def dashboard(request):
     data = request.POST if request.method == "POST" else request.GET
     form = PeriodForm(data or {"period": "7"})
     report, error = None, ""
+    comparison = None
+    comparison_start = comparison_end = None
     if form.is_valid():
         start, end = form.cleaned_data["date_from"], form.cleaned_data["date_to"]
         report, error = get_report(start, end, force=request.method == "POST")
+        comparison_start, comparison_end = previous_period(start, end, form.cleaned_data["period"])
+        comparison, comparison_error = get_report(comparison_start, comparison_end, force=request.method == "POST")
+        if comparison_error and not error:
+            error = "Periode pembanding belum tersedia. " + comparison_error
     main_keys = ("reach", "views", "total_interactions", "accounts_engaged", "profile_views", "website_clicks")
-    cards = [{"name": ACCOUNT_METRICS[key], "api": key, "value": report["totals"].get(key)} for key in main_keys] if report else []
-    details = [{"name": label, "value": report["totals"].get(key)} for key, label in ACCOUNT_METRICS.items() if key not in main_keys] if report else []
+    cards = [{"name": ACCOUNT_METRICS[key], "api": key, "value": report["totals"].get(key), "previous": comparison["totals"].get(key) if comparison else None, "growth": growth(report["totals"].get(key), comparison["totals"].get(key)) if comparison else None} for key in main_keys] if report else []
+    details = [{"name": label, "value": report["totals"].get(key), "previous": comparison["totals"].get(key) if comparison else None, "growth": growth(report["totals"].get(key), comparison["totals"].get(key)) if comparison else None} for key, label in ACCOUNT_METRICS.items() if key not in main_keys] if report else []
+    follow_details = [{"name": label, "value": report.get(key), "previous": comparison.get(key) if comparison else None, "growth": growth(report.get(key), comparison.get(key)) if comparison else None} for key, label in (("follows", "Follows"), ("unfollows", "Unfollows"), ("net_follows", "Net Follows"))] if report else []
     if report:
         report = dict(report)
         report["fetched_display"] = datetime.fromisoformat(report["fetched_at"])
-    return render(request, "dashboard/instagram_report.html", {"form": form, "report": report, "error": error, "cards": cards, "details": details})
+        report["er_growth"] = growth(report.get("er"), comparison.get("er")) if comparison else None
+    return render(request, "dashboard/instagram_report.html", {"form": form, "report": report, "error": error, "cards": cards, "details": details, "follow_details": follow_details, "comparison_start": comparison_start, "comparison_end": comparison_end, "comparison": comparison})

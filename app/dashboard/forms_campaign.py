@@ -4,10 +4,12 @@ from decimal import Decimal
 
 from master_data.models import Product
 
-from .models import Campaign, CampaignCreative, CampaignProduct
+from .models import Campaign, CampaignCreative, CampaignExpense, CampaignProduct
 
 
 class CampaignForm(forms.ModelForm):
+    COVER_MAX_BYTES = 5 * 1024 * 1024
+    COVER_TYPES = {"image/jpeg": (b"\xff\xd8\xff",), "image/png": (b"\x89PNG\r\n\x1a\n",), "image/webp": (b"RIFF",)}
     budget = forms.CharField(
         label="Campaign Budget",
         widget=forms.TextInput(attrs={"data-rupiah": "", "inputmode": "numeric", "placeholder": "Rp. 0"}),
@@ -16,10 +18,18 @@ class CampaignForm(forms.ModelForm):
         label="Campaign Plan URL",
         help_text="Link moodboard, creative direction, atau dokumen campaign plan.",
     )
+    creative_asset_url = forms.URLField(
+        label="Creative Asset URL",
+        help_text="Link folder atau dokumen berisi creative asset campaign.",
+        required=False,
+    )
 
     class Meta:
         model = Campaign
-        exclude = ("created_by", "actual_spent")
+        exclude = (
+            "created_by", "actual_spent", "actual_approval_date", "actual_sample_date",
+            "actual_creative_date", "actual_prelaunch_date", "actual_launch_date",
+        )
         labels = {
             "name": "Campaign Name", "description": "Campaign Description",
             "approval_date": "Approval Campaign Plan", "sample_date": "Product Marketing Sample",
@@ -29,7 +39,8 @@ class CampaignForm(forms.ModelForm):
         }
         widgets = {
             "description": forms.Textarea(attrs={"rows": 4}),
-            **{name: forms.DateInput(attrs={"type": "date"}) for name in ("approval_date", "sample_date", "creative_date", "prelaunch_date", "launch_date")},
+            "cover": forms.FileInput(attrs={"accept": "image/jpeg,image/png,image/webp"}),
+            **{name: forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}) for name in ("approval_date", "sample_date", "creative_date", "prelaunch_date", "launch_date")},
         }
 
     def clean_budget(self):
@@ -37,6 +48,21 @@ class CampaignForm(forms.ModelForm):
         if not digits or len(digits) > 18:
             raise forms.ValidationError("Campaign Budget tidak valid.")
         return Decimal(digits)
+
+    def clean_cover(self):
+        cover = self.cleaned_data.get("cover")
+        if not cover or not hasattr(cover, "content_type"):
+            return cover
+        if cover.size > self.COVER_MAX_BYTES:
+            raise forms.ValidationError("Campaign Cover maksimal 5 MB.")
+        signatures = self.COVER_TYPES.get(cover.content_type, ())
+        header = cover.read(12)
+        cover.seek(0)
+        if not signatures or not any(header.startswith(signature) for signature in signatures):
+            raise forms.ValidationError("Campaign Cover harus berupa JPG, PNG, atau WebP.")
+        if cover.content_type == "image/webp" and header[8:12] != b"WEBP":
+            raise forms.ValidationError("Campaign Cover WebP tidak valid.")
+        return cover
 
     def clean(self):
         data = super().clean()
@@ -85,8 +111,37 @@ class CreativeForm(forms.ModelForm):
         return url
 
 
-class CampaignSpendForm(forms.ModelForm):
+class CampaignExpenseForm(forms.ModelForm):
+    amount = forms.CharField(
+        label="Nominal",
+        widget=forms.TextInput(attrs={"data-rupiah": "", "inputmode": "numeric", "placeholder": "Rp. 0"}),
+    )
+
+    class Meta:
+        model = CampaignExpense
+        fields = ("amount", "description")
+        labels = {"description": "Description"}
+        widgets = {"description": forms.TextInput(attrs={"placeholder": "Contoh: Production kreatif"})}
+
+    def clean_amount(self):
+        digits = "".join(character for character in self.cleaned_data["amount"] if character.isdigit())
+        if not digits or len(digits) > 18 or Decimal(digits) <= 0:
+            raise forms.ValidationError("Nominal harus lebih dari nol.")
+        return Decimal(digits)
+
+
+class CampaignActualTimelineForm(forms.ModelForm):
     class Meta:
         model = Campaign
-        fields = ("budget", "actual_spent")
-        labels = {"budget": "Campaign Budget", "actual_spent": "Actual Campaign Spent"}
+        fields = (
+            "actual_approval_date", "actual_sample_date", "actual_creative_date",
+            "actual_prelaunch_date", "actual_launch_date",
+        )
+        labels = {
+            "actual_approval_date": "Approval Campaign Plan",
+            "actual_sample_date": "Product Marketing Sample",
+            "actual_creative_date": "Creative Production",
+            "actual_prelaunch_date": "Pre Launch",
+            "actual_launch_date": "Launch",
+        }
+        widgets = {name: forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}) for name in fields}

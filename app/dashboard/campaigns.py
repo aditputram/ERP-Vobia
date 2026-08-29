@@ -1,25 +1,28 @@
-import calendar
 from datetime import date, timedelta
 from decimal import Decimal
+from mimetypes import guess_type
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from django.db.models import Sum
-from django.http import HttpResponseForbidden
+from django.http import FileResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
 from sales.models import SalesOrderLine
+from traffic.models import TrafficProductMetric
 
-from .forms_campaign import CampaignForm, CampaignProductFormSet, CampaignSpendForm, CreativeForm
-from .models import Campaign
+from .forms_campaign import CampaignActualTimelineForm, CampaignExpenseForm, CampaignForm, CampaignProductFormSet, CreativeForm
+from .models import Campaign, CampaignExpense
 from .instagram_report import get_report
 
 
 def _end_date(launch):
-    year, month = (launch.year + 1, 1) if launch.month == 12 else (launch.year, launch.month + 1)
-    return date(year, month, min(launch.day, calendar.monthrange(year, month)[1])) - timedelta(days=1)
+    return launch + timedelta(days=30)
 
 
 def _post_key(url):
@@ -37,6 +40,11 @@ def _guard(request):
     return request.user.is_superuser
 
 
+def _sync_actual_spent(campaign):
+    campaign.actual_spent = CampaignExpense.objects.filter(campaign=campaign).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+    campaign.save(update_fields=("actual_spent", "updated_at"))
+
+
 @login_required
 def campaign_list(request):
     if not _guard(request):
@@ -46,12 +54,27 @@ def campaign_list(request):
 
 
 @login_required
+@require_POST
+def campaign_delete(request, campaign_id):
+    if not _guard(request):
+        return HttpResponseForbidden()
+    campaign = get_object_or_404(Campaign, id=campaign_id)
+    try:
+        campaign.delete()
+    except ProtectedError:
+        messages.error(request, "Campaign belum dapat dihapus karena masih dipakai Partnership. Hapus Partnership terkait lebih dulu.")
+        return redirect("dashboard:campaign_detail", campaign_id=campaign.id)
+    messages.success(request, "Campaign berhasil dihapus.")
+    return redirect("dashboard:campaign_list")
+
+
+@login_required
 @transaction.atomic
 def campaign_create(request):
     if not _guard(request):
         return HttpResponseForbidden()
     campaign = Campaign(created_by=request.user)
-    form = CampaignForm(request.POST or None, instance=campaign)
+    form = CampaignForm(request.POST or None, request.FILES or None, instance=campaign)
     formset = CampaignProductFormSet(request.POST or None, instance=campaign)
     if request.method == "POST" and form.is_valid() and formset.is_valid():
         form.save()
@@ -68,7 +91,7 @@ def campaign_edit(request, campaign_id):
         return HttpResponseForbidden()
     campaign = get_object_or_404(Campaign, id=campaign_id)
     initial = {"budget": f"{campaign.budget:.0f}"} if request.method == "GET" else None
-    form = CampaignForm(request.POST or None, instance=campaign, initial=initial)
+    form = CampaignForm(request.POST or None, request.FILES or None, instance=campaign, initial=initial)
     formset = CampaignProductFormSet(request.POST or None, instance=campaign)
     if request.method == "POST" and form.is_valid() and formset.is_valid():
         form.save()
@@ -79,18 +102,56 @@ def campaign_edit(request, campaign_id):
 
 
 @login_required
+def campaign_cover(request, campaign_id):
+    if not _guard(request):
+        return HttpResponseForbidden()
+    campaign = get_object_or_404(Campaign, id=campaign_id)
+    if not campaign.cover:
+        return HttpResponseForbidden()
+    response = FileResponse(campaign.cover.open("rb"), content_type=guess_type(campaign.cover.name)[0] or "application/octet-stream")
+    response["Content-Disposition"] = f'inline; filename="{campaign.cover.name.rsplit("/", 1)[-1]}"'
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@login_required
 def campaign_detail(request, campaign_id):
     if not _guard(request):
         return HttpResponseForbidden()
-    campaign = get_object_or_404(Campaign.objects.prefetch_related("products__product", "creatives"), id=campaign_id)
-    spend_form = CampaignSpendForm(instance=campaign)
-    if request.method == "POST" and request.POST.get("action") == "spend":
-        spend_form = CampaignSpendForm(request.POST, instance=campaign)
-        if spend_form.is_valid():
-            spend_form.save()
-            messages.success(request, "Budget dan actual spent diperbarui.")
+    campaign = get_object_or_404(Campaign.objects.prefetch_related("products__product", "creatives", "expenses__created_by", "kol_partnerships"), id=campaign_id)
+    expense_form = CampaignExpenseForm()
+    actual_timeline_form = CampaignActualTimelineForm(instance=campaign)
+    if request.method == "POST" and request.POST.get("action") == "timeline_actual":
+        actual_timeline_form = CampaignActualTimelineForm(request.POST, instance=campaign)
+        if actual_timeline_form.is_valid():
+            actual_timeline_form.save()
+            messages.success(request, "Actual timeline berhasil diperbarui.")
             return redirect("dashboard:campaign_detail", campaign_id=campaign.id)
         creative = CreativeForm()
+    elif request.method == "POST" and request.POST.get("action") == "expense":
+        expense_form = CampaignExpenseForm(request.POST)
+        if expense_form.is_valid():
+            with transaction.atomic():
+                expense = expense_form.save(commit=False)
+                expense.campaign = campaign
+                expense.created_by = request.user
+                expense.save()
+                _sync_actual_spent(campaign)
+            messages.success(request, "Campaign spent berhasil ditambahkan.")
+            return redirect("dashboard:campaign_detail", campaign_id=campaign.id)
+        creative = CreativeForm()
+    elif request.method == "POST" and request.POST.get("action") == "delete_expense":
+        try:
+            expense_id = UUID(request.POST.get("expense_id", ""))
+        except (TypeError, ValueError):
+            messages.error(request, "Campaign spent tidak valid.")
+            return redirect("dashboard:campaign_detail", campaign_id=campaign.id)
+        expense = get_object_or_404(CampaignExpense, id=expense_id, campaign=campaign)
+        with transaction.atomic():
+            expense.delete()
+            _sync_actual_spent(campaign)
+        messages.success(request, "Campaign spent berhasil dihapus.")
+        return redirect("dashboard:campaign_detail", campaign_id=campaign.id)
     elif request.method == "POST":
         creative = CreativeForm(request.POST)
         if creative.is_valid():
@@ -101,6 +162,18 @@ def campaign_detail(request, campaign_id):
     else:
         creative = CreativeForm()
     end = _end_date(campaign.launch_date)
+    traffic_by_listing = {}
+    for metric in TrafficProductMetric.objects.filter(
+        product_id__in=[item.product_id for item in campaign.products.all()],
+        period_start__lte=end,
+        period_end__gte=campaign.prelaunch_date,
+    ).values("product_id", "source", "period_start", "marketplace_product_code_snapshot", "traffic_product_key", "visitors"):
+        listing = metric["marketplace_product_code_snapshot"] or metric["traffic_product_key"]
+        key = (metric["product_id"], metric["source"], metric["period_start"], listing)
+        traffic_by_listing[key] = max(traffic_by_listing.get(key, 0), metric["visitors"])
+    traffic_totals = {}
+    for (product_id, source, _period, _listing), views in traffic_by_listing.items():
+        traffic_totals[(product_id, source)] = traffic_totals.get((product_id, source), 0) + views
     rows = []
     for item in campaign.products.all():
         actual = SalesOrderLine.objects.filter(
@@ -110,10 +183,32 @@ def campaign_detail(request, campaign_id):
         qty, gross = actual["qty"] or 0, actual["gross"] or Decimal("0")
         rows.append({"item": item, "qty": qty, "gross": gross,
                      "qty_achievement": Decimal(qty) / item.target_qty * 100 if item.target_qty else None,
-                     "gross_achievement": gross / item.target_gross_sales * 100 if item.target_gross_sales else None})
+                     "traffic_shopee": traffic_totals.get((item.product_id, "Shopee"), 0),
+                     "traffic_tiktok": traffic_totals.get((item.product_id, "Tiktok"), 0)})
     target = sum((row["item"].target_gross_sales for row in rows), Decimal("0"))
     gross = sum((row["gross"] for row in rows), Decimal("0"))
-    roi = gross / campaign.actual_spent if campaign.actual_spent else None
+    total_target_qty = sum(row["item"].target_qty for row in rows)
+    total_actual_qty = sum(row["qty"] for row in rows)
+    product_totals = {
+        "target_qty": total_target_qty,
+        "actual_qty": total_actual_qty,
+        "achievement": Decimal(total_actual_qty) / total_target_qty * 100 if total_target_qty else None,
+        "target_gross": target,
+        "actual_gross": gross,
+        "traffic_shopee": sum(row["traffic_shopee"] for row in rows),
+        "traffic_tiktok": sum(row["traffic_tiktok"] for row in rows),
+    }
+    kol_items = list(campaign.kol_partnerships.all())
+    kol_budget = sum((item.budget for item in kol_items), Decimal("0"))
+    kol_views = sum(item.views for item in kol_items)
+    kol_engagement = sum(item.total_engagement for item in kol_items)
+    kol_summary = {
+        "posts": len(kol_items), "budget": kol_budget, "views": kol_views, "engagement": kol_engagement,
+        "er": Decimal(kol_engagement) / kol_views * 100 if kol_views else None,
+        "cpm": kol_budget / kol_views * 1000 if kol_views else None,
+    }
+    actual_spent = campaign.actual_spent + kol_budget
+    roi = gross / actual_spent if actual_spent else None
     instagram = [item for item in campaign.creatives.all() if item.platform == "INSTAGRAM"]
     for item in campaign.creatives.all():
         item.api_matched = False
@@ -149,4 +244,4 @@ def campaign_detail(request, campaign_id):
         values["avg_views"] = values["views"] / count if count else None
         values["avg_engagement"] = values["engagement"] / count if count else None
         values["er"] = values["engagement"] / values["views"] * 100 if values["views"] else None
-    return render(request, "dashboard/campaign_detail.html", {"campaign": campaign, "rows": rows, "end": end, "target": target, "gross": gross, "roi": roi, "creative_form": creative, "spend_form": spend_form, "social": social, "report_error": report_error})
+    return render(request, "dashboard/campaign_detail.html", {"campaign": campaign, "rows": rows, "product_totals": product_totals, "kol_summary": kol_summary, "actual_spent": actual_spent, "end": end, "target": target, "gross": gross, "roi": roi, "creative_form": creative, "expense_form": expense_form, "actual_timeline_form": actual_timeline_form, "social": social, "report_error": report_error})

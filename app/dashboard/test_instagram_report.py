@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import calendar
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -70,6 +71,10 @@ class InstagramReportTests(SimpleTestCase):
         self.assertEqual(report.rate(0, 10), 0)
         self.assertEqual(report.safe_permalink("javascript:alert(1)"), "")
         self.assertEqual(report.safe_permalink("https://instagram.com.evil.example/"), "")
+        self.assertEqual(report.growth(150, 100), 50)
+        self.assertEqual(report.growth(50, 100), -50)
+        self.assertIsNone(report.growth(50, 0))
+        self.assertEqual(report.previous_period(self.start, self.end, "7"), (self.start - timedelta(days=7), self.start - timedelta(days=1)))
 
     def test_period_validation(self):
         self.assertTrue(report.PeriodForm({"date_from": self.start, "date_to": self.end}).is_valid())
@@ -132,3 +137,25 @@ class InstagramReportTests(SimpleTestCase):
         self.assertTrue(form.is_valid())
         self.assertEqual(form.cleaned_data["period"], "custom")
         self.assertTrue(report.PeriodForm({"period": "custom", "date_from": today - timedelta(days=90), "date_to": self.end}).is_valid())
+        previous_month_end = today.replace(day=1) - timedelta(days=1)
+        month_value = previous_month_end.strftime("%Y-%m")
+        month_form = report.PeriodForm({"period": "month", "month": month_value})
+        self.assertTrue(month_form.is_valid(), month_form.errors)
+        self.assertEqual(month_form.cleaned_data["date_from"], previous_month_end.replace(day=1))
+        self.assertEqual(month_form.cleaned_data["date_to"], previous_month_end)
+        comparison_start, comparison_end = report.previous_period(month_form.cleaned_data["date_from"], month_form.cleaned_data["date_to"], "month")
+        self.assertEqual(comparison_end, month_form.cleaned_data["date_from"] - timedelta(days=1))
+        self.assertEqual(comparison_start.day, 1)
+        current_full_comparison_form = report.PeriodForm({"period": "month", "month": today.strftime("%Y-%m")})
+        self.assertTrue(current_full_comparison_form.is_valid(), current_full_comparison_form.errors)
+        self.assertEqual(current_full_comparison_form.cleaned_data["date_to"], today - timedelta(days=1))
+        full_previous_start, full_previous_end = report.previous_period(current_full_comparison_form.cleaned_data["date_from"], current_full_comparison_form.cleaned_data["date_to"], "month")
+        self.assertEqual(full_previous_start.day, 1)
+        self.assertEqual(full_previous_end.day, calendar.monthrange(full_previous_end.year, full_previous_end.month)[1])
+        current_month_form = report.PeriodForm({"period": "month_mtd", "month": today.strftime("%Y-%m")})
+        self.assertTrue(current_month_form.is_valid(), current_month_form.errors)
+        self.assertEqual(current_month_form.cleaned_data["date_from"], today.replace(day=1))
+        self.assertEqual(current_month_form.cleaned_data["date_to"], today - timedelta(days=1))
+        current_previous_start, current_previous_end = report.previous_period(current_month_form.cleaned_data["date_from"], current_month_form.cleaned_data["date_to"], "month_mtd")
+        self.assertEqual(current_previous_start.day, 1)
+        self.assertEqual(current_previous_end.day, (today - timedelta(days=1)).day)

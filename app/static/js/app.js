@@ -108,6 +108,35 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  document.querySelectorAll('form[data-edit-gated]').forEach(form => {
+    const toggle = document.querySelector(`[data-edit-toggle="${form.id}"]`);
+    const cancel = document.querySelector(`[data-edit-cancel="${form.id}"]`);
+    const controls = [...form.querySelectorAll('input:not([type="hidden"]), select, textarea')];
+    if (!toggle || !cancel || !controls.length) return;
+    const savedValues = new Map(controls.map(control => [control, control.value]));
+    controls.forEach(control => { control.readOnly = true; });
+    toggle.addEventListener('click', () => {
+      controls.forEach(control => { control.readOnly = false; });
+      form.classList.add('is-editing');
+      toggle.disabled = true;
+      toggle.setAttribute('aria-pressed', 'true');
+      cancel.hidden = false;
+      controls[0].focus();
+    });
+    cancel.addEventListener('click', () => {
+      controls.forEach(control => {
+        control.value = savedValues.get(control);
+        control.readOnly = true;
+        control.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      form.classList.remove('is-editing');
+      toggle.disabled = false;
+      toggle.setAttribute('aria-pressed', 'false');
+      cancel.hidden = true;
+      toggle.focus();
+    });
+  });
+
   document.querySelectorAll('form[data-dirty-submit]').forEach(form => {
     const submitButtons = [...document.querySelectorAll('[data-dirty-submit-button]')]
       .filter(button => button.form === form);

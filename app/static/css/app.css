@@ -464,13 +464,21 @@ tbody tr:last-child td { border-bottom: 0; }
 .module-card-copy p { margin: 0 0 7px; color: rgba(255,255,255,.74); font-size: 8px; font-weight: 850; letter-spacing: .13em; }
 .module-card-copy h2 { margin: 0 0 12px; color: white; text-shadow: 0 2px 18px rgba(0,0,0,.28); font-size: 29px; letter-spacing: -.045em; }
 .module-card-copy span { display: block; max-width: 330px; color: rgba(255,255,255,.78); text-shadow: 0 1px 10px rgba(0,0,0,.35); font-size: 11px; line-height: 1.65; }
-.module-card-action { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 24px; border-top: 1px solid rgba(255,255,255,.15); color: white; background: rgba(10,12,10,.54); backdrop-filter: blur(12px); font-size: 10px; font-weight: 850; }
+.module-card-action { width: 100%; min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 24px; border: 0; border-top: 1px solid rgba(255,255,255,.15); color: white; background: rgba(10,12,10,.54); backdrop-filter: blur(12px); cursor: pointer; font: inherit; font-size: 10px; font-weight: 850; text-align: left; }
 .module-card-action span { font-size: 18px; transition: transform .2s ease; }
 .module-card-action:hover span { transform: translateX(4px); }
 .module-card.coming-soon { filter: saturate(.86); }
 .module-card.coming-soon .module-icon { opacity: .78; }
 .module-card.coming-soon .module-card-action { color: rgba(255,255,255,.82); background: rgba(10,12,10,.62); }
 .module-footer { display: flex; justify-content: space-between; gap: 20px; padding: 20px clamp(24px, 5vw, 72px) 28px; color: #92938b; font-size: 8px; font-weight: 750; letter-spacing: .1em; }
+.access-warning { width: min(440px, calc(100% - 32px)); padding: 0; overflow: hidden; border: 0; border-radius: 16px; background: white; box-shadow: 0 30px 80px rgba(0,0,0,.3); }
+.access-warning::backdrop { background: rgba(9,10,8,.58); backdrop-filter: blur(3px); }
+.access-warning-title { padding: 14px 20px; color: white; background: #171714; font-size: 14px; font-weight: 850; }
+.access-warning-body { display: flex; align-items: center; gap: 18px; padding: 30px 28px 22px; }
+.access-warning-body span { width: 48px; height: 48px; flex: 0 0 48px; display: grid; place-items: center; border-radius: 50%; color: white; background: #e72d2d; font-size: 38px; line-height: 1; }
+.access-warning-body strong { font-size: 18px; line-height: 1.35; }
+.access-warning form { padding: 0 28px 28px; text-align: center; }
+.access-warning button { min-width: 120px; padding: 11px 20px; border: 0; border-radius: 9px; color: white; background: var(--ink); cursor: pointer; font-weight: 850; }
 .system-shell { display: block; }
 .system-shell .main-content { width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding-top: 48px; }
 

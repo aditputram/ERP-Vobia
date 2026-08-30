@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
     <title>Pilih Modul · Vobia ERP</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260830-02">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260830-04">
 </head>
 <body class="module-hub-page">
     <header class="module-topbar">
@@ -74,17 +74,31 @@
                         <h2>{{ module.name }}</h2>
                         <span>{{ module.description }}</span>
                     </div>
-                    <a class="module-card-action" href="{% url 'dashboard:enter_module' module.slug %}">
-                        {% if not module.accessible %}Tidak ada akses{% elif module.available %}Buka modul <span>→</span>{% else %}Lihat status <span>→</span>{% endif %}
-                    </a>
+                    {% if not module.accessible %}
+                        <button class="module-card-action" type="button" data-access-warning>Tidak ada akses</button>
+                    {% else %}
+                        <a class="module-card-action" href="{% url 'dashboard:enter_module' module.slug %}">
+                            {% if module.available %}Buka modul <span>→</span>{% else %}Lihat status <span>→</span>{% endif %}
+                        </a>
+                    {% endif %}
                 </article>
             {% endfor %}
         </section>
     </main>
 
+    <dialog class="access-warning" aria-labelledby="access-warning-title">
+        <div class="access-warning-title" id="access-warning-title">Warning</div>
+        <div class="access-warning-body"><span aria-hidden="true">×</span><strong>yang tidak berkepentingan dilarang masuk!</strong></div>
+        <form method="dialog"><button type="submit">OK</button></form>
+    </dialog>
+
     <footer class="module-footer">
         <span>VOBIA ERP · PRIVATE SYSTEM</span>
         <span>Asia/Jakarta · Private multi-user system</span>
     </footer>
+    <script>
+        const accessWarning = document.querySelector('.access-warning');
+        document.querySelectorAll('[data-access-warning]').forEach(button => button.addEventListener('click', () => accessWarning.showModal()));
+    </script>
 </body>
 </html>

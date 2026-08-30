@@ -98,7 +98,7 @@ def enter_module(request, module_slug):
         )
         return redirect("dashboard:index")
     if not request.user.is_superuser and (request.user.module_access or {}).get(module_slug, "approve") == "none":
-        messages.error(request, f"Akun ini tidak memiliki akses ke modul {module['name']}.")
+        messages.error(request, "yang tidak berkepentingan dilarang masuk!")
         return redirect("dashboard:index")
 
     request.session["active_module"] = module_slug

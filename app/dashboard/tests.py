@@ -54,6 +54,22 @@ class DashboardAccessTests(TestCase):
         self.assertContains(response, reverse("accounts:password_change"))
         self.assertNotContains(response, reverse("accounts:user_list"))
 
+    def test_inaccessible_module_uses_warning_dialog_and_server_guard(self):
+        user = get_user_model().objects.create_user(
+            username="sales.manager",
+            password="AmanSekali-ERP-2026!",
+            module_access={"sales": "approve", "operation": "none", "marketing": "none"},
+        )
+        self.client.force_login(user)
+
+        dashboard = self.client.get(reverse("dashboard:index"))
+        self.assertContains(dashboard, '<button class="module-card-action" type="button" data-access-warning>', count=2)
+        self.assertContains(dashboard, "yang tidak berkepentingan dilarang masuk!")
+
+        denied = self.client.get(reverse("dashboard:enter_module", args=["operation"]), follow=True)
+        self.assertRedirects(denied, reverse("dashboard:index"))
+        self.assertContains(denied, "yang tidak berkepentingan dilarang masuk!")
+
     def test_sales_module_sets_context_and_opens_sales_dashboard(self):
         user = get_user_model().objects.create_superuser(
             username="vobiasuperadmin",

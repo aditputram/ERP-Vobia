@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -133,3 +133,16 @@ class InitialSuperadminBrowserSetupTests(TestCase):
     def test_setup_rejects_non_local_request(self):
         response = self.client.get(self.setup_url, REMOTE_ADDR="203.0.113.10")
         self.assertEqual(response.status_code, 403)
+
+    @override_settings(ALLOW_INITIAL_SETUP_PAGE=False)
+    def test_setup_is_disabled_by_configuration(self):
+        response = self.client.get(self.setup_url, REMOTE_ADDR="127.0.0.1")
+        self.assertEqual(response.status_code, 403)
+
+
+class HealthCheckTests(TestCase):
+    def test_health_check_confirms_application_and_database(self):
+        response = self.client.get(reverse("healthz"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})

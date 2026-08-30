@@ -34,6 +34,14 @@ if not SECRET_KEY:
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
 
+RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
+if RENDER_EXTERNAL_HOSTNAME:
+    if RENDER_EXTERNAL_HOSTNAME not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+    render_origin = f"https://{RENDER_EXTERNAL_HOSTNAME}"
+    if render_origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(render_origin)
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -57,6 +65,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -90,6 +99,27 @@ if USE_SQLITE:
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": PROJECT_ROOT / "data" / "vobia_erp.sqlite3",
+        }
+    }
+elif os.getenv("DATABASE_URL", "").strip():
+    from urllib.parse import unquote, urlparse
+
+    database_url = urlparse(os.environ["DATABASE_URL"].strip())
+    if database_url.scheme not in {"postgres", "postgresql"}:
+        raise ImproperlyConfigured("DATABASE_URL harus PostgreSQL.")
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": database_url.path.lstrip("/"),
+            "USER": unquote(database_url.username or ""),
+            "PASSWORD": unquote(database_url.password or ""),
+            "HOST": database_url.hostname or "",
+            "PORT": str(database_url.port or 5432),
+            "CONN_MAX_AGE": 60,
+            "OPTIONS": {
+                "connect_timeout": 5,
+                "sslmode": os.getenv("POSTGRES_SSLMODE", "require"),
+            },
         }
     }
 else:
@@ -129,12 +159,25 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = PROJECT_ROOT / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
-PRIVATE_UPLOAD_ROOT = PROJECT_ROOT / "data" / "private_uploads"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": (
+            "django.contrib.staticfiles.storage.StaticFilesStorage"
+            if DEBUG or USE_SQLITE
+            else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+        )
+    },
+}
+PRIVATE_UPLOAD_ROOT = Path(
+    os.getenv("VOBIA_PRIVATE_UPLOAD_ROOT", PROJECT_ROOT / "data" / "private_uploads")
+)
 MEDIA_ROOT = PRIVATE_UPLOAD_ROOT
 MASTER_IMPORT_MAX_BYTES = 25 * 1024 * 1024
 MASTER_IMPORT_MAX_ROWS = 5000
 SALES_IMPORT_MAX_ROWS = 100000
 SALES_IMPORT_COMMIT_ENABLED = env_bool("SALES_IMPORT_COMMIT_ENABLED", True)
+ALLOW_INITIAL_SETUP_PAGE = env_bool("VOBIA_ALLOW_INITIAL_SETUP", DEBUG or USE_SQLITE)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "accounts.User"

@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: vobia-space
+    runtime: python
+    region: singapore
+    plan: 1c-2g
+    branch: main
+    buildCommand: ./build.sh
+    preDeployCommand: python app/manage.py migrate --noinput
+    startCommand: gunicorn config.wsgi:application --chdir app --config gunicorn.conf.py
+    healthCheckPath: /healthz
+    disk:
+      name: vobia-private-files
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: VOBIA_USE_SQLITE
+        value: "0"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: space.vobia.id
+      - key: DJANGO_CSRF_TRUSTED_ORIGINS
+        value: https://space.vobia.id
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_SECURE_SSL_REDIRECT
+        value: "1"
+      - key: DJANGO_SECURE_HSTS_SECONDS
+        value: "31536000"
+      - key: DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS
+        value: "0"
+      - key: DJANGO_SECURE_HSTS_PRELOAD
+        value: "0"
+      - key: VOBIA_ALLOW_INITIAL_SETUP
+        value: "0"
+      - key: VOBIA_PRIVATE_UPLOAD_ROOT
+        value: /var/data/private_uploads
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vobia-space-db
+          property: connectionString
+
+databases:
+  - name: vobia-space-db
+    databaseName: vobia_space
+    user: vobia_space
+    region: singapore
+    plan: 0.5c-1g
+    diskSizeGB: 5
+    ipAllowList: []

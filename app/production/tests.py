@@ -1171,8 +1171,9 @@ class ProductionWorkflowTests(TestCase):
             inbound_page,
             f'<option value="{main_warehouse.id}" selected>Main Warehouse</option>',
         )
+        today_value = timezone.localdate().isoformat()
         self.assertContains(inbound_page, 'min="2026-08-26"')
-        self.assertContains(inbound_page, 'value="2026-08-26"')
+        self.assertContains(inbound_page, f'value="{today_value}"')
         rejected_early_date = self.client.post(
             reverse("inventory:inbound"),
             {

@@ -1,12 +1,14 @@
 from django.contrib import admin
 from django.urls import include, path
 
+from .health import healthz
 
 admin.site.site_header = "Vobia ERP Administration"
 admin.site.site_title = "Vobia ERP"
 admin.site.index_title = "Administrasi data"
 
 urlpatterns = [
+    path("healthz", healthz, name="healthz"),
     path("admin/", admin.site.urls),
     path("account/", include("accounts.urls")),
     path("imports/", include("imports.urls")),

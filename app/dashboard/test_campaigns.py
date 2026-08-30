@@ -72,6 +72,16 @@ class CampaignTests(TestCase):
                                       quantity=1, net_unit_price=gross, retail_price_snapshot=gross, total_gross_sales=gross,
                                       total_net_sales=gross, is_counted=True)
 
+    def test_campaign_list_shows_newest_created_first(self):
+        newest = Campaign.objects.create(
+            name="Newest", description="Latest campaign", approval_date=date(2026, 1, 1),
+            sample_date=date(2026, 1, 2), creative_date=date(2026, 1, 3),
+            prelaunch_date=date(2026, 1, 4), launch_date=date(2025, 1, 5),
+            budget=0, created_by=self.user,
+        )
+        response = self.client.get(reverse("dashboard:campaign_list"))
+        self.assertEqual(list(response.context["campaigns"]), [newest, self.campaign])
+
     @patch("dashboard.campaigns.get_report", return_value=(None, ""))
     def test_calendar_month_and_sales_window_report(self, report):
         from datetime import datetime, timezone

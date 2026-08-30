@@ -44,7 +44,8 @@ def _sync_actual_spent(campaign):
 @login_required
 def campaign_list(request):
     request.session["active_module"] = "marketing"
-    return render(request, "dashboard/campaign_list.html", {"campaigns": Campaign.objects.prefetch_related("products")})
+    campaigns = Campaign.objects.order_by("-created_at").prefetch_related("products")
+    return render(request, "dashboard/campaign_list.html", {"campaigns": campaigns})
 
 
 @login_required

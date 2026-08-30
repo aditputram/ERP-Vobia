@@ -187,6 +187,8 @@ class UserManagementTests(TestCase):
         self.assertContains(response, "system-shell")
         self.assertNotContains(response, 'class="sidebar"')
         self.assertNotContains(response, "Ganti modul")
+        self.assertContains(response, reverse("dashboard:index"))
+        self.assertContains(response, 'aria-label="Kembali ke dashboard"')
 
     def test_non_superuser_cannot_open_user_management(self):
         user = get_user_model().objects.create_user(username="staff", password=self.password)

@@ -7,6 +7,10 @@
 .ig-period { display:flex; flex-wrap:wrap; align-items:end; gap:12px; }
 .ig-period label { display:grid; gap:6px; }
 .ig-period .secondary-button { margin:0; }
+.ig-filter-shell { display:flex; flex-wrap:wrap; align-items:end; gap:12px; }
+.ig-filter-shell .ig-period { flex:1 1 auto; padding:0; }
+.ig-refresh-form { margin-left:auto; }
+.ig-refresh-form .secondary-button { margin:0; }
 .ig-details { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
 .ig-details>div { padding:14px; background:#f5f5ef; border-radius:10px; display:grid; gap:8px; }
 .ig-details span { font-size:11px; color:var(--muted); }

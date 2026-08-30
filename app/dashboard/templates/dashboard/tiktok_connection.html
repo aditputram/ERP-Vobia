@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Koneksi TikTok · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">MARKETING / KONEKSI</p><h1>Koneksi TikTok</h1><p>Hubungkan akun TikTok Vobia melalui OAuth resmi TikTok.</p></div><a class="secondary-button" href="{% url 'dashboard:instagram_dashboard' %}">Buka Social Media Report</a></header>
+<section class="panel narrow-panel">
+  <div class="panel-header"><div><p class="eyebrow">KONEKSI AKUN</p><h2>TikTok</h2></div></div>
+  {% if error %}<div class="message error" role="alert">{{ error }}</div>{% endif %}
+  {% if status %}
+    <p><strong>Akun terhubung</strong></p>
+    <p>{{ status.display_name }}{% if status.username %} · @{{ status.username }}{% endif %}</p>
+    <p class="muted">Scope: {{ status.scope }} · diverifikasi {{ status.verified_at }}</p>
+  {% elif configured %}
+    <p><strong>Konfigurasi aplikasi siap, akun belum diotorisasi.</strong></p>
+  {% else %}
+    <p><strong>Client key dan client secret belum dipasang di server.</strong></p>
+  {% endif %}
+  {% if configured %}<a class="primary-button" href="{% url 'dashboard:tiktok_oauth_start' %}">{% if status %}Hubungkan Ulang TikTok{% else %}Hubungkan TikTok{% endif %}</a>{% endif %}
+  <p class="muted">Vobia Space hanya meminta akses baca profil, statistik akun, dan video publik. Token serta refresh token disimpan di server privat dan tidak ditampilkan kembali.</p>
+</section>
+{% endblock %}

@@ -3,6 +3,7 @@ from django.urls import path
 from . import views
 from .instagram import connection
 from .instagram_report import dashboard as instagram_dashboard
+from .tiktok import callback as tiktok_callback, connection as tiktok_connection, oauth_start as tiktok_oauth_start
 from .campaigns import campaign_cover, campaign_create, campaign_delete, campaign_detail, campaign_edit, campaign_list
 from .partnerships import partnership_create, partnership_delete, partnership_detail, partnership_edit, partnership_list
 
@@ -12,6 +13,9 @@ app_name = "dashboard"
 urlpatterns = [
     path("marketing/", instagram_dashboard, name="instagram_dashboard"),
     path("marketing/instagram/", connection, name="instagram_connection"),
+    path("marketing/tiktok/", tiktok_connection, name="tiktok_connection"),
+    path("marketing/tiktok/connect/", tiktok_oauth_start, name="tiktok_oauth_start"),
+    path("marketing/tiktok/callback/", tiktok_callback, name="tiktok_callback"),
     path("marketing/campaigns/", campaign_list, name="campaign_list"),
     path("marketing/campaigns/new/", campaign_create, name="campaign_create"),
     path("marketing/campaigns/<uuid:campaign_id>/edit/", campaign_edit, name="campaign_edit"),

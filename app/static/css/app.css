@@ -484,6 +484,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .user-list-header { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; }
 .system-back-button { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: white; font-size: 20px; font-weight: 750; }
 .system-back-button:hover { border-color: #b6b7ae; transform: translateX(-2px); }
+.legal-page { width: min(760px, calc(100% - 40px)); margin: 0 auto; padding: 72px 0 96px; }
+.legal-page h1 { margin: 8px 0 4px; font-size: clamp(42px, 7vw, 72px); letter-spacing: -.055em; }
+.legal-page section { margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--line); }
+.legal-page h2 { margin: 0 0 10px; font-size: 18px; }
+.legal-page p { color: #55574f; line-height: 1.75; }
 
 .upload-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 13px; }
 .upload-panel { min-height: 410px; display: grid; align-items: center; }

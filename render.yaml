@@ -44,6 +44,10 @@ services:
         value: /var/data/private_integrations
       - key: INSTAGRAM_LIVE_ENABLED
         value: "1"
+      - key: TIKTOK_CONNECTION_DIR
+        value: /var/data/private_integrations
+      - key: TIKTOK_LIVE_ENABLED
+        value: "1"
       - key: DATABASE_URL
         fromDatabase:
           name: vobia-space-db

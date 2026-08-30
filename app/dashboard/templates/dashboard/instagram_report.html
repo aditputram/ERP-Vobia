@@ -2,8 +2,8 @@
 {% load static %}
 {% block title %}Instagram Report · Vobia ERP{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="{% static 'css/instagram-report.css' %}?v=20260831-03">
-<header class="page-header"><div><p class="eyebrow">MARKETING · DASHBOARD</p><h1>Social Media Report</h1><p>Instagram &amp; TikTok @vobia.id · performa akun dan konten.</p></div></header>
+<link rel="stylesheet" href="{% static 'css/instagram-report.css' %}?v=20260831-04">
+<header class="page-header"><div><p class="eyebrow">MARKETING · DASHBOARD</p><h1>Social Media Report</h1><p>Instagram &amp; TikTok @vobia.id · performa akun dan konten.</p></div><details class="social-connection-menu"><summary class="secondary-button">Kelola koneksi</summary><div><a href="{% url 'dashboard:instagram_connection' %}">Instagram</a><a href="{% url 'dashboard:tiktok_connection' %}">TikTok</a></div></details></header>
 <div class="panel ig-filter-shell"><form method="get" class="report-filter ig-period" id="ig-period-form"><label>Periode{{ form.period }}</label><div id="ig-month" {% if form.period.value != 'month' and form.period.value != 'month_mtd' %}hidden{% endif %}><label>Bulan{{ form.month }}</label></div><div id="ig-custom-dates" {% if form.period.value != 'custom' %}hidden{% endif %}><label>Dari tanggal{{ form.date_from }}</label><label>Sampai tanggal{{ form.date_to }}</label></div><button class="primary-button" type="submit">Tampilkan</button></form>{% if report %}<form method="post" class="ig-refresh-form">{% csrf_token %}<input type="hidden" name="period" value="{{ form.period.value }}"><input type="hidden" name="month" value="{{ form.month.value|default:'' }}"><input type="hidden" name="date_from" value="{{ report.date_from }}"><input type="hidden" name="date_to" value="{{ report.date_to }}"><button type="submit" class="secondary-button">Refresh data</button></form>{% endif %}</div>
 <script src="{% static 'js/instagram-period.js' %}?v=20260830-03" defer></script>
 {% if form.is_valid %}<p class="muted ig-note">Periode: {{ form.cleaned_data.date_from|date:"d M Y" }} – {{ form.cleaned_data.date_to|date:"d M Y" }} · dibandingkan {{ comparison_start|date:"d M Y" }} – {{ comparison_end|date:"d M Y" }}.</p>{% endif %}
@@ -12,7 +12,7 @@
 {% if error %}<div class="message warning" role="alert">{{ error }}{% if report %} Angka di bawah adalah snapshot terakhir, bukan hasil refresh baru.{% endif %}</div>{% endif %}
 <div class="social-report-columns">
 <div class="social-report-column">
-<section class="panel social-platform-header"><div class="panel-header"><div><p class="eyebrow">INSTAGRAM · ORGANIC</p><h2>@vobia.id</h2></div><a class="secondary-button" href="{% url 'dashboard:instagram_connection' %}">Kelola koneksi</a></div></section>
+<section class="panel social-platform-header"><div class="panel-header"><div><p class="eyebrow">INSTAGRAM · ORGANIC</p><h2>@vobia.id</h2></div></div></section>
 {% if report %}
 <div class="ig-sync"><span>Update terakhir <strong>{{ report.fetched_display|date:"d M Y H:i" }} WIB</strong> · API v25.0</span></div>
 <section class="ig-kpis">
@@ -34,7 +34,7 @@
 {% else %}<section class="panel section-gap"><h2>Belum ada snapshot laporan</h2><p>Pastikan koneksi Instagram aktif, lalu tampilkan periode atau buka kembali halaman.</p><a href="{% url 'dashboard:instagram_connection' %}" class="secondary-button">Kelola koneksi Instagram</a></section>{% endif %}
 </div>
 <div class="social-report-column">
-<section class="panel social-platform-panel"><div class="panel-header"><div><p class="eyebrow">TIKTOK · ORGANIC</p><h2>@vobia.id</h2></div><a class="secondary-button" href="{% url 'dashboard:tiktok_connection' %}">Kelola koneksi</a></div>
+<section class="panel social-platform-panel"><div class="panel-header"><div><p class="eyebrow">TIKTOK · ORGANIC</p><h2>@vobia.id</h2></div></div>
 {% if tiktok_error %}<div class="message warning" role="alert">{{ tiktok_error }}</div>{% endif %}
 {% if tiktok_report %}<div class="ig-kpis">
 <article class="metric-card"><span>Views</span><strong>{{ tiktok_report.views|floatformat:"0g" }}</strong><small>Video terbit pada periode</small></article>

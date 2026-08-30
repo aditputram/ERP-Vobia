@@ -80,7 +80,11 @@ class DashboardAccessTests(TestCase):
         self.client.force_login(user)
 
         with patch("dashboard.instagram_report.get_report", return_value=(None, "")):
-            self.assertEqual(self.client.get(reverse("dashboard:instagram_dashboard")).status_code, 200)
+            marketing = self.client.get(reverse("dashboard:instagram_dashboard"))
+            self.assertEqual(marketing.status_code, 200)
+            self.assertContains(marketing, '<summary class="secondary-button">Kelola koneksi</summary>', html=True)
+            self.assertContains(marketing, reverse("dashboard:instagram_connection"))
+            self.assertContains(marketing, reverse("dashboard:tiktok_connection"))
         self.assertEqual(self.client.get(reverse("dashboard:campaign_list")).status_code, 200)
         self.assertEqual(self.client.get(reverse("dashboard:partnership_list")).status_code, 200)
         self.assertEqual(self.client.get(reverse("dashboard:instagram_connection")).status_code, 403)

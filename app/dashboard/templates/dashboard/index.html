@@ -39,7 +39,7 @@
         <section class="module-grid" aria-label="Daftar modul ERP">
             {% for module in modules %}
                 <article
-                    class="module-card module-{{ module.accent }} {% if not module.available %}coming-soon{% endif %}"
+                    class="module-card module-{{ module.accent }} {% if not module.available or not module.accessible %}coming-soon{% endif %}"
                     style="--module-image: url('{% static module.image %}'); --module-position: {{ module.image_position }};"
                 >
                     <div class="module-card-top">
@@ -66,7 +66,7 @@
                         <span>{{ module.description }}</span>
                     </div>
                     <a class="module-card-action" href="{% url 'dashboard:enter_module' module.slug %}">
-                        {% if module.available %}Buka modul <span>→</span>{% else %}Lihat status <span>→</span>{% endif %}
+                        {% if not module.accessible %}Tidak ada akses{% elif module.available %}Buka modul <span>→</span>{% else %}Lihat status <span>→</span>{% endif %}
                     </a>
                 </article>
             {% endfor %}
@@ -75,7 +75,7 @@
 
     <footer class="module-footer">
         <span>VOBIA ERP · PRIVATE SYSTEM</span>
-        <span>Asia/Jakarta · Single-user MVP</span>
+        <span>Asia/Jakarta · Private multi-user system</span>
     </footer>
 </body>
 </html>

@@ -3,20 +3,21 @@ from datetime import timedelta
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login, logout
+from django.contrib.auth.decorators import user_passes_test
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import PasswordChangeView
 from django.db import transaction
 from django.http import HttpResponseForbidden, HttpResponseNotAllowed
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.views import View
 
 from audit.services import record_audit
 
-from .forms import InitialSuperadminSetupForm
+from .forms import InitialSuperadminSetupForm, ManagedUserForm
 from .models import LoginThrottle
 
 
@@ -178,3 +179,54 @@ class VobiaPasswordChangeView(LoginRequiredMixin, PasswordChangeView):
         )
         messages.success(self.request, "Password berhasil diperbarui.")
         return response
+
+
+superuser_required = user_passes_test(lambda user: user.is_authenticated and user.is_superuser)
+
+
+@superuser_required
+def user_list(request):
+    users = get_user_model().objects.order_by("-is_superuser", "username")
+    return render(request, "accounts/user_list.html", {"users": users})
+
+
+@superuser_required
+def user_create(request):
+    form = ManagedUserForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        user = form.save()
+        record_audit(
+            actor=request.user,
+            action="user_created",
+            entity_type="accounts.user",
+            entity_id=str(user.pk),
+            metadata={"username": user.username, "module_access": user.module_access},
+        )
+        messages.success(request, f"Akun {user.username} berhasil dibuat.")
+        return redirect("accounts:user_list")
+    return render(request, "accounts/user_form.html", {"form": form, "managed_user": None})
+
+
+@superuser_required
+def user_edit(request, user_id):
+    managed_user = get_object_or_404(get_user_model(), pk=user_id)
+    form = ManagedUserForm(request.POST or None, instance=managed_user)
+    if request.method == "POST" and form.is_valid():
+        if managed_user == request.user and not form.cleaned_data["is_active"]:
+            form.add_error("is_active", "Akun yang sedang dipakai tidak boleh dinonaktifkan.")
+        else:
+            user = form.save()
+            record_audit(
+                actor=request.user,
+                action="user_updated",
+                entity_type="accounts.user",
+                entity_id=str(user.pk),
+                metadata={"username": user.username, "module_access": user.module_access},
+            )
+            messages.success(request, f"Akun {user.username} berhasil diperbarui.")
+            return redirect("accounts:user_list")
+    return render(
+        request,
+        "accounts/user_form.html",
+        {"form": form, "managed_user": managed_user},
+    )

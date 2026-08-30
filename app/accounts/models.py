@@ -6,6 +6,8 @@ from django.db import models
 
 class User(AbstractUser):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    job_title = models.CharField(max_length=120, blank=True)
+    module_access = models.JSONField(default=dict, blank=True)
 
 
 class LoginThrottle(models.Model):
@@ -29,4 +31,3 @@ class LoginThrottle(models.Model):
 
     def __str__(self):
         return f"{self.username} @ {self.ip_address or 'unknown'}"
-

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{% if managed_user %}Edit{% else %}Tambah{% endif %} Pengguna · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">SYSTEM · USER ACCESS</p><h1>{% if managed_user %}Edit Pengguna{% else %}Tambah Pengguna{% endif %}</h1><p>Hak akses diterapkan langsung oleh server pada setiap modul.</p></div><a class="secondary-button" href="{% url 'accounts:user_list' %}">Daftar Pengguna</a></header>
+<form method="post" class="panel user-access-form">{% csrf_token %}
+{% if form.non_field_errors %}<div class="message error">{{ form.non_field_errors }}</div>{% endif %}
+<div class="user-identity-grid">
+{% for field in form %}{% if not field.name|slice:":7" == "access_" %}<label>{{ field.label }}{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</label>{% endif %}{% endfor %}
+</div>
+<div class="section-heading"><p class="eyebrow">MODULE ACCESS</p><h2>Hak Akses per Modul</h2>{% if managed_user.is_superuser %}<p>Super Admin selalu memiliki akses Approve ke seluruh modul.</p>{% endif %}</div>
+<div class="module-access-grid">{% for field in form %}{% if field.name|slice:":7" == "access_" %}<label><span>{{ field.label }}</span>{{ field }}{{ field.errors }}</label>{% endif %}{% endfor %}</div>
+<div class="form-actions"><button class="primary-button" type="submit">Simpan Pengguna</button><a class="secondary-button" href="{% url 'accounts:user_list' %}">Batal</a></div>
+</form>
+{% endblock %}

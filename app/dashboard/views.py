@@ -77,7 +77,12 @@ MODULES = (
 
 @login_required
 def index(request):
-    return render(request, "dashboard/index.html", {"modules": MODULES})
+    access = request.user.module_access or {}
+    modules = [
+        {**module, "accessible": request.user.is_superuser or access.get(module["slug"], "approve") != "none"}
+        for module in MODULES
+    ]
+    return render(request, "dashboard/index.html", {"modules": modules})
 
 
 @login_required
@@ -91,6 +96,9 @@ def enter_module(request, module_slug):
             request,
             f"Modul {module['name']} sudah masuk roadmap dan akan diaktifkan setelah proses bisnisnya siap.",
         )
+        return redirect("dashboard:index")
+    if not request.user.is_superuser and (request.user.module_access or {}).get(module_slug, "approve") == "none":
+        messages.error(request, f"Akun ini tidak memiliki akses ke modul {module['name']}.")
         return redirect("dashboard:index")
 
     request.session["active_module"] = module_slug

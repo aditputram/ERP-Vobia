@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
     <title>{% block title %}Vobia ERP{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260829-04">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260830-01">
     <script src="{% static 'js/app.js' %}?v=20260829-02" defer></script>
 </head>
 <body>
@@ -75,6 +75,7 @@
                 <a class="nav-item {% if request.resolver_match.namespace == 'master_data' %}active{% endif %}" href="{% url 'master_data:overview' %}"><span>Master Data</span></a>
                 <a class="nav-item {% if request.resolver_match.namespace == 'reconciliation' %}active{% endif %}" href="{% url 'reconciliation:overview' %}"><span>Reconciliation</span></a>
                 <a class="nav-item {% if request.resolver_match.url_name == 'guide' %}active{% endif %}" href="{% url 'dashboard:guide' %}"><span>Panduan &amp; UAT</span></a>
+                {% if request.user.is_superuser %}<a class="nav-item {% if request.resolver_match.namespace == 'accounts' and 'user_' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'accounts:user_list' %}"><span>Kelola Pengguna</span></a>{% endif %}
             </nav>
 
             <div class="sidebar-footer">

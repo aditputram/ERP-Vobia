@@ -146,3 +146,59 @@ class HealthCheckTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
+
+
+class UserManagementTests(TestCase):
+    def setUp(self):
+        self.password = "AmanSekali-ERP-2026!"
+        self.admin = get_user_model().objects.create_superuser(
+            username="admin", password=self.password
+        )
+        self.client.force_login(self.admin)
+
+    def test_superadmin_can_create_user_with_module_access(self):
+        response = self.client.post(
+            reverse("accounts:user_create"),
+            {
+                "username": "marketing.team",
+                "first_name": "Marketing",
+                "last_name": "Team",
+                "email": "marketing@vobia.id",
+                "job_title": "Marketing",
+                "is_active": "on",
+                "password": "Marketing-Aman-2026!",
+                "access_sales": "view",
+                "access_operation": "none",
+                "access_marketing": "edit",
+                "access_master_data": "view",
+                "access_reconciliation": "none",
+                "access_guide": "view",
+            },
+        )
+        self.assertRedirects(response, reverse("accounts:user_list"))
+        user = get_user_model().objects.get(username="marketing.team")
+        self.assertEqual(user.module_access["marketing"], "edit")
+        self.assertTrue(user.check_password("Marketing-Aman-2026!"))
+        self.assertTrue(AuditEvent.objects.filter(action="user_created", actor=self.admin).exists())
+
+    def test_non_superuser_cannot_open_user_management(self):
+        user = get_user_model().objects.create_user(username="staff", password=self.password)
+        self.client.force_login(user)
+        self.assertEqual(self.client.get(reverse("accounts:user_list")).status_code, 302)
+
+    def test_module_middleware_enforces_none_view_and_approve_levels(self):
+        user = get_user_model().objects.create_user(
+            username="staff",
+            password=self.password,
+            module_access={"sales": "view", "operation": "none"},
+        )
+        self.client.force_login(user)
+        self.assertEqual(self.client.get(reverse("sales:dashboard")).status_code, 200)
+        self.assertEqual(self.client.post(reverse("sales:dashboard")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("merchandising:overview")).status_code, 403)
+
+    def test_existing_user_without_access_map_keeps_legacy_access(self):
+        user = get_user_model().objects.create_user(username="legacy", password=self.password)
+        self.client.force_login(user)
+        self.assertEqual(self.client.get(reverse("sales:dashboard")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("merchandising:overview")).status_code, 200)

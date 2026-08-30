@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Kelola Pengguna · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">SYSTEM</p><h1>Kelola Pengguna</h1><p>Buat akun dan atur akses setiap modul Vobia Space.</p></div><a class="primary-button" href="{% url 'accounts:user_create' %}">Tambah Pengguna</a></header>
+<section class="panel"><div class="table-wrap"><table><thead><tr><th>Pengguna</th><th>Jabatan</th><th>Email</th><th>Akses Modul</th><th>Status</th><th></th></tr></thead><tbody>
+{% for user in users %}<tr><td><strong>{{ user.get_full_name|default:user.username }}</strong><small class="table-subcopy">@{{ user.username }}{% if user.is_superuser %} · Super Admin{% endif %}</small></td><td>{{ user.job_title|default:"—" }}</td><td>{{ user.email|default:"—" }}</td><td>{% if user.is_superuser %}Semua modul · Approve{% else %}{% for module, level in user.module_access.items %}{% if level != 'none' %}<span class="access-chip">{{ module|title }} · {{ level|title }}</span>{% endif %}{% empty %}—{% endfor %}{% endif %}</td><td>{% if user.is_active %}<span class="status-badge status-approved">Aktif</span>{% else %}<span class="status-badge">Nonaktif</span>{% endif %}</td><td><a class="row-link" href="{% url 'accounts:user_edit' user.id %}">Edit →</a></td></tr>
+{% empty %}<tr><td colspan="6">Belum ada pengguna.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

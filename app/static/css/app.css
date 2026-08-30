@@ -731,6 +731,15 @@ tbody tr:last-child td { border-bottom: 0; }
 .delivery-order-product-table th:nth-child(9) { width: 85px; }
 .delivery-receive-error-row td { padding: 8px 12px; background: #fff7f6; }
 .primary-button:disabled, .secondary-button:disabled { color: #96978f; background: #e7e7e1; border-color: #e1e1dc; cursor: not-allowed; opacity: .8; }
+.table-subcopy { display: block; margin-top: 4px; color: var(--muted); font-size: 8px; }
+.access-chip { display: inline-flex; margin: 2px; padding: 5px 7px; border-radius: 999px; color: #4e650b; background: #eff7d6; font-size: 8px; font-weight: 800; }
+.user-access-form { display: grid; gap: 24px; }
+.user-identity-grid, .module-access-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.user-identity-grid label, .module-access-grid label { display: grid; gap: 7px; color: var(--muted); font-size: 9px; font-weight: 800; }
+.user-identity-grid input, .module-access-grid select { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: white; }
+.user-identity-grid input[type="checkbox"] { width: 18px; min-height: 18px; }
+.user-identity-grid small { font-weight: 500; line-height: 1.5; }
+.user-identity-grid .errorlist, .module-access-grid .errorlist { margin: 0; padding: 0; list-style: none; color: var(--danger); }
 
 @media (max-width: 1080px) {
     .metric-grid.five, .metric-grid.six { grid-template-columns: repeat(3, 1fr); }
@@ -799,6 +808,7 @@ tbody tr:last-child td { border-bottom: 0; }
     .cmt-quantity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .trial-summary .span-two { grid-column: auto; }
     .production-plan-selector, .production-plan-grid, .production-monitor-card-grid, .production-activity-form-grid { grid-template-columns: 1fr; }
+    .user-identity-grid, .module-access-grid { grid-template-columns: 1fr; }
     .production-plan-field.full, .production-plan-field.wide, .production-activity-form-grid .wide { grid-column: auto; }
     .production-plan-pair { grid-column: auto; }
     .production-activity-layout { grid-template-columns: 1fr; }

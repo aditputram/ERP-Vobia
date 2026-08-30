@@ -215,6 +215,8 @@ def campaign_detail(request, campaign_id):
             metrics = media["metrics"]
             creative_item.post_metrics = {
                 "views": metrics.get("views"), "reach": metrics.get("reach"),
+                "likes": metrics.get("likes"), "comments": metrics.get("comments"),
+                "saves": metrics.get("saved"), "shares": metrics.get("shares"),
                 "engagement": metrics.get("total_interactions"), "er": metrics.get("er"),
             }
             creative_item.comments = media.get("comments") if media.get("comments_available") else None

@@ -93,7 +93,8 @@ class CampaignTests(TestCase):
         )
         report.return_value = ({"contents": [{
             "permalink": "https://www.instagram.com/p/example/",
-            "metrics": {"views": 12345, "reach": 6000, "total_interactions": 300, "er": 2.5},
+            "metrics": {"views": 12345, "reach": 6000, "likes": 240, "comments": 20,
+                        "saved": 25, "shares": 15, "total_interactions": 300, "er": 2.5},
             "comments": [{"username": "viewer", "text": "Great post", "like_count": 2}],
             "comments_available": True, "comments_complete": True,
         }]}, "")
@@ -101,6 +102,9 @@ class CampaignTests(TestCase):
         self.assertContains(response, "12.345")
         self.assertContains(response, "6.000")
         self.assertContains(response, "2,50%")
+        self.assertContains(response, "Total Likes")
+        self.assertContains(response, "240")
+        self.assertContains(response, "25")
         self.assertContains(response, "View Comments (1)")
         self.assertContains(response, "Great post")
 
@@ -215,7 +219,7 @@ class CampaignTests(TestCase):
         self.assertEqual(response.context["rows"][0]["traffic_tiktok"], 0)
         self.assertContains(response, "1.234")
         self.assertEqual(response.content.decode().count("<th>Achievement</th>"), 1)
-        self.assertContains(response, "<th>Jumlah</th>", html=True)
+        self.assertContains(response, "<th>Total</th>", html=True)
         self.assertEqual(response.context["product_totals"]["achievement"], Decimal("0"))
 
     def test_create_kol_posting_and_calculate_manual_metrics(self):

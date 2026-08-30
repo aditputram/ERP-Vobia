@@ -2,14 +2,17 @@
 {% load static %}
 {% block title %}Instagram Report · Vobia ERP{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="{% static 'css/instagram-report.css' %}?v=20260830-19">
-<header class="page-header"><div><p class="eyebrow">MARKETING · DASHBOARD</p><h1>Social Media Report</h1><p>Instagram @vobia.id · performa akun, audiens, dan konten.</p></div><a class="secondary-button" href="{% url 'dashboard:instagram_connection' %}">Kelola koneksi</a></header>
+<link rel="stylesheet" href="{% static 'css/instagram-report.css' %}?v=20260831-01">
+<header class="page-header"><div><p class="eyebrow">MARKETING · DASHBOARD</p><h1>Social Media Report</h1><p>Instagram &amp; TikTok @vobia.id · performa akun dan konten.</p></div></header>
 <form method="get" class="panel report-filter ig-period" id="ig-period-form"><label>Periode{{ form.period }}</label><div id="ig-month" {% if form.period.value != 'month' and form.period.value != 'month_mtd' %}hidden{% endif %}><label>Bulan{{ form.month }}</label></div><div id="ig-custom-dates" {% if form.period.value != 'custom' %}hidden{% endif %}><label>Dari tanggal{{ form.date_from }}</label><label>Sampai tanggal{{ form.date_to }}</label></div><button class="primary-button" type="submit">Tampilkan</button></form>
 <script src="{% static 'js/instagram-period.js' %}?v=20260830-03" defer></script>
 {% if form.is_valid %}<p class="muted ig-note">Periode: {{ form.cleaned_data.date_from|date:"d M Y" }} – {{ form.cleaned_data.date_to|date:"d M Y" }} · dibandingkan {{ comparison_start|date:"d M Y" }} – {{ comparison_end|date:"d M Y" }}.</p>{% endif %}
 {% if form.errors %}<div class="message error section-gap" role="alert">{{ form.errors }}</div>{% endif %}
 <p class="muted ig-note">Rentang inklusif · batas tanggal API (UTC), belum disetarakan dengan laporan kalender WIB · maksimal 90 hari. Pembaruan otomatis saat halaman dibuka bila cache lewat 1 jam; bukan sinkronisasi background.</p>
 {% if error %}<div class="message warning" role="alert">{{ error }}{% if report %} Angka di bawah adalah snapshot terakhir, bukan hasil refresh baru.{% endif %}</div>{% endif %}
+<div class="social-report-columns">
+<div class="social-report-column">
+<section class="panel social-platform-header"><div class="panel-header"><div><p class="eyebrow">INSTAGRAM · ORGANIC</p><h2>@vobia.id</h2></div><a class="secondary-button" href="{% url 'dashboard:instagram_connection' %}">Kelola koneksi</a></div></section>
 {% if report %}
 <div class="ig-sync"><span>Update terakhir <strong>{{ report.fetched_display|date:"d M Y H:i" }} WIB</strong> · API v25.0</span><form method="post">{% csrf_token %}<input type="hidden" name="period" value="{{ form.period.value }}"><input type="hidden" name="month" value="{{ form.month.value|default:'' }}"><input type="hidden" name="date_from" value="{{ report.date_from }}"><input type="hidden" name="date_to" value="{{ report.date_to }}"><button type="submit" class="secondary-button">Refresh data</button></form></div>
 <section class="ig-kpis">
@@ -29,7 +32,9 @@
 {% for item in report.contents %}<tr><td>{% if item.permalink %}<a href="{{ item.permalink }}" target="_blank" rel="noopener noreferrer">{{ item.caption|default:item.id }}</a>{% else %}{{ item.caption|default:item.id }}{% endif %}<small>{{ item.published }}{% if item.partial %} · Data sebagian{% endif %}</small></td><td>{{ item.kind }}</td><td>{{ item.metrics.views|floatformat:"0g"|default:"—" }}</td><td>{{ item.metrics.reach|floatformat:"0g"|default:"—" }}</td><td>{{ item.metrics.total_interactions|floatformat:"0g"|default:"—" }}</td><td>{% if item.metrics.er != None %}{{ item.metrics.er|floatformat:"2g" }}%{% else %}—{% endif %}</td><td>{{ item.metrics.likes|floatformat:"0g"|default:"—" }}</td><td>{{ item.metrics.comments|floatformat:"0g"|default:"—" }}</td><td>{{ item.metrics.shares|floatformat:"0g"|default:"—" }}</td><td>{{ item.metrics.saved|floatformat:"0g"|default:"—" }}</td><td>{% if item.metrics.profile_visits != None %}{{ item.metrics.profile_visits|floatformat:"0g" }}{% else %}—{% endif %}</td><td>{% if item.metrics.follows != None %}{{ item.metrics.follows|floatformat:"0g" }}{% else %}—{% endif %}</td><td>{% if item.metrics.ig_reels_avg_watch_time_seconds != None %}{{ item.metrics.ig_reels_avg_watch_time_seconds|floatformat:"2g" }}{% else %}—{% endif %}</td><td>{% if item.metrics.ig_reels_video_view_total_time_seconds != None %}{{ item.metrics.ig_reels_video_view_total_time_seconds|floatformat:"2g" }}{% else %}—{% endif %}</td></tr>{% empty %}<tr><td colspan="14">{% if report.library_complete %}Tidak ada konten terbit pada periode ini.{% else %}Data konten belum berhasil diambil lengkap.{% endif %}</td></tr>{% endfor %}
 </tbody></table></div><p class="muted ig-note">— berarti tidak tersedia/tidak berlaku, bukan nol. Watch time dikonversi dari milidetik ke detik.</p></section>
 {% else %}<section class="panel section-gap"><h2>Belum ada snapshot laporan</h2><p>Pastikan koneksi Instagram aktif, lalu tampilkan periode atau buka kembali halaman.</p><a href="{% url 'dashboard:instagram_connection' %}" class="secondary-button">Kelola koneksi Instagram</a></section>{% endif %}
-<section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">TIKTOK · ORGANIC</p><h2>@vobia.id</h2></div><a class="secondary-button" href="{% url 'dashboard:tiktok_connection' %}">Kelola koneksi</a></div>
+</div>
+<div class="social-report-column">
+<section class="panel social-platform-panel"><div class="panel-header"><div><p class="eyebrow">TIKTOK · ORGANIC</p><h2>@vobia.id</h2></div><a class="secondary-button" href="{% url 'dashboard:tiktok_connection' %}">Kelola koneksi</a></div>
 {% if tiktok_error %}<div class="message warning" role="alert">{{ tiktok_error }}</div>{% endif %}
 {% if tiktok_report %}<div class="ig-kpis">
 <article class="metric-card"><span>Views</span><strong>{{ tiktok_report.views|floatformat:"0g" }}</strong><small>Video terbit pada periode</small></article>
@@ -43,4 +48,6 @@
 <div class="table-wrap ig-content-scroll"><table class="ig-content-table"><thead><tr><th>Video / terbit UTC</th><th>Views</th><th>Total Engagement</th><th>ER</th><th>Likes</th><th>Comments</th><th>Shares</th></tr></thead><tbody>
 {% for item in tiktok_report.videos %}<tr><td><a href="{{ item.share_url }}" target="_blank" rel="noopener noreferrer">{{ item.video_description|default:item.title|default:item.id }}</a><small>{{ item.published }}</small></td><td>{{ item.views|floatformat:"0g" }}</td><td>{{ item.engagement|floatformat:"0g" }}</td><td>{% if item.er != None %}{{ item.er|floatformat:"2g" }}%{% else %}—{% endif %}</td><td>{{ item.likes|floatformat:"0g" }}</td><td>{{ item.comments|floatformat:"0g" }}</td><td>{{ item.shares|floatformat:"0g" }}</td></tr>{% empty %}<tr><td colspan="7">Tidak ada video terbit pada periode ini.</td></tr>{% endfor %}
 </tbody></table></div>{% else %}<p class="muted">Belum ada laporan TikTok untuk periode ini.</p>{% endif %}</section>
+</div>
+</div>
 {% endblock %}

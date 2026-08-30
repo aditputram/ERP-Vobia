@@ -6,11 +6,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
     <title>{% block title %}Vobia ERP{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260830-01">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260830-03">
     <script src="{% static 'js/app.js' %}?v=20260829-02" defer></script>
 </head>
 <body>
-    <div class="app-shell">
+    <div class="app-shell{% if request.resolver_match.namespace == 'accounts' %} system-shell{% endif %}">
+        {% if request.resolver_match.namespace != 'accounts' %}
         <aside class="sidebar">
             <a class="brand" href="{% url 'dashboard:index' %}" title="Kembali ke pemilihan modul">
                 <img class="brand-logo" src="{% static 'img/logo-vobia.png' %}" alt="Vobia">
@@ -89,6 +90,7 @@
                 </form>
             </div>
         </aside>
+        {% endif %}
 
         <main class="main-content">
             {% if messages %}

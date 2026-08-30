@@ -181,6 +181,13 @@ class UserManagementTests(TestCase):
         self.assertTrue(user.check_password("Marketing-Aman-2026!"))
         self.assertTrue(AuditEvent.objects.filter(action="user_created", actor=self.admin).exists())
 
+    def test_user_management_uses_system_layout_without_module_sidebar(self):
+        response = self.client.get(reverse("accounts:user_list"))
+
+        self.assertContains(response, "system-shell")
+        self.assertNotContains(response, 'class="sidebar"')
+        self.assertNotContains(response, "Ganti modul")
+
     def test_non_superuser_cannot_open_user_management(self):
         user = get_user_model().objects.create_user(username="staff", password=self.password)
         self.client.force_login(user)

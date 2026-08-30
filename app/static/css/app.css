@@ -471,6 +471,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .module-card.coming-soon .module-icon { opacity: .78; }
 .module-card.coming-soon .module-card-action { color: rgba(255,255,255,.82); background: rgba(10,12,10,.62); }
 .module-footer { display: flex; justify-content: space-between; gap: 20px; padding: 20px clamp(24px, 5vw, 72px) 28px; color: #92938b; font-size: 8px; font-weight: 750; letter-spacing: .1em; }
+.system-shell { display: block; }
+.system-shell .main-content { width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding-top: 48px; }
 
 .upload-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 13px; }
 .upload-panel { min-height: 410px; display: grid; align-items: center; }

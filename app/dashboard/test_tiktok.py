@@ -69,6 +69,12 @@ class TikTokConnectionTests(TestCase):
         self.client.force_login(user)
         self.assertEqual(self.client.get(reverse("dashboard:tiktok_connection")).status_code, 403)
 
+    def test_connection_shows_business_accounts_api_prototype(self):
+        response = self.client.get(reverse("dashboard:tiktok_connection"))
+        self.assertContains(response, "BUSINESS ACCOUNTS API · PROTOTYPE")
+        self.assertContains(response, "Reached Audience")
+        self.assertContains(response, "Hubungkan TikTok Business · tersedia setelah approval")
+
     @patch.object(tiktok, "access_token", return_value="ACCESS_PRIVATE")
     @patch.object(tiktok, "api_request")
     def test_report_uses_real_video_metrics(self, api_request, access_token):

@@ -557,6 +557,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .report-filter.dashboard-period-filter>label,.report-filter.dashboard-period-filter>.filter-field { min-width:0; }
 .report-filter.dashboard-period-filter input,.report-filter.dashboard-period-filter select,.dashboard-period-filter .multi-select-trigger { min-width:0; min-height:34px; padding:7px 8px; }
 .dashboard-period-filter .multi-select-menu { right:0; left:auto; width:min(260px,85vw); }
+.report-filter.dashboard-period-filter .multi-select-option { align-items:center; gap:6px; padding:6px 4px; line-height:1.2; }
 .compact-filter { padding: 0; }
 .compact-filter label { min-width: 170px; }
 .bar-chart { display: grid; gap: 13px; }

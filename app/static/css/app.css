@@ -516,7 +516,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .filter-links a { padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 8px; font-weight: 800; text-transform: uppercase; }
 .filter-links a:hover { border-color: #b2b3aa; color: var(--ink); }
 .report-filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; box-shadow: none; }
-.dashboard-period-filter { margin-bottom: 13px; }
+.dashboard-period-filter { display:grid; grid-template-columns:125px 125px 125px minmax(170px,1fr) minmax(170px,1fr) auto; gap:10px; margin-bottom:13px; }
+.dashboard-period-filter>label,.dashboard-period-filter>.filter-field { min-width:0; }
+.dashboard-period-filter>.secondary-button { min-height:40px; align-self:end; }
+@media(max-width:1150px) { .dashboard-period-filter { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media(max-width:650px) { .dashboard-period-filter { grid-template-columns:1fr; } }
 .report-filter label { min-width: 145px; display: grid; gap: 6px; color: var(--muted); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .report-filter input, .report-filter select { min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--ink); }
 .report-filter .secondary-button { margin-top: 0; }

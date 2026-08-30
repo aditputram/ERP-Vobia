@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from unittest.mock import patch
 
 
 class DashboardAccessTests(TestCase):
@@ -69,6 +70,20 @@ class DashboardAccessTests(TestCase):
         denied = self.client.get(reverse("dashboard:enter_module", args=["operation"]), follow=True)
         self.assertRedirects(denied, reverse("dashboard:index"))
         self.assertContains(denied, "yang tidak berkepentingan dilarang masuk!")
+
+    def test_marketing_user_can_open_marketing_pages(self):
+        user = get_user_model().objects.create_user(
+            username="marketing.staff",
+            password="AmanSekali-ERP-2026!",
+            module_access={"marketing": "approve"},
+        )
+        self.client.force_login(user)
+
+        with patch("dashboard.instagram_report.get_report", return_value=(None, "")):
+            self.assertEqual(self.client.get(reverse("dashboard:instagram_dashboard")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("dashboard:campaign_list")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("dashboard:partnership_list")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("dashboard:instagram_connection")).status_code, 403)
 
     def test_sales_module_sets_context_and_opens_sales_dashboard(self):
         user = get_user_model().objects.create_superuser(

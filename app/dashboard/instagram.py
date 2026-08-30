@@ -27,12 +27,14 @@ class ConnectionError(Exception):
     pass
 
 
-def access_allowed(request):
-    if not request.user.is_superuser:
-        return False
+def runtime_allowed(request):
     if settings.USE_SQLITE:
         return request.META.get("REMOTE_ADDR") in {"127.0.0.1", "::1"}
     return settings.INSTAGRAM_LIVE_ENABLED and request.is_secure()
+
+
+def access_allowed(request):
+    return request.user.is_superuser and runtime_allowed(request)
 
 
 class TokenForm(forms.Form):

@@ -11,14 +11,8 @@ from .kol_metrics import read_public_metrics
 from .models import Campaign, KolPartnership
 
 
-def _guard(request):
-    return request.user.is_superuser
-
-
 @login_required
 def partnership_list(request):
-    if not _guard(request):
-        return HttpResponseForbidden()
     request.session["active_module"] = "marketing"
     items = KolPartnership.objects.select_related("campaign", "created_by").prefetch_related("products__product")
     kol_options = list(items.order_by("kol_name").values_list("kol_name", flat=True).distinct())
@@ -42,7 +36,7 @@ def partnership_list(request):
 @login_required
 @require_POST
 def partnership_delete(request, partnership_id):
-    if not _guard(request):
+    if not request.user.is_superuser:
         return HttpResponseForbidden()
     item = get_object_or_404(KolPartnership, id=partnership_id)
     item.delete()
@@ -70,23 +64,17 @@ def _form(request, instance=None):
 @login_required
 @transaction.atomic
 def partnership_create(request):
-    if not _guard(request):
-        return HttpResponseForbidden()
     return _form(request, KolPartnership())
 
 
 @login_required
 @transaction.atomic
 def partnership_edit(request, partnership_id):
-    if not _guard(request):
-        return HttpResponseForbidden()
     return _form(request, get_object_or_404(KolPartnership, id=partnership_id))
 
 
 @login_required
 def partnership_detail(request, partnership_id):
-    if not _guard(request):
-        return HttpResponseForbidden()
     item = get_object_or_404(KolPartnership.objects.select_related("campaign").prefetch_related("products__product"), id=partnership_id)
     metric_form = KolMetricForm(instance=item)
     link_form = KolPostUrlForm(instance=item)

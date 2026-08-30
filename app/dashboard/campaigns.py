@@ -36,10 +36,6 @@ def _instagram_embed_url(url):
     return "https://www.instagram.com" + urlsplit(url).path.rstrip("/") + "/embed/"
 
 
-def _guard(request):
-    return request.user.is_superuser
-
-
 def _sync_actual_spent(campaign):
     campaign.actual_spent = CampaignExpense.objects.filter(campaign=campaign).aggregate(total=Sum("amount"))["total"] or Decimal("0")
     campaign.save(update_fields=("actual_spent", "updated_at"))
@@ -47,8 +43,6 @@ def _sync_actual_spent(campaign):
 
 @login_required
 def campaign_list(request):
-    if not _guard(request):
-        return HttpResponseForbidden()
     request.session["active_module"] = "marketing"
     return render(request, "dashboard/campaign_list.html", {"campaigns": Campaign.objects.prefetch_related("products")})
 
@@ -56,7 +50,7 @@ def campaign_list(request):
 @login_required
 @require_POST
 def campaign_delete(request, campaign_id):
-    if not _guard(request):
+    if not request.user.is_superuser:
         return HttpResponseForbidden()
     campaign = get_object_or_404(Campaign, id=campaign_id)
     try:
@@ -71,8 +65,6 @@ def campaign_delete(request, campaign_id):
 @login_required
 @transaction.atomic
 def campaign_create(request):
-    if not _guard(request):
-        return HttpResponseForbidden()
     campaign = Campaign(created_by=request.user)
     form = CampaignForm(request.POST or None, request.FILES or None, instance=campaign)
     formset = CampaignProductFormSet(request.POST or None, instance=campaign)
@@ -87,8 +79,6 @@ def campaign_create(request):
 @login_required
 @transaction.atomic
 def campaign_edit(request, campaign_id):
-    if not _guard(request):
-        return HttpResponseForbidden()
     campaign = get_object_or_404(Campaign, id=campaign_id)
     initial = {"budget": f"{campaign.budget:.0f}"} if request.method == "GET" else None
     form = CampaignForm(request.POST or None, request.FILES or None, instance=campaign, initial=initial)
@@ -103,8 +93,6 @@ def campaign_edit(request, campaign_id):
 
 @login_required
 def campaign_cover(request, campaign_id):
-    if not _guard(request):
-        return HttpResponseForbidden()
     campaign = get_object_or_404(Campaign, id=campaign_id)
     if not campaign.cover:
         return HttpResponseForbidden()
@@ -116,8 +104,6 @@ def campaign_cover(request, campaign_id):
 
 @login_required
 def campaign_detail(request, campaign_id):
-    if not _guard(request):
-        return HttpResponseForbidden()
     campaign = get_object_or_404(Campaign.objects.prefetch_related("products__product", "creatives", "expenses__created_by", "kol_partnerships"), id=campaign_id)
     expense_form = CampaignExpenseForm()
     actual_timeline_form = CampaignActualTimelineForm(instance=campaign)

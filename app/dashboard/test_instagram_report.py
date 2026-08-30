@@ -119,8 +119,7 @@ class InstagramReportTests(SimpleTestCase):
         self.assertNotContains(response, "PRIVATE_TEST_TOKEN")
         self.assertIn("no-store", response["Cache-Control"])
         request.user.is_superuser = False
-        self.assertEqual(report.dashboard(request).status_code, 403)
-        request.user.is_superuser = True
+        self.assertEqual(report.dashboard(request).status_code, 200)
         request.META["REMOTE_ADDR"] = "192.0.2.1"
         self.assertEqual(report.dashboard(request).status_code, 403)
 

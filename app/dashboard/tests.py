@@ -21,6 +21,8 @@ class DashboardAccessTests(TestCase):
         response = self.client.get(reverse("dashboard:index"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Vobia Space")
+        self.assertContains(response, "<title>Vobia Space - Pilih Modul</title>", html=True)
+        self.assertContains(response, "vobia-tiktok-app-icon.png")
         self.assertContains(response, "Play For Legacy")
         self.assertContains(response, "module-space-brand")
         self.assertContains(response, "Vobia Business Connected")

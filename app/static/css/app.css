@@ -405,13 +405,18 @@ tbody tr:last-child td { border-bottom: 0; }
 .module-space-brand { position: absolute; left: 50%; top: 50%; width: 230px; display: flex; flex-direction: column; align-items: center; gap: 2px; transform: translate(-50%, -50%); pointer-events: none; }
 .module-space-wordmark { display: block; margin-bottom: 6px; color: #11120f; font-size: 27px; font-weight: 900; letter-spacing: .035em; line-height: 1; white-space: nowrap; }
 .module-space-tagline { width: 100%; color: #686a61; text-align: center; font-size: 6px; font-weight: 800; letter-spacing: .1em; line-height: 1.25; white-space: nowrap; }
-.module-user { display: flex; align-items: center; gap: 12px; }
+.module-user-menu { position: relative; }
+.module-user-menu summary { list-style: none; }
+.module-user-menu summary::-webkit-details-marker { display: none; }
+.module-user { display: flex; align-items: center; gap: 12px; cursor: pointer; }
 .module-user-copy { display: grid; gap: 2px; text-align: right; }
 .module-user-copy small { color: var(--muted); font-size: 8px; font-weight: 850; letter-spacing: .12em; }
 .module-user-copy strong { font-size: 11px; }
 .module-user .user-avatar { color: var(--ink); border-color: #d8d8cf; background: white; }
-.module-logout { padding: 8px 10px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 9px; font-weight: 750; }
-.module-logout:hover { color: var(--ink); }
+.module-user-dropdown { position: absolute; top: calc(100% + 12px); right: 0; z-index: 60; width: 156px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: white; box-shadow: var(--shadow); }
+.module-user-dropdown a, .module-user-dropdown button { width: 100%; display: block; padding: 12px 14px; border: 0; color: var(--ink); background: white; text-align: left; cursor: pointer; font: inherit; font-size: 10px; font-weight: 750; }
+.module-user-dropdown a:hover, .module-user-dropdown button:hover { background: var(--paper); }
+.module-user-dropdown form { border-top: 1px solid var(--line); }
 .module-hub { width: min(1380px, calc(100% - 48px)); margin: 0 auto; padding: 28px 0 64px; }
 .module-messages { max-width: 760px; margin-bottom: 24px; }
 .module-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 48px; margin-bottom: 42px; }

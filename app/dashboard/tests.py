@@ -25,6 +25,9 @@ class DashboardAccessTests(TestCase):
         self.assertContains(response, "Vobia Business Connected")
         self.assertContains(response, "Tempat Untuk Bekerja, Berkarya dan Tertawa")
         self.assertContains(response, "VOBIA SPACE")
+        self.assertContains(response, "User Setting")
+        self.assertContains(response, reverse("accounts:user_list"))
+        self.assertContains(response, "Log Out")
         self.assertNotContains(response, "Pilih modul kerja")
         self.assertNotContains(response, "Mulai dari Sales")
         for module_name in ("Sales", "Operation", "RnD", "Marketing", "Finance", "Human Resource"):
@@ -38,6 +41,18 @@ class DashboardAccessTests(TestCase):
             "module-human-resource.jpg",
         ):
             self.assertContains(response, image_name)
+
+    def test_regular_user_setting_opens_password_change(self):
+        user = get_user_model().objects.create_user(
+            username="staff",
+            password="AmanSekali-ERP-2026!",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard:index"))
+
+        self.assertContains(response, reverse("accounts:password_change"))
+        self.assertNotContains(response, reverse("accounts:user_list"))
 
     def test_sales_module_sets_context_and_opens_sales_dashboard(self):
         user = get_user_model().objects.create_superuser(

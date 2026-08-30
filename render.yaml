@@ -40,6 +40,10 @@ services:
         value: "0"
       - key: VOBIA_PRIVATE_UPLOAD_ROOT
         value: /var/data/private_uploads
+      - key: INSTAGRAM_CONNECTION_DIR
+        value: /var/data/private_integrations
+      - key: INSTAGRAM_LIVE_ENABLED
+        value: "1"
       - key: DATABASE_URL
         fromDatabase:
           name: vobia-space-db

@@ -19,7 +19,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_variables
 from django.views.decorators.http import require_http_methods
 
-from .instagram import ACCOUNT_ID, USERNAME, ConnectionError, api_get, store_path
+from .instagram import ACCOUNT_ID, USERNAME, ConnectionError, access_allowed, api_get, store_path
 
 
 ACCOUNT_METRICS = {
@@ -346,8 +346,8 @@ def get_report(start, end, force=False):
 @login_required
 @require_http_methods(["GET", "POST"])
 def dashboard(request):
-    if not request.user.is_superuser or not settings.USE_SQLITE or request.META.get("REMOTE_ADDR") not in {"127.0.0.1", "::1"}:
-        return HttpResponseForbidden("Dashboard Instagram hanya tersedia untuk Super Admin pada local UAT.")
+    if not access_allowed(request):
+        return HttpResponseForbidden("Dashboard Instagram hanya tersedia untuk Super Admin melalui koneksi aman.")
     request.session["active_module"] = "marketing"
     data = request.POST if request.method == "POST" else request.GET
     form = PeriodForm(data or {"period": "7"})

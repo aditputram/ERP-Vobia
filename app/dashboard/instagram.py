@@ -27,6 +27,14 @@ class ConnectionError(Exception):
     pass
 
 
+def access_allowed(request):
+    if not request.user.is_superuser:
+        return False
+    if settings.USE_SQLITE:
+        return request.META.get("REMOTE_ADDR") in {"127.0.0.1", "::1"}
+    return settings.INSTAGRAM_LIVE_ENABLED and request.is_secure()
+
+
 class TokenForm(forms.Form):
     access_token = forms.CharField(
         label="Access Token Instagram", max_length=4096, strip=True,
@@ -122,9 +130,8 @@ def status_only():
 def connection(request):
     if not request.user.is_superuser:
         return HttpResponseForbidden("Koneksi akun hanya dapat dikelola Super Admin.")
-    # A file-backed credential is intentionally limited to the existing loopback UAT.
-    if not settings.USE_SQLITE or request.META.get("REMOTE_ADDR") not in {"127.0.0.1", "::1"}:
-        return HttpResponseForbidden("Koneksi ini hanya untuk local UAT; deployment perlu secret manager dan HTTPS.")
+    if not access_allowed(request):
+        return HttpResponseForbidden("Koneksi Instagram memerlukan HTTPS dan penyimpanan rahasia yang aktif.")
     request.session["active_module"] = "marketing"
     error = ""
     if request.method == "POST":

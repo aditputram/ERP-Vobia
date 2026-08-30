@@ -60,6 +60,15 @@ class InstagramConnectionTests(SimpleTestCase):
         with override_settings(USE_SQLITE=False):
             self.assertEqual(ig.connection(self.request()).status_code, 403)
 
+    def test_secure_live_access_requires_explicit_enablement(self):
+        request = self.request(address="192.0.2.1")
+        request.META["HTTP_X_FORWARDED_PROTO"] = "https"
+        with override_settings(USE_SQLITE=False, INSTAGRAM_LIVE_ENABLED=True):
+            self.assertEqual(ig.connection(request).status_code, 200)
+        request.META["HTTP_X_FORWARDED_PROTO"] = "http"
+        with override_settings(USE_SQLITE=False, INSTAGRAM_LIVE_ENABLED=True):
+            self.assertEqual(ig.connection(request).status_code, 403)
+
     @patch.object(ig, "verify")
     def test_post_and_get_never_render_token(self, verify):
         verify.return_value = {"username": ig.USERNAME, "account_id": ig.ACCOUNT_ID, "insights_ok": True}

@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+from datetime import date
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -67,3 +68,15 @@ class TikTokConnectionTests(TestCase):
         user = get_user_model().objects.create_user(username="staff", password="Strong-Test-2026!", module_access={"marketing": "approve"})
         self.client.force_login(user)
         self.assertEqual(self.client.get(reverse("dashboard:tiktok_connection")).status_code, 403)
+
+    @patch.object(tiktok, "access_token", return_value="ACCESS_PRIVATE")
+    @patch.object(tiktok, "api_request")
+    def test_report_uses_real_video_metrics(self, api_request, access_token):
+        api_request.side_effect = [
+            {"data": {"user": {"username": "vobia.id", "follower_count": 90000, "likes_count": 120000, "video_count": 1}}, "error": {"code": "ok"}},
+            {"data": {"videos": [{"id": "1", "create_time": 1788134400, "share_url": "https://www.tiktok.com/@vobia.id/video/1", "view_count": 1000, "like_count": 80, "comment_count": 10, "share_count": 10}], "has_more": False}, "error": {"code": "ok"}},
+        ]
+        report = tiktok.fetch_report(date(2026, 8, 30), date(2026, 8, 31))
+        self.assertEqual(report["views"], 1000)
+        self.assertEqual(report["engagement"], 100)
+        self.assertEqual(report["er"], 10)

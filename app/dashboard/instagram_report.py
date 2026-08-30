@@ -20,6 +20,7 @@ from django.views.decorators.debug import sensitive_variables
 from django.views.decorators.http import require_http_methods
 
 from .instagram import ACCOUNT_ID, USERNAME, ConnectionError, api_get, runtime_allowed, store_path
+from .tiktok import get_report as get_tiktok_report
 
 
 ACCOUNT_METRICS = {
@@ -353,12 +354,15 @@ def dashboard(request):
     form = PeriodForm(data or {"period": "7"})
     report, error = None, ""
     comparison = None
+    tiktok_report = None
+    tiktok_error = ""
     comparison_start = comparison_end = None
     if form.is_valid():
         start, end = form.cleaned_data["date_from"], form.cleaned_data["date_to"]
         report, error = get_report(start, end, force=request.method == "POST")
         comparison_start, comparison_end = previous_period(start, end, form.cleaned_data["period"])
         comparison, comparison_error = get_report(comparison_start, comparison_end, force=request.method == "POST")
+        tiktok_report, tiktok_error = get_tiktok_report(start, end)
         if comparison_error and not error:
             error = "Periode pembanding belum tersedia. " + comparison_error
     main_keys = ("reach", "views", "total_interactions", "accounts_engaged", "profile_views", "website_clicks")
@@ -369,4 +373,4 @@ def dashboard(request):
         report = dict(report)
         report["fetched_display"] = datetime.fromisoformat(report["fetched_at"])
         report["er_growth"] = growth(report.get("er"), comparison.get("er")) if comparison else None
-    return render(request, "dashboard/instagram_report.html", {"form": form, "report": report, "error": error, "cards": cards, "details": details, "follow_details": follow_details, "comparison_start": comparison_start, "comparison_end": comparison_end, "comparison": comparison})
+    return render(request, "dashboard/instagram_report.html", {"form": form, "report": report, "error": error, "cards": cards, "details": details, "follow_details": follow_details, "comparison_start": comparison_start, "comparison_end": comparison_end, "comparison": comparison, "tiktok_report": tiktok_report, "tiktok_error": tiktok_error})

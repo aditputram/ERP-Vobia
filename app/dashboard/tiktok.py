@@ -3,7 +3,7 @@ import json
 import os
 import secrets
 import tempfile
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -68,10 +68,12 @@ def save_connection(payload):
 
 
 @sensitive_variables()
-def api_request(url, *, data=None, token=""):
-    body = urlencode(data).encode() if data is not None else None
+def api_request(url, *, data=None, json_data=None, token=""):
+    body = json.dumps(json_data).encode() if json_data is not None else urlencode(data).encode() if data is not None else None
     headers = {"Accept": "application/json"}
-    if data is not None:
+    if json_data is not None:
+        headers["Content-Type"] = "application/json"
+    elif data is not None:
         headers["Content-Type"] = "application/x-www-form-urlencoded"
     if token:
         headers["Authorization"] = "Bearer " + token
@@ -86,6 +88,92 @@ def api_request(url, *, data=None, token=""):
     if isinstance(error, dict) and error.get("code") not in {None, "ok"}:
         raise TikTokConnectionError("Respons TikTok tidak valid atau izin belum disetujui.")
     return payload
+
+
+def load_connection():
+    with store_path().open() as handle:
+        return json.load(handle)
+
+
+@sensitive_variables()
+def access_token():
+    saved = load_connection()
+    try:
+        expires_at = datetime.fromisoformat(saved["expires_at"])
+    except (KeyError, TypeError, ValueError):
+        expires_at = timezone.now()
+    if expires_at > timezone.now() + timedelta(minutes=5):
+        return saved["access_token"]
+    refreshed = api_request("https://open.tiktokapis.com/v2/oauth/token/", data={
+        "client_key": settings.TIKTOK_CLIENT_KEY,
+        "client_secret": settings.TIKTOK_CLIENT_SECRET,
+        "grant_type": "refresh_token",
+        "refresh_token": saved["refresh_token"],
+    })
+    if not refreshed.get("access_token") or not refreshed.get("refresh_token"):
+        raise TikTokConnectionError("Token TikTok perlu dihubungkan ulang.")
+    now = timezone.now()
+    saved.update(refreshed)
+    saved["verified_at"] = now.isoformat()
+    saved["expires_at"] = (now + timedelta(seconds=int(refreshed.get("expires_in", 0)))).isoformat()
+    save_connection(saved)
+    return saved["access_token"]
+
+
+@sensitive_variables()
+def fetch_report(start, end):
+    token = access_token()
+    fields = "open_id,display_name,username,avatar_url,bio_description,profile_deep_link,is_verified,follower_count,following_count,likes_count,video_count"
+    profile = api_request("https://open.tiktokapis.com/v2/user/info/?" + urlencode({"fields": fields}), token=token).get("data", {}).get("user", {})
+    video_fields = "id,create_time,cover_image_url,share_url,video_description,duration,title,like_count,comment_count,share_count,view_count"
+    videos, cursor = [], None
+    for _ in range(20):
+        body = {"max_count": 20}
+        if cursor is not None:
+            body["cursor"] = cursor
+        data = api_request("https://open.tiktokapis.com/v2/video/list/?" + urlencode({"fields": video_fields}), json_data=body, token=token).get("data", {})
+        page = data.get("videos", [])
+        if not isinstance(page, list):
+            raise TikTokConnectionError("Daftar video TikTok tidak dapat dibaca.")
+        stop = False
+        for video in page:
+            try:
+                published = datetime.fromtimestamp(int(video["create_time"]), tz=dt_timezone.utc)
+            except (KeyError, TypeError, ValueError, OSError):
+                continue
+            if published.date() < start:
+                stop = True
+                continue
+            if published.date() <= end:
+                likes = max(0, int(video.get("like_count") or 0))
+                comments = max(0, int(video.get("comment_count") or 0))
+                shares = max(0, int(video.get("share_count") or 0))
+                views = max(0, int(video.get("view_count") or 0))
+                engagement = likes + comments + shares
+                videos.append({**video, "published": published.isoformat(), "likes": likes, "comments": comments,
+                               "shares": shares, "views": views, "engagement": engagement,
+                               "er": engagement / views * 100 if views else None})
+        if stop or not data.get("has_more"):
+            break
+        cursor = data.get("cursor")
+        if cursor is None:
+            break
+    views = sum(item["views"] for item in videos)
+    engagement = sum(item["engagement"] for item in videos)
+    return {"profile": profile, "videos": videos, "views": views, "engagement": engagement,
+            "er": engagement / views * 100 if views else None, "date_from": start, "date_to": end,
+            "fetched_at": timezone.now()}
+
+
+def get_report(start, end):
+    if not store_path().exists():
+        return None, "Hubungkan akun TikTok terlebih dahulu."
+    try:
+        return fetch_report(start, end), ""
+    except TikTokConnectionError as exc:
+        return None, str(exc)
+    except Exception:
+        return None, "Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan."
 
 
 @never_cache

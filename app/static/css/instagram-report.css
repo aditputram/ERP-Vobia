@@ -7,9 +7,14 @@
 .ig-period { display:flex; flex-wrap:wrap; align-items:end; gap:12px; }
 .ig-period label { display:grid; gap:6px; }
 .ig-period .secondary-button { margin:0; }
-.ig-filter-shell { display:flex; flex-wrap:wrap; align-items:end; gap:12px; }
-.ig-filter-shell .ig-period { flex:1 1 auto; padding:0; }
-.ig-refresh-form { margin-left:auto; }
+.social-report-header { align-items:flex-start; }
+.social-header-actions { display:grid; justify-items:end; gap:14px; }
+.social-header-controls { display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:end; gap:10px; }
+.social-header-controls .report-filter { padding:0; }
+.social-header-controls .ig-period { flex-wrap:nowrap; gap:8px; }
+.social-header-controls .ig-period label { min-width:105px; }
+.social-header-controls .ig-period select,.social-header-controls .ig-period input { min-height:36px; }
+.social-header-controls .primary-button,.social-header-controls .secondary-button { min-height:36px; margin:0; padding:8px 14px; }
 .ig-refresh-form .secondary-button { margin:0; }
 .social-connection-menu { position:relative; }
 .social-connection-menu summary { list-style:none; cursor:pointer; }
@@ -18,6 +23,7 @@
 .social-connection-menu a { display:block; padding:11px 13px; color:var(--ink); font-size:10px; font-weight:750; }
 .social-connection-menu a+a { border-top:1px solid var(--line); }
 .social-connection-menu a:hover,.social-connection-menu a:focus { background:#f5f5ef; }
+.ig-platform-update { margin:7px 0 0; color:var(--muted); font-size:10px; font-weight:500; }
 .ig-details { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
 .ig-details>div { padding:14px; background:#f5f5ef; border-radius:10px; display:grid; gap:8px; }
 .ig-details span { font-size:11px; color:var(--muted); }
@@ -48,6 +54,7 @@
 .social-report-column .ig-details strong { font-size:19px; }
 .social-report-column .ig-demographics { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
 @media(max-width:1000px) { .social-report-columns { grid-template-columns:1fr; } }
+@media(max-width:850px) { .social-report-header { align-items:stretch; } .social-header-actions { justify-items:start; } .social-header-controls { justify-content:flex-start; } }
 @media(max-width:1100px) { .ig-kpis,.ig-kpis.partnership-kpis,.ig-details { grid-template-columns:repeat(2,minmax(0,1fr)); } .ig-demographics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:650px) { .ig-kpis,.ig-kpis.partnership-kpis,.ig-details,.ig-demographics { grid-template-columns:1fr; } }
 #ig-custom-dates:not([hidden]){display:flex;gap:16px;flex-wrap:wrap}

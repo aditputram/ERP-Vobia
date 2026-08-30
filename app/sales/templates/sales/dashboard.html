@@ -2,7 +2,7 @@
 {% block title %}Sales Dashboard · Vobia ERP{% endblock %}
 {% block content %}
 <header class="page-header">
-  <div><p class="eyebrow">SALES · DASHBOARD</p><h1>{{ date_from|date:"d M Y" }} – {{ date_to|date:"d M Y" }}</h1><p>Selamat datang, Adit. Dashboard mengikuti periode pilihan; data transaksi terakhir tersedia sampai {{ latest|date:"d F Y" }}.{% if includes_historical %} Data sebelum 1 Agustus adalah historical snapshot report dan tidak mem-posting ulang inventory.{% endif %}</p></div>
+  <div><p class="eyebrow">SALES · DASHBOARD</p><h1>{{ date_from|date:"d M Y" }} – {{ date_to|date:"d M Y" }}</h1><p>Dashboard mengikuti periode pilihan; data transaksi terakhir tersedia sampai {{ latest|date:"d F Y" }}.{% if includes_historical %} Data sebelum 1 Agustus adalah historical snapshot report dan tidak mem-posting ulang inventory.{% endif %}</p></div>
 </header>
 <form method="get" class="panel report-filter dashboard-period-filter" data-auto-submit data-source-cascade data-dashboard-period-filter>
   <label>Period Type<select name="period_type" data-period-type><option value="custom" {% if period_type == 'custom' %}selected{% endif %}>Custom Date</option><option value="month" {% if period_type == 'month' %}selected{% endif %}>Bulan</option><option value="quarter" {% if period_type == 'quarter' %}selected{% endif %}>Quarter</option><option value="semester" {% if period_type == 'semester' %}selected{% endif %}>Semester</option><option value="year" {% if period_type == 'year' %}selected{% endif %}>Tahun</option></select></label>

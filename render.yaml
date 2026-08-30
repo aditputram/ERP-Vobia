@@ -9,6 +9,8 @@ services:
     preDeployCommand: python app/manage.py migrate --noinput
     startCommand: gunicorn config.wsgi:application --chdir app --config gunicorn.conf.py
     healthCheckPath: /healthz
+    domains:
+      - space.vobia.id
     disk:
       name: vobia-private-files
       mountPath: /var/data

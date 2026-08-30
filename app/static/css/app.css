@@ -516,16 +516,16 @@ tbody tr:last-child td { border-bottom: 0; }
 .filter-links a { padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 8px; font-weight: 800; text-transform: uppercase; }
 .filter-links a:hover { border-color: #b2b3aa; color: var(--ink); }
 .report-filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; box-shadow: none; }
-.dashboard-period-filter { display:grid; grid-template-columns:105px 115px 115px minmax(150px,1fr) minmax(130px,.75fr) 54px; gap:8px; margin-bottom:13px; }
+.dashboard-period-filter { display:grid; grid-template-columns:110px 120px 120px minmax(0,1fr) 150px 140px 54px; gap:8px; margin-bottom:13px; }
 .dashboard-period-filter>label,.dashboard-period-filter>.filter-field { min-width:0; }
 .dashboard-period-filter>[hidden] { display:none; }
 .dashboard-period-filter>.secondary-button { width:54px; min-height:34px; align-self:end; justify-self:end; padding:7px 8px; }
 @media(min-width:1151px) {
   .dashboard-period-filter>[data-period-field],.dashboard-period-filter>label:has(input[name="date_from"]) { grid-column:2; }
   .dashboard-period-filter>label:has(input[name="date_to"]) { grid-column:3; }
-  .dashboard-period-filter>.multi-select-field:not([data-cascading-source-filter]) { grid-column:4; }
-  .dashboard-period-filter>[data-cascading-source-filter] { grid-column:5; }
-  .dashboard-period-filter>.secondary-button { grid-column:6; }
+  .dashboard-period-filter>.multi-select-field:not([data-cascading-source-filter]) { grid-column:5; }
+  .dashboard-period-filter>[data-cascading-source-filter] { grid-column:6; }
+  .dashboard-period-filter>.secondary-button { grid-column:7; }
 }
 @media(max-width:1150px) { .dashboard-period-filter { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media(max-width:650px) { .dashboard-period-filter { grid-template-columns:1fr; } }
@@ -554,7 +554,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .report-filter .multi-select-option:hover { background: #fafbf4; }
 .report-filter .multi-select-option input { width: 15px; height: 15px; min-height: 0; flex: 0 0 auto; margin: 0; padding: 0; accent-color: var(--lime-dark); }
 .multi-select-option[hidden], .multi-select-menu[hidden] { display: none; }
-.report-filter.dashboard-period-filter input,.report-filter.dashboard-period-filter select,.dashboard-period-filter .multi-select-trigger { min-height:34px; padding:7px 8px; }
+.report-filter.dashboard-period-filter>label,.report-filter.dashboard-period-filter>.filter-field { min-width:0; }
+.report-filter.dashboard-period-filter input,.report-filter.dashboard-period-filter select,.dashboard-period-filter .multi-select-trigger { min-width:0; min-height:34px; padding:7px 8px; }
 .compact-filter { padding: 0; }
 .compact-filter label { min-width: 170px; }
 .bar-chart { display: grid; gap: 13px; }

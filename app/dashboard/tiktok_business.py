@@ -1,5 +1,6 @@
 """Read-only TikTok Accounts API OAuth connection."""
 import json
+import logging
 import os
 import secrets
 import tempfile
@@ -17,6 +18,9 @@ from django.views.decorators.debug import sensitive_variables
 from django.views.decorators.http import require_GET
 
 from .tiktok import TikTokConnectionError, runtime_allowed
+
+
+logger = logging.getLogger(__name__)
 
 
 def store_path():
@@ -131,5 +135,6 @@ def callback(request):
         )
         save_connection({**token, "scope": permissions.get("scope", token.get("scope", "")), "verified_at": timezone.now().isoformat()})
     except TikTokConnectionError as exc:
+        logger.warning("TikTok Business OAuth failed: %s", exc)
         return HttpResponseBadRequest(str(exc))
     return redirect("dashboard:tiktok_connection")

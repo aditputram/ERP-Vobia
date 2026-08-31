@@ -156,6 +156,34 @@ class TikTokConnectionTests(TestCase):
 
         self.assertRedirects(response, reverse("dashboard:tiktok_connection"))
 
+    @patch.object(tiktok_business, "api_request")
+    @patch.object(tiktok_business, "access_token", return_value="BUSINESS_ACCESS")
+    @patch.object(tiktok_business, "load_connection", return_value={"open_id": "business-1"})
+    def test_business_report_returns_only_real_available_metrics(self, load_connection, access_token, api_request):
+        api_request.side_effect = [
+            {
+                "followers_count": 100,
+                "audience_genders": [{"gender": "Female", "percentage": 0.35}],
+                "audience_countries": [{"country": "ID", "percentage": 0.85}],
+                "metrics": [
+                    {"date": "2026-08-29", "followers_count": 90, "likes": 10},
+                    {"date": "2026-08-30", "followers_count": 100, "likes": 15},
+                ],
+            },
+            {
+                "videos": [{"item_id": "video-1", "create_time": "1788048000", "reach": 80}],
+                "has_more": False,
+            },
+        ]
+
+        report = tiktok_business.fetch_report(date(2026, 8, 29), date(2026, 8, 30))
+
+        self.assertEqual(report["reach"], 80)
+        self.assertEqual(report["likes"], 25)
+        self.assertEqual(report["follower_growth"], 10)
+        self.assertEqual(report["profile"]["audience_genders"][0]["percentage_display"], 35)
+        self.assertNotIn("profile_visits", report)
+
     @patch.object(tiktok, "access_token", return_value="ACCESS_PRIVATE")
     @patch.object(tiktok, "api_request")
     def test_report_uses_real_video_metrics(self, api_request, access_token):

@@ -4,6 +4,7 @@ import logging
 import os
 import secrets
 import tempfile
+from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -39,6 +40,11 @@ def status_only():
     with store_path().open() as handle:
         saved = json.load(handle)
     return {key: saved.get(key) for key in ("open_id", "scope", "verified_at", "expires_in")}
+
+
+def load_connection():
+    with store_path().open() as handle:
+        return json.load(handle)
 
 
 def save_connection(payload):
@@ -84,6 +90,89 @@ def api_request(url, *, json_data=None, token=""):
         message = str(payload.get("message") or "izin belum lengkap")[:240]
         raise TikTokConnectionError(f"TikTok Business API menolak permintaan: {message} (code {code}).")
     return payload.get("data") or {}
+
+
+@sensitive_variables()
+def access_token():
+    saved = load_connection()
+    try:
+        verified_at = datetime.fromisoformat(saved["verified_at"])
+        expires_at = verified_at + timedelta(seconds=int(saved.get("expires_in") or 0))
+    except (KeyError, TypeError, ValueError):
+        expires_at = timezone.now()
+    if expires_at > timezone.now() + timedelta(minutes=5):
+        return saved["access_token"]
+    refreshed = api_request(
+        "https://business-api.tiktok.com/open_api/v1.3/tt_user/oauth2/refresh_token/",
+        json_data={
+            "client_id": settings.TIKTOK_BUSINESS_APP_ID,
+            "client_secret": settings.TIKTOK_BUSINESS_APP_SECRET,
+            "grant_type": "refresh_token",
+            "refresh_token": saved["refresh_token"],
+        },
+    )
+    if not refreshed.get("access_token") or not refreshed.get("refresh_token"):
+        raise TikTokConnectionError("Token TikTok Business perlu dihubungkan ulang.")
+    saved.update(refreshed)
+    saved["verified_at"] = timezone.now().isoformat()
+    save_connection(saved)
+    return saved["access_token"]
+
+
+@sensitive_variables()
+def fetch_report(start, end):
+    saved = load_connection()
+    token = access_token()
+    profile_fields = [
+        "audience_countries", "audience_genders", "followers_count",
+        "display_name", "username", "likes",
+    ]
+    profile = api_request(
+        "https://business-api.tiktok.com/open_api/v1.3/business/get/?" + urlencode({
+            "business_id": saved["open_id"],
+            "fields": json.dumps(profile_fields),
+        }),
+        token=token,
+    )
+    video_fields = [
+        "item_id", "caption", "likes", "comments", "shares", "video_views",
+        "create_time", "total_time_watched", "average_time_watched", "reach",
+    ]
+    page = api_request(
+        "https://business-api.tiktok.com/open_api/v1.3/business/video/list/?" + urlencode({
+            "business_id": saved["open_id"],
+            "fields": json.dumps(video_fields),
+        }),
+        token=token,
+    )
+    videos = {}
+    for item in page.get("videos", []):
+        try:
+            published = datetime.fromtimestamp(int(item["create_time"]), tz=dt_timezone.utc).date()
+        except (KeyError, TypeError, ValueError, OSError):
+            continue
+        if start <= published <= end and item.get("item_id"):
+            videos[str(item["item_id"])] = item
+    daily = []
+    for item in profile.get("metrics", []):
+        try:
+            day = datetime.fromisoformat(item["date"]).date()
+        except (KeyError, TypeError, ValueError):
+            continue
+        if start <= day <= end:
+            daily.append(item)
+    valid_followers = [int(item.get("followers_count") or 0) for item in daily if int(item.get("followers_count") or 0) > 0]
+    for key in ("audience_genders", "audience_countries"):
+        for row in profile.get(key, []):
+            row["percentage_display"] = float(row.get("percentage") or 0) * 100
+    return {
+        "profile": profile,
+        "videos": videos,
+        "reach": sum(max(0, int(item.get("reach") or 0)) for item in videos.values()),
+        "likes": sum(max(0, int(item.get("likes") or 0)) for item in daily),
+        "follower_growth": valid_followers[-1] - valid_followers[0] if len(valid_followers) > 1 else None,
+        "daily": daily,
+    }
 
 
 @login_required

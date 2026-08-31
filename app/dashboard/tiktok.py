@@ -160,9 +160,20 @@ def fetch_report(start, end):
             break
     views = sum(item["views"] for item in videos)
     engagement = sum(item["engagement"] for item in videos)
+    business = None
+    try:
+        from . import tiktok_business
+        if tiktok_business.store_path().exists():
+            business = tiktok_business.fetch_report(start, end)
+            for video in videos:
+                insight = business["videos"].get(str(video.get("id")))
+                if insight:
+                    video["business"] = insight
+    except Exception:
+        business = None
     return {"profile": profile, "videos": videos, "views": views, "engagement": engagement,
             "er": engagement / views * 100 if views else None, "date_from": start, "date_to": end,
-            "fetched_at": timezone.now()}
+            "fetched_at": timezone.now(), "business": business}
 
 
 def get_report(start, end):

@@ -188,6 +188,21 @@ class TikTokConnectionTests(TestCase):
         with self.assertRaisesMessage(tiktok.TikTokConnectionError, "HTTP 403"):
             tiktok_business.api_request("https://business-api.tiktok.com/test")
 
+    @patch.object(tiktok_business.time, "sleep")
+    @patch.object(tiktok_business, "urlopen")
+    def test_business_api_retries_transient_transport_failure(self, urlopen, sleep):
+        urlopen.side_effect = [
+            OSError("temporary TLS failure"),
+            BytesIO(b'{"code": 0, "data": {"ok": true}}'),
+        ]
+
+        self.assertEqual(
+            tiktok_business.api_request("https://business-api.tiktok.com/test"),
+            {"ok": True},
+        )
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(0.35)
+
     @patch.object(tiktok_business, "api_request")
     def test_business_callback_stores_token_privately(self, api_request):
         api_request.return_value = {"access_token": "BUSINESS_ACCESS", "refresh_token": "BUSINESS_REFRESH", "open_id": "open-business", "expires_in": 86400, "scope": "user.info.basic,user.insights"}

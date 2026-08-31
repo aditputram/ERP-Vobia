@@ -4,6 +4,7 @@ import logging
 import os
 import secrets
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
 from urllib.error import HTTPError
@@ -84,17 +85,27 @@ def api_request(url, *, json_data=None, token=""):
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     if token:
         headers["Access-Token"] = token
-    try:
-        with urlopen(Request(url, data=body, headers=headers), timeout=15) as response:
-            payload = json.loads(response.read(1024 * 1024))
-    except HTTPError as exc:
+    for attempt in range(3):
         try:
-            payload = json.loads(exc.read(1024 * 1024))
-        except (json.JSONDecodeError, OSError, TypeError):
-            raise TikTokConnectionError(f"TikTok Business API gagal merespons (HTTP {exc.code}).") from None
-    except Exception as exc:
-        logger.warning("TikTok Business transport failed: %s: %s", type(exc).__name__, exc)
-        raise TikTokConnectionError("TikTok Business API belum dapat dihubungi.") from None
+            with urlopen(Request(url, data=body, headers=headers), timeout=15) as response:
+                payload = json.loads(response.read(1024 * 1024))
+            break
+        except HTTPError as exc:
+            try:
+                payload = json.loads(exc.read(1024 * 1024))
+            except (json.JSONDecodeError, OSError, TypeError):
+                raise TikTokConnectionError(f"TikTok Business API gagal merespons (HTTP {exc.code}).") from None
+            break
+        except Exception as exc:
+            logger.warning(
+                "TikTok Business transport failed (attempt %s/3): %s: %s",
+                attempt + 1,
+                type(exc).__name__,
+                exc,
+            )
+            if attempt == 2:
+                raise TikTokConnectionError("TikTok Business API belum dapat dihubungi.") from None
+            time.sleep(0.35 * (attempt + 1))
     if not isinstance(payload, dict):
         raise TikTokConnectionError("TikTok Business API mengembalikan respons yang tidak valid.")
     if payload.get("code") not in {0, "0"}:

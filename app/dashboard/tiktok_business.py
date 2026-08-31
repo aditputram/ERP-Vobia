@@ -24,6 +24,18 @@ from .tiktok import TikTokConnectionError, runtime_allowed
 
 logger = logging.getLogger(__name__)
 STATE_SALT = "dashboard.tiktok_business.oauth"
+PROFILE_FIELDS = (
+    "audience_activity", "audience_ages", "audience_cities", "audience_countries",
+    "audience_genders", "bio_link_clicks", "comments", "daily_lost_followers",
+    "daily_new_followers", "daily_total_followers", "display_name", "engaged_audience",
+    "followers_count", "likes", "profile_views", "shares", "total_likes",
+    "unique_video_views", "username", "video_views", "videos_count",
+)
+DAILY_SUM_FIELDS = (
+    "unique_video_views", "video_views", "likes", "comments", "shares",
+    "engaged_audience", "profile_views", "bio_link_clicks", "daily_new_followers",
+    "daily_lost_followers",
+)
 
 
 def store_path():
@@ -119,60 +131,137 @@ def access_token():
     return saved["access_token"]
 
 
+def nonnegative_int(value):
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def percentage_rows(profile, key):
+    rows = []
+    for source in profile.get(key, []):
+        if not isinstance(source, dict):
+            continue
+        try:
+            percentage = float(source.get("percentage"))
+        except (TypeError, ValueError):
+            continue
+        rows.append({**source, "percentage_display": percentage * 100})
+    return rows
+
+
+def profile_date_ranges(start, end):
+    """TikTok accepts at most 60 inclusive calendar days per profile request."""
+    cursor = start
+    while cursor <= end:
+        chunk_end = min(end, cursor + timedelta(days=59))
+        yield cursor, chunk_end
+        cursor = chunk_end + timedelta(days=1)
+
+
+@sensitive_variables()
+def fetch_profile_report(start, end, *, saved=None, token=None):
+    saved = saved or load_connection()
+    token = token or access_token()
+    profile, daily_by_date = {}, {}
+    for chunk_start, chunk_end in profile_date_ranges(start, end):
+        chunk = api_request(
+            "https://business-api.tiktok.com/open_api/v1.3/business/get/?" + urlencode({
+                "business_id": saved["open_id"],
+                "start_date": chunk_start.isoformat(),
+                "end_date": chunk_end.isoformat(),
+                "fields": json.dumps(PROFILE_FIELDS),
+            }),
+            token=token,
+        )
+        profile.update({key: value for key, value in chunk.items() if key != "metrics"})
+        for item in chunk.get("metrics", []):
+            try:
+                day = datetime.fromisoformat(str(item["date"]).replace("Z", "+00:00")).date()
+            except (KeyError, TypeError, ValueError):
+                continue
+            if start <= day <= end:
+                daily_by_date[day] = item
+    daily = list(daily_by_date.values())
+    daily.sort(key=lambda item: item.get("date", ""))
+    totals = {}
+    for field in DAILY_SUM_FIELDS:
+        values = [nonnegative_int(item.get(field)) for item in daily]
+        available = [value for value in values if value is not None]
+        totals[field] = sum(available) if available else None
+    profile = dict(profile)
+    for key in ("audience_ages", "audience_cities", "audience_countries", "audience_genders"):
+        profile[key] = percentage_rows(profile, key)
+    return {
+        "profile": profile,
+        "daily": daily,
+        "totals": totals,
+        "reach": totals["unique_video_views"],
+        "views": totals["video_views"],
+        "likes": totals["likes"],
+        "comments": totals["comments"],
+        "shares": totals["shares"],
+        "engagement": sum(totals[key] for key in ("likes", "comments", "shares"))
+        if all(totals[key] is not None for key in ("likes", "comments", "shares")) else None,
+        "accounts_engaged": totals["engaged_audience"],
+        "profile_views": totals["profile_views"],
+        "website_clicks": totals["bio_link_clicks"],
+        "new_followers": totals["daily_new_followers"],
+        "lost_followers": totals["daily_lost_followers"],
+        "follower_growth": (
+            totals["daily_new_followers"] - totals["daily_lost_followers"]
+            if totals["daily_new_followers"] is not None and totals["daily_lost_followers"] is not None
+            else None
+        ),
+    }
+
+
+@sensitive_variables()
+def fetch_video_report(start, end, *, saved=None, token=None):
+    saved = saved or load_connection()
+    token = token or access_token()
+    video_fields = [
+        "item_id", "thumbnail_url", "share_url", "embed_url", "caption", "likes",
+        "comments", "shares", "favorites", "video_views", "create_time",
+        "total_time_watched", "average_time_watched", "reach",
+    ]
+    videos, cursor = {}, 0
+    for _ in range(20):
+        page = api_request(
+            "https://business-api.tiktok.com/open_api/v1.3/business/video/list/?" + urlencode({
+                "business_id": saved["open_id"],
+                "cursor": cursor,
+                "fields": json.dumps(video_fields),
+            }),
+            token=token,
+        )
+        stop = False
+        for item in page.get("videos", []):
+            try:
+                published = datetime.fromtimestamp(int(item["create_time"]), tz=dt_timezone.utc).date()
+            except (KeyError, TypeError, ValueError, OSError):
+                continue
+            if published < start:
+                stop = True
+            elif published <= end and item.get("item_id"):
+                videos[str(item["item_id"])] = item
+        if stop or not page.get("has_more"):
+            break
+        next_cursor = page.get("cursor")
+        if next_cursor in (None, cursor):
+            break
+        cursor = next_cursor
+    return videos
+
+
 @sensitive_variables()
 def fetch_report(start, end):
     saved = load_connection()
     token = access_token()
-    profile_fields = [
-        "audience_countries", "audience_genders", "followers_count",
-        "display_name", "username", "likes",
-    ]
-    profile = api_request(
-        "https://business-api.tiktok.com/open_api/v1.3/business/get/?" + urlencode({
-            "business_id": saved["open_id"],
-            "fields": json.dumps(profile_fields),
-        }),
-        token=token,
-    )
-    video_fields = [
-        "item_id", "caption", "likes", "comments", "shares", "video_views",
-        "create_time", "total_time_watched", "average_time_watched", "reach",
-    ]
-    page = api_request(
-        "https://business-api.tiktok.com/open_api/v1.3/business/video/list/?" + urlencode({
-            "business_id": saved["open_id"],
-            "fields": json.dumps(video_fields),
-        }),
-        token=token,
-    )
-    videos = {}
-    for item in page.get("videos", []):
-        try:
-            published = datetime.fromtimestamp(int(item["create_time"]), tz=dt_timezone.utc).date()
-        except (KeyError, TypeError, ValueError, OSError):
-            continue
-        if start <= published <= end and item.get("item_id"):
-            videos[str(item["item_id"])] = item
-    daily = []
-    for item in profile.get("metrics", []):
-        try:
-            day = datetime.fromisoformat(item["date"]).date()
-        except (KeyError, TypeError, ValueError):
-            continue
-        if start <= day <= end:
-            daily.append(item)
-    valid_followers = [int(item.get("followers_count") or 0) for item in daily if int(item.get("followers_count") or 0) > 0]
-    for key in ("audience_genders", "audience_countries"):
-        for row in profile.get(key, []):
-            row["percentage_display"] = float(row.get("percentage") or 0) * 100
-    return {
-        "profile": profile,
-        "videos": videos,
-        "reach": sum(max(0, int(item.get("reach") or 0)) for item in videos.values()),
-        "likes": sum(max(0, int(item.get("likes") or 0)) for item in daily),
-        "follower_growth": valid_followers[-1] - valid_followers[0] if len(valid_followers) > 1 else None,
-        "daily": daily,
-    }
+    report = fetch_profile_report(start, end, saved=saved, token=token)
+    report["videos"] = fetch_video_report(start, end, saved=saved, token=token)
+    return report
 
 
 @login_required

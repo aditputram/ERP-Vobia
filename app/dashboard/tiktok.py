@@ -162,6 +162,7 @@ def fetch_report(start, end):
     views = sum(item["views"] for item in videos)
     engagement = sum(item["engagement"] for item in videos)
     business = None
+    business_error = ""
     try:
         from . import tiktok_business
         if tiktok_business.store_path().exists():
@@ -170,11 +171,15 @@ def fetch_report(start, end):
                 insight = business["videos"].get(str(video.get("id")))
                 if insight:
                     video["business"] = insight
-    except Exception:
+    except TikTokConnectionError as exc:
+        business_error = str(exc)
         business = None
-    return {"profile": profile, "videos": videos, "views": views, "engagement": engagement,
-            "er": engagement / views * 100 if views else None, "date_from": start, "date_to": end,
-            "fetched_at": timezone.now(), "business": business}
+    account_views = business.get("views") if business else views
+    account_engagement = business.get("engagement") if business else engagement
+    return {"profile": profile, "videos": videos, "views": account_views, "engagement": account_engagement,
+            "er": account_engagement / account_views * 100 if account_engagement is not None and account_views else None,
+            "display_views": views, "display_engagement": engagement, "date_from": start, "date_to": end,
+            "fetched_at": timezone.now(), "business": business, "business_error": business_error}
 
 
 def get_report(start, end):

@@ -108,6 +108,40 @@ class TikTokConnectionTests(TestCase):
         self.assertContains(response, "Login Kit")
         self.assertContains(response, "Update terakhir")
 
+    def test_dashboard_renders_business_suite_account_metrics(self):
+        from django.utils import timezone
+        from . import instagram_report
+
+        business = {
+            "profile": {
+                "followers_count": 163134, "total_likes": 728976, "videos_count": 1639,
+                "audience_genders": [{"gender": "Female", "percentage_display": 60}],
+                "audience_ages": [], "audience_countries": [], "audience_cities": [],
+                "audience_activity": [],
+            },
+            "reach": 319613, "views": 500000, "likes": 1000, "comments": 100,
+            "shares": 50, "engagement": 1150, "accounts_engaged": 4351,
+            "profile_views": 9000, "website_clicks": 100, "new_followers": 500,
+            "lost_followers": 100, "follower_growth": 400, "videos": {},
+        }
+        comparison = {**business, "reach": 300000, "views": 450000, "engagement": 1000}
+        tiktok_snapshot = ({
+            "profile": {}, "videos": [], "views": 500000, "engagement": 1150,
+            "er": 0.23, "fetched_at": timezone.now(), "business": business,
+            "business_error": "",
+        }, "")
+        with (
+            patch.object(instagram_report, "get_report", return_value=(None, "Instagram unavailable")),
+            patch.object(instagram_report, "get_tiktok_report", return_value=tiktok_snapshot),
+            patch.object(tiktok_business, "fetch_profile_report", return_value=comparison),
+        ):
+            response = self.client.get(reverse("dashboard:instagram_dashboard"), {"period": "7"})
+
+        self.assertContains(response, "319.613")
+        self.assertContains(response, "Reached audience")
+        self.assertContains(response, "Demografi &amp; aktivitas audiens")
+        self.assertContains(response, "Accounts Engaged")
+
     def test_business_oauth_start_uses_separate_app_and_state(self):
         response = self.client.get(reverse("dashboard:tiktok_business_oauth_start"))
         self.assertEqual(response.status_code, 302)
@@ -191,11 +225,21 @@ class TikTokConnectionTests(TestCase):
         api_request.side_effect = [
             {
                 "followers_count": 100,
+                "total_likes": 500,
+                "videos_count": 20,
                 "audience_genders": [{"gender": "Female", "percentage": 0.35}],
                 "audience_countries": [{"country": "ID", "percentage": 0.85}],
+                "audience_ages": [{"age": "25-34", "percentage": 0.45}],
+                "audience_cities": [{"city_name": "Jakarta", "percentage": 0.4}],
                 "metrics": [
-                    {"date": "2026-08-29", "followers_count": 90, "likes": 10},
-                    {"date": "2026-08-30", "followers_count": 100, "likes": 15},
+                    {"date": "2026-08-29", "unique_video_views": 80, "video_views": 100,
+                     "likes": 10, "comments": 1, "shares": 2, "engaged_audience": 7,
+                     "profile_views": 4, "bio_link_clicks": 1,
+                     "daily_new_followers": 6, "daily_lost_followers": 2},
+                    {"date": "2026-08-30", "unique_video_views": 90, "video_views": 120,
+                     "likes": 15, "comments": 2, "shares": 3, "engaged_audience": 8,
+                     "profile_views": 5, "bio_link_clicks": 2,
+                     "daily_new_followers": 7, "daily_lost_followers": 1},
                 ],
             },
             {
@@ -206,11 +250,27 @@ class TikTokConnectionTests(TestCase):
 
         report = tiktok_business.fetch_report(date(2026, 8, 29), date(2026, 8, 30))
 
-        self.assertEqual(report["reach"], 80)
+        self.assertEqual(report["reach"], 170)
+        self.assertEqual(report["views"], 220)
         self.assertEqual(report["likes"], 25)
+        self.assertEqual(report["comments"], 3)
+        self.assertEqual(report["shares"], 5)
+        self.assertEqual(report["engagement"], 33)
+        self.assertEqual(report["accounts_engaged"], 15)
+        self.assertEqual(report["profile_views"], 9)
+        self.assertEqual(report["website_clicks"], 3)
         self.assertEqual(report["follower_growth"], 10)
         self.assertEqual(report["profile"]["audience_genders"][0]["percentage_display"], 35)
-        self.assertNotIn("profile_visits", report)
+        profile_url = api_request.call_args_list[0].args[0]
+        self.assertIn("start_date=2026-08-29", profile_url)
+        self.assertIn("end_date=2026-08-30", profile_url)
+
+    def test_business_profile_ranges_never_exceed_sixty_days(self):
+        ranges = list(tiktok_business.profile_date_ranges(date(2026, 6, 1), date(2026, 8, 29)))
+        self.assertEqual(ranges, [
+            (date(2026, 6, 1), date(2026, 7, 30)),
+            (date(2026, 7, 31), date(2026, 8, 29)),
+        ])
 
     @patch.object(tiktok, "access_token", return_value="ACCESS_PRIVATE")
     @patch.object(tiktok, "api_request")

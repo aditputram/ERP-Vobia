@@ -20,7 +20,7 @@ from django.views.decorators.debug import sensitive_variables
 from django.views.decorators.http import require_http_methods
 
 from .instagram import ACCOUNT_ID, USERNAME, ConnectionError, api_get, runtime_allowed, store_path
-from .tiktok import get_report as get_tiktok_report
+from .tiktok import TikTokConnectionError, get_report as get_tiktok_report
 
 
 ACCOUNT_METRICS = {
@@ -356,6 +356,7 @@ def dashboard(request):
     comparison = None
     tiktok_report = None
     tiktok_error = ""
+    tiktok_comparison = None
     comparison_start = comparison_end = None
     if form.is_valid():
         start, end = form.cleaned_data["date_from"], form.cleaned_data["date_to"]
@@ -363,6 +364,12 @@ def dashboard(request):
         comparison_start, comparison_end = previous_period(start, end, form.cleaned_data["period"])
         comparison, comparison_error = get_report(comparison_start, comparison_end, force=request.method == "POST")
         tiktok_report, tiktok_error = get_tiktok_report(start, end)
+        if tiktok_report and tiktok_report.get("business"):
+            try:
+                from .tiktok_business import fetch_profile_report
+                tiktok_comparison = fetch_profile_report(comparison_start, comparison_end)
+            except TikTokConnectionError:
+                tiktok_comparison = None
         if comparison_error and not error:
             error = "Periode pembanding belum tersedia. " + comparison_error
     main_keys = ("reach", "views", "total_interactions", "accounts_engaged", "profile_views", "website_clicks")
@@ -373,4 +380,42 @@ def dashboard(request):
         report = dict(report)
         report["fetched_display"] = datetime.fromisoformat(report["fetched_at"])
         report["er_growth"] = growth(report.get("er"), comparison.get("er")) if comparison else None
-    return render(request, "dashboard/instagram_report.html", {"form": form, "report": report, "error": error, "cards": cards, "details": details, "follow_details": follow_details, "comparison_start": comparison_start, "comparison_end": comparison_end, "comparison": comparison, "tiktok_report": tiktok_report, "tiktok_error": tiktok_error})
+    tiktok_cards = []
+    tiktok_details = []
+    tiktok_er_growth = None
+    tiktok_previous_er = None
+    if tiktok_report:
+        current = tiktok_report.get("business")
+        previous = tiktok_comparison
+        if current:
+            for key, label in (
+                ("reach", "Reach"), ("views", "Impression (Views)"),
+                ("engagement", "Total Engagement"), ("accounts_engaged", "Accounts Engaged"),
+                ("profile_views", "Profile Visit"), ("website_clicks", "Click Website"),
+            ):
+                value = current.get(key)
+                previous_value = previous.get(key) if previous else None
+                tiktok_cards.append({"name": label, "value": value, "previous": previous_value,
+                                     "growth": growth(value, previous_value)})
+            for key, label in (
+                ("likes", "Likes"), ("comments", "Comments"), ("shares", "Shares"),
+                ("new_followers", "New Followers"), ("lost_followers", "Lost Followers"),
+                ("follower_growth", "Net Followers"),
+            ):
+                value = current.get(key)
+                previous_value = previous.get(key) if previous else None
+                tiktok_details.append({"name": label, "value": value, "previous": previous_value,
+                                       "growth": growth(value, previous_value)})
+            tiktok_previous_er = (
+                previous["engagement"] / previous["views"] * 100
+                if previous and previous.get("engagement") is not None and previous.get("views") else None
+            )
+            tiktok_er_growth = growth(tiktok_report.get("er"), tiktok_previous_er)
+    return render(request, "dashboard/instagram_report.html", {
+        "form": form, "report": report, "error": error, "cards": cards, "details": details,
+        "follow_details": follow_details, "comparison_start": comparison_start,
+        "comparison_end": comparison_end, "comparison": comparison, "tiktok_report": tiktok_report,
+        "tiktok_error": tiktok_error, "tiktok_cards": tiktok_cards,
+        "tiktok_details": tiktok_details, "tiktok_comparison": tiktok_comparison,
+        "tiktok_er_growth": tiktok_er_growth, "tiktok_previous_er": tiktok_previous_er,
+    })

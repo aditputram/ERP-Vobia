@@ -145,6 +145,17 @@ class InstagramReportTests(TestCase):
         comparison_start, comparison_end = report.previous_period(month_form.cleaned_data["date_from"], month_form.cleaned_data["date_to"], "month")
         self.assertEqual(comparison_end, month_form.cleaned_data["date_from"] - timedelta(days=1))
         self.assertEqual(comparison_start.day, 1)
+        historic_month_end = today.replace(day=1) - timedelta(days=91)
+        historic_month_form = report.PeriodForm({
+            "period": "month",
+            "month": historic_month_end.strftime("%Y-%m"),
+        })
+        self.assertTrue(historic_month_form.is_valid(), historic_month_form.errors)
+        self.assertFalse(report.PeriodForm({
+            "period": "custom",
+            "date_from": historic_month_end.replace(day=1),
+            "date_to": historic_month_end,
+        }).is_valid())
         current_full_comparison_form = report.PeriodForm({"period": "month", "month": today.strftime("%Y-%m")})
         self.assertTrue(current_full_comparison_form.is_valid(), current_full_comparison_form.errors)
         self.assertEqual(current_full_comparison_form.cleaned_data["date_to"], today - timedelta(days=1))

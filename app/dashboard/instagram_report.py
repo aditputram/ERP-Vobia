@@ -89,7 +89,12 @@ class PeriodForm(forms.Form):
                 raise forms.ValidationError("Tanggal awal harus sebelum atau sama dengan tanggal akhir.")
             if (end - start).days >= 90:
                 raise forms.ValidationError("Pilih maksimal 90 hari per laporan.")
-            if end >= today or start < today - timedelta(days=90):
+            # Stored full-month snapshots remain useful after they leave the rolling
+            # daily-sync window. Custom/preset ranges stay bounded to the last 90 days.
+            if end >= today or (
+                preset not in {"month", "month_mtd"}
+                and start < today - timedelta(days=90)
+            ):
                 raise forms.ValidationError("Pilih hari lengkap sebelum hari ini, dalam 90 hari terakhir.")
         return cleaned
 

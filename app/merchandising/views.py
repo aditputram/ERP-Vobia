@@ -837,9 +837,7 @@ def planning_builder(request):
             "draft_product_count": draft_product_count,
             "draft_missing_months": draft_missing_months,
             "scenarios": ProjectionScenario.objects.annotate(
-                rule_count=Count("rules", distinct=True),
-                projection_count=Count("projections", distinct=True),
-                incoming_plan_count=Count("incoming_plans", distinct=True),
+                projection_count=Count("projections"),
             )[:50],
             "projections": SalesProjection.objects.select_related("scenario", "sku")[:200],
             "incoming_plans": IncomingPlan.objects.select_related("sku", "scenario")[:200],

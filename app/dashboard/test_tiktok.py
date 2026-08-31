@@ -80,6 +80,19 @@ class TikTokConnectionTests(TestCase):
         self.assertContains(response, "Reached Audience")
         self.assertContains(response, "Hubungkan TikTok Business")
 
+    def test_dashboard_shows_separate_tiktok_update_time(self):
+        from django.utils import timezone
+        from . import instagram_report
+
+        tiktok_snapshot = ({
+            "profile": {}, "videos": [], "views": 0, "engagement": 0,
+            "er": None, "fetched_at": timezone.now(), "business": {},
+        }, "")
+        with patch.object(instagram_report, "get_report", return_value=(None, "Instagram unavailable")), patch.object(instagram_report, "get_tiktok_report", return_value=tiktok_snapshot):
+            response = self.client.get(reverse("dashboard:instagram_dashboard"))
+        self.assertContains(response, "Login Kit")
+        self.assertContains(response, "Update terakhir")
+
     def test_business_oauth_start_uses_separate_app_and_state(self):
         response = self.client.get(reverse("dashboard:tiktok_business_oauth_start"))
         self.assertEqual(response.status_code, 302)

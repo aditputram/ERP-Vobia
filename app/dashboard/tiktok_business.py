@@ -78,8 +78,17 @@ def oauth_start(request):
         return HttpResponseForbidden("Konfigurasi aman TikTok Business belum aktif.")
     state = secrets.token_urlsafe(32)
     request.session["tiktok_business_oauth_state"] = state
-    return redirect("https://ads.tiktok.com/marketing_api/auth?" + urlencode({
-        "app_id": settings.TIKTOK_BUSINESS_APP_ID,
+    return redirect("https://www.tiktok.com/v2/auth/authorize/?" + urlencode({
+        "client_key": settings.TIKTOK_BUSINESS_APP_ID,
+        "scope": ",".join((
+            "user.info.basic",
+            "user.info.profile",
+            "user.info.stats",
+            "user.insights",
+            "video.list",
+            "video.insights",
+        )),
+        "response_type": "code",
         "state": state,
         "redirect_uri": redirect_uri(request),
     }))

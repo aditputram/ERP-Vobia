@@ -64,8 +64,12 @@ def api_request(url, *, json_data=None, token=""):
             payload = json.loads(response.read(1024 * 1024))
     except Exception:
         raise TikTokConnectionError("TikTok Business API belum dapat dihubungi.") from None
-    if not isinstance(payload, dict) or payload.get("code") not in {0, "0"}:
-        raise TikTokConnectionError("TikTok Business API menolak permintaan atau izin belum lengkap.")
+    if not isinstance(payload, dict):
+        raise TikTokConnectionError("TikTok Business API mengembalikan respons yang tidak valid.")
+    if payload.get("code") not in {0, "0"}:
+        code = str(payload.get("code", "unknown"))[:32]
+        message = str(payload.get("message") or "izin belum lengkap")[:240]
+        raise TikTokConnectionError(f"TikTok Business API menolak permintaan: {message} (code {code}).")
     return payload.get("data") or {}
 
 

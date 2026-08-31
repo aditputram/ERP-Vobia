@@ -704,6 +704,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const sales = Number(salesInput.value);
       const beginning = Number(salesInput.dataset.beginning) || 0;
       if (!Number.isFinite(sales)) return;
+      if (salesInput.dataset.incomingAllowed === 'false') {
+        if (incomingInput) {
+          incomingInput.min = '0';
+          incomingInput.value = '0';
+          incomingInput.disabled = true;
+        }
+        return;
+      }
       const currentRatio = sales ? beginning / sales : null;
       const minimum = (
         currentRatio !== null && currentRatio < 1.5

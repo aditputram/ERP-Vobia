@@ -529,8 +529,13 @@ def build_draft_matrix(
             }
             if grain == "sku" and bucket and len(bucket["projections"]) == 1:
                 projection = bucket["projections"][0]
+                product = projection.sku.product_variant.product
                 cell["projection_id"] = projection.id
                 cell["beginning"] = projection.beginning_qty or Decimal("0")
+                cell["incoming_allowed"] = (
+                    product.status.name not in NO_INCOMING_STATUSES
+                    and product.category.name not in NO_INCOMING_CATEGORIES
+                )
                 if header["metric"] == "sales" and header["submetric"] == "qty":
                     cell["editable"] = "sales"
                     cell["input_name"] = f"sales_qty_{projection.id}"

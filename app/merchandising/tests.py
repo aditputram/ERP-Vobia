@@ -291,6 +291,26 @@ class MerchandisingWorkflowTests(TestCase):
         self.assertEqual(sku_rows[0]["cells"][3]["value"], Decimal("19400000"))
         self.assertEqual(sku_rows[0]["cells"][4]["value"], Decimal("2.5"))
 
+    def test_draft_matrix_marks_no_incoming_product_for_read_only_incoming(self):
+        self.product.status.name = "Discontinue"
+        self.product.status.save(update_fields=["name"])
+        projection = self._projection()
+        projection.beginning_qty = Decimal("200")
+        projection.save(update_fields=["beginning_qty"])
+
+        rows, _, _ = build_draft_matrix(
+            [projection],
+            [date(2026, 9, 1)],
+            ["sales", "incoming_recommendation"],
+            grain="sku",
+            selected_submetrics=["qty"],
+        )
+
+        sales_cell, incoming_cell = rows[0]["cells"]
+        self.assertFalse(sales_cell["incoming_allowed"])
+        self.assertFalse(incoming_cell["incoming_allowed"])
+        self.assertEqual(incoming_cell["value"], Decimal("0"))
+
     def test_rule_priority_product_over_category_over_status(self):
         rules = [
             ProjectionRule.objects.create(

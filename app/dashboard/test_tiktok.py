@@ -19,6 +19,51 @@ class TikTokConnectionTests(TestCase):
         self.assertEqual(tiktok.video_id_from_url("https://www.tiktok.com/@vobia.id/video/123?lang=en"), "123")
         self.assertEqual(tiktok.video_id_from_url("https://www.tiktok.com/@vobia.id/photo/456"), "456")
 
+    @patch.object(tiktok, "fetch_available_report")
+    def test_report_cache_avoids_repeating_external_requests(self, fetch):
+        from django.utils import timezone
+
+        fetch.return_value = {
+            "profile": {}, "videos": [], "views": 100, "engagement": 10,
+            "fetched_at": timezone.now(), "business": {},
+        }
+        start, end = date(2026, 8, 23), date(2026, 8, 29)
+
+        first, first_error = tiktok.get_report(start, end)
+        second, second_error = tiktok.get_report(start, end)
+
+        self.assertEqual(first_error, "")
+        self.assertEqual(second_error, "")
+        self.assertEqual(first["views"], second["views"])
+        fetch.assert_called_once_with(start, end)
+        self.assertEqual(os.stat(tiktok.report_path(start, end)).st_mode & 0o777, 0o600)
+
+    @patch.object(tiktok, "fetch_available_report")
+    def test_report_cache_preserves_snapshot_when_refresh_fails(self, fetch):
+        from django.utils import timezone
+
+        start, end = date(2026, 8, 23), date(2026, 8, 29)
+        tiktok.write_cache(tiktok.report_path(start, end), {
+            "profile": {}, "videos": [], "views": 100, "engagement": 10,
+            "fetched_at": timezone.now(), "business": {},
+        })
+        fetch.side_effect = tiktok.TikTokConnectionError("TikTok lambat")
+
+        report, error = tiktok.get_report(start, end, force=True)
+
+        self.assertEqual(report["views"], 100)
+        self.assertEqual(error, "TikTok lambat")
+
+    @patch.object(tiktok, "fetch_videos")
+    def test_video_query_cache_reuses_metrics_for_campaign(self, fetch):
+        fetch.return_value = {"123": {"views": 100, "engagement": 10}}
+
+        first = tiktok.query_videos(["123"])
+        second = tiktok.query_videos(["123"])
+
+        self.assertEqual(first, second)
+        fetch.assert_called_once_with(["123"])
+
     @patch.object(tiktok, "access_token", return_value="ACCESS_PRIVATE")
     @patch.object(tiktok, "api_request")
     def test_query_videos_calculates_public_metrics(self, api_request, _token):

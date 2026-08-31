@@ -1,4 +1,6 @@
 """Superadmin-managed, read-only TikTok OAuth connection."""
+import fcntl
+import hashlib
 import json
 import os
 import secrets
@@ -11,6 +13,7 @@ from urllib.request import Request, urlopen
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.core.serializers.json import DjangoJSONEncoder
 from django.http import HttpResponseForbidden
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -20,6 +23,7 @@ from django.views.decorators.http import require_GET
 
 
 SCOPES = "user.info.basic,user.info.profile,user.info.stats,video.list"
+CACHE_SECONDS = 3600
 
 
 class TikTokConnectionError(Exception):
@@ -34,6 +38,88 @@ def runtime_allowed(request):
 
 def store_path():
     return Path(settings.TIKTOK_CONNECTION_DIR) / "tiktok.json"
+
+
+def report_path(start, end, kind="report"):
+    return store_path().parent / f"tiktok-{kind}-{start.isoformat()}-{end.isoformat()}.json"
+
+
+def query_path(video_ids):
+    digest = hashlib.sha256(",".join(video_ids).encode()).hexdigest()[:24]
+    return store_path().parent / f"tiktok-videos-{digest}.json"
+
+
+def write_cache(path, value):
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.parent.is_symlink() or path.is_symlink():
+        raise TikTokConnectionError("Lokasi penyimpanan cache TikTok tidak aman.")
+    os.chmod(path.parent, 0o700)
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".tiktok-cache-")
+    try:
+        with os.fdopen(descriptor, "w") as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            json.dump({
+                "schema": 1,
+                "cached_at": timezone.now().isoformat(),
+                "value": value,
+            }, handle, cls=DjangoJSONEncoder)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def load_cache(path):
+    try:
+        with path.open() as handle:
+            cached = json.load(handle)
+        return cached if cached.get("schema") == 1 else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def cache_fresh(cached):
+    try:
+        age = (timezone.now() - datetime.fromisoformat(cached["cached_at"])).total_seconds()
+        return 0 <= age < CACHE_SECONDS
+    except (TypeError, KeyError, ValueError):
+        return False
+
+
+def cached_value(cached):
+    if not cached:
+        return None
+    value = cached.get("value")
+    if isinstance(value, dict) and isinstance(value.get("fetched_at"), str):
+        try:
+            value["fetched_at"] = datetime.fromisoformat(value["fetched_at"])
+        except ValueError:
+            pass
+    return value
+
+
+def cached_fetch(path, fetcher, *, force=False):
+    cached = load_cache(path)
+    if not force and cache_fresh(cached):
+        return cached_value(cached), ""
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o700)
+        with (path.parent / (path.name.split("-202", 1)[0] + ".lock")).open("a+") as lock:
+            os.fchmod(lock.fileno(), 0o600)
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return cached_value(cached), "Sinkronisasi TikTok sedang berjalan. Snapshot terakhir tetap ditampilkan."
+            value = fetcher()
+            write_cache(path, value)
+            return value, ""
+    except TikTokConnectionError as exc:
+        return cached_value(cached), str(exc)
+    except Exception:
+        return cached_value(cached), "Refresh TikTok belum berhasil. Snapshot terakhir tetap ditampilkan."
 
 
 def redirect_uri(request):
@@ -215,30 +301,50 @@ def business_only_report(start, end):
     }
 
 
-def get_report(start, end):
+def fetch_available_report(start, end):
     from . import tiktok_business
 
     has_display = store_path().exists()
     has_business = tiktok_business.store_path().exists()
     if not has_display and not has_business:
-        return None, "Hubungkan akun TikTok terlebih dahulu."
+        raise TikTokConnectionError("Hubungkan akun TikTok terlebih dahulu.")
     if has_display:
         try:
-            return fetch_report(start, end), ""
+            return fetch_report(start, end)
         except TikTokConnectionError as exc:
             if not has_business:
-                return None, str(exc)
+                raise exc
         except Exception:
             if not has_business:
-                return None, "Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan."
+                raise TikTokConnectionError("Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan.") from None
     if has_business:
         try:
-            return business_only_report(start, end), ""
+            return business_only_report(start, end)
         except TikTokConnectionError as exc:
-            return None, str(exc)
+            raise exc
         except Exception:
-            return None, "Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan."
-    return None, "Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan."
+            raise TikTokConnectionError("Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan.") from None
+    raise TikTokConnectionError("Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan.")
+
+
+def get_report(start, end, force=False):
+    return cached_fetch(
+        report_path(start, end),
+        lambda: fetch_available_report(start, end),
+        force=force,
+    )
+
+
+def get_business_profile_report(start, end, force=False):
+    from . import tiktok_business
+
+    if not tiktok_business.store_path().exists():
+        return None, "Hubungkan TikTok Business terlebih dahulu."
+    return cached_fetch(
+        report_path(start, end, kind="business-profile"),
+        lambda: tiktok_business.fetch_profile_report(start, end),
+        force=force,
+    )
 
 
 def video_id_from_url(url):
@@ -247,18 +353,15 @@ def video_id_from_url(url):
 
 
 @sensitive_variables()
-def query_videos(video_ids):
+def fetch_videos(video_ids):
     """Read specific linked-account posts without relying on feed pagination."""
-    ids = list(dict.fromkeys(str(item) for item in video_ids if item))
-    if not ids:
-        return {}
     token = access_token()
     fields = "id,create_time,cover_image_url,share_url,video_description,duration,title,like_count,comment_count,share_count,view_count"
     found = {}
-    for offset in range(0, len(ids), 20):
+    for offset in range(0, len(video_ids), 20):
         payload = api_request(
             "https://open.tiktokapis.com/v2/video/query/?" + urlencode({"fields": fields}),
-            json_data={"filters": {"video_ids": ids[offset:offset + 20]}}, token=token,
+            json_data={"filters": {"video_ids": video_ids[offset:offset + 20]}}, token=token,
         )
         videos = payload.get("data", {}).get("videos", [])
         if not isinstance(videos, list):
@@ -276,6 +379,16 @@ def query_videos(video_ids):
                                "views": views, "engagement": engagement,
                                "er": engagement / views * 100 if views else None}
     return found
+
+
+def query_videos(video_ids, force=False):
+    ids = sorted(dict.fromkeys(str(item) for item in video_ids if item))
+    if not ids:
+        return {}
+    result, error = cached_fetch(query_path(ids), lambda: fetch_videos(ids), force=force)
+    if result is not None:
+        return result
+    raise TikTokConnectionError(error or "Data video TikTok belum dapat dibaca.")
 
 
 @never_cache

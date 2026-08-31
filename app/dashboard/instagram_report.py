@@ -20,7 +20,10 @@ from django.views.decorators.debug import sensitive_variables
 from django.views.decorators.http import require_http_methods
 
 from .instagram import ACCOUNT_ID, USERNAME, ConnectionError, api_get, runtime_allowed, store_path
-from .tiktok import TikTokConnectionError, get_report as get_tiktok_report
+from .tiktok import (
+    get_business_profile_report as get_tiktok_business_profile_report,
+    get_report as get_tiktok_report,
+)
 
 
 ACCOUNT_METRICS = {
@@ -363,13 +366,14 @@ def dashboard(request):
         report, error = get_report(start, end, force=request.method == "POST")
         comparison_start, comparison_end = previous_period(start, end, form.cleaned_data["period"])
         comparison, comparison_error = get_report(comparison_start, comparison_end, force=request.method == "POST")
-        tiktok_report, tiktok_error = get_tiktok_report(start, end)
+        force = request.method == "POST"
+        tiktok_report, tiktok_error = get_tiktok_report(start, end, force=force)
         if tiktok_report and tiktok_report.get("business"):
-            try:
-                from .tiktok_business import fetch_profile_report
-                tiktok_comparison = fetch_profile_report(comparison_start, comparison_end)
-            except TikTokConnectionError:
-                tiktok_comparison = None
+            tiktok_comparison, _tiktok_comparison_error = get_tiktok_business_profile_report(
+                comparison_start,
+                comparison_end,
+                force=force,
+            )
         if comparison_error and not error:
             error = "Periode pembanding belum tersedia. " + comparison_error
     main_keys = ("reach", "views", "total_interactions", "accounts_engaged", "profile_views", "website_clicks")

@@ -152,6 +152,8 @@ class TikTokConnectionTests(TestCase):
             response = self.client.get(reverse("dashboard:instagram_dashboard"))
         self.assertContains(response, "Login Kit")
         self.assertContains(response, "Update terakhir")
+        self.assertContains(response, "social-refresh-status")
+        self.assertContains(response, "Proses ini memakan waktu lebih lama karena harus memindai data actual dari platform.")
 
     def test_dashboard_renders_business_suite_account_metrics(self):
         from django.utils import timezone

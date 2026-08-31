@@ -20,3 +20,9 @@ if (periodForm) {
   period.addEventListener("change", toggleDates);
   toggleDates();
 }
+
+const refreshForm = document.querySelector(".ig-refresh-form");
+const refreshStatus = document.getElementById("social-refresh-status");
+refreshForm?.addEventListener("submit", event => {
+  if (!event.defaultPrevented && refreshStatus) refreshStatus.hidden = false;
+});

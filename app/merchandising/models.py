@@ -10,6 +10,7 @@ from django.db.models import Q
 class ProjectionScenario(models.Model):
     class Status(models.TextChoices):
         DRAFT = "DRAFT", "Draft"
+        REVISION_DRAFT = "REVISION_DRAFT", "Revision Draft"
         APPROVED = "APPROVED", "Approved"
         SUPERSEDED = "SUPERSEDED", "Superseded"
 
@@ -42,6 +43,10 @@ class ProjectionScenario(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+
+    @property
+    def quantities_editable(self):
+        return self.status in {self.Status.DRAFT, self.Status.REVISION_DRAFT}
 
     def clean(self):
         super().clean()

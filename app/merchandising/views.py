@@ -57,6 +57,7 @@ from .services.workflows import (
     approve_incoming_plan,
     approve_sales_projection,
     approve_scenario,
+    open_scenario_revision,
     create_incoming_plan,
     delete_draft_scenario,
     delete_draft_scenario_items,
@@ -944,6 +945,26 @@ def delete_scenario_draft_items(request, scenario_id):
         )
     except (ValidationError, TypeError, ValueError) as exc:
         messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+    draft_url = reverse("merchandising:planning_builder")
+    return redirect(f"{draft_url}?view_draft={scenario.id}#draft-projection")
+
+
+@login_required
+@require_POST
+def revise_scenario(request, scenario_id):
+    scenario = get_object_or_404(ProjectionScenario, pk=scenario_id)
+    try:
+        open_scenario_revision(
+            scenario.id,
+            request.user,
+            request.POST.get("reason", ""),
+        )
+        messages.success(
+            request,
+            "Revision Draft dibuka. Angka Approved lama tersimpan di audit trail; simpan perubahan lalu approve ulang.",
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
     draft_url = reverse("merchandising:planning_builder")
     return redirect(f"{draft_url}?view_draft={scenario.id}#draft-projection")
 

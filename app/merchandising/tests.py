@@ -39,6 +39,7 @@ from .services.workflows import (
     create_incoming_plan,
     delete_draft_scenario,
     delete_draft_scenario_items,
+    open_scenario_revision,
     save_scenario_draft,
     update_draft_scenario,
 )
@@ -564,6 +565,90 @@ class MerchandisingWorkflowTests(TestCase):
         self.assertEqual(projection.final_approved_qty, Decimal("100"))
         self.assertEqual(plan.final_approved_incoming, Decimal("130"))
         self.assertEqual(requirement.approved_qty, Decimal("130"))
+
+    def test_superadmin_can_revise_and_reapprove_approved_scenario_with_audit(self):
+        superadmin = User.objects.create_superuser(
+            username="owner",
+            password="test-password",
+        )
+        projection = self._projection()
+        projection.beginning_qty = Decimal("30")
+        projection.save(update_fields=["beginning_qty"])
+        approve_scenario(self.scenario.id, self.user, reason="Approval awal")
+
+        open_scenario_revision(
+            self.scenario.id,
+            superadmin,
+            "Target September dikoreksi",
+        )
+        self.scenario.refresh_from_db()
+        projection.refresh_from_db()
+        plan = IncomingPlan.objects.get(sales_projection=projection)
+        requirement = PPICRequirement.objects.get(incoming_plan=plan)
+        self.assertEqual(self.scenario.status, ProjectionScenario.Status.REVISION_DRAFT)
+        self.assertEqual(projection.approval_status, SalesProjection.ApprovalStatus.DRAFT)
+        self.assertEqual(plan.approval_status, IncomingPlan.ApprovalStatus.DRAFT)
+        audit = AuditEvent.objects.get(action="projection_scenario_revision_opened")
+        self.assertEqual(
+            audit.before_values["sales_projections"][0]["final_approved_qty"],
+            "100.0000",
+        )
+
+        approve_scenario(
+            self.scenario.id,
+            superadmin,
+            sales_values={str(projection.id): "90"},
+            incoming_values={str(projection.id): "110"},
+            reason="Revisi final September",
+        )
+        self.scenario.refresh_from_db()
+        projection.refresh_from_db()
+        plan.refresh_from_db()
+        requirement.refresh_from_db()
+        self.assertEqual(self.scenario.status, ProjectionScenario.Status.APPROVED)
+        self.assertEqual(projection.final_approved_qty, Decimal("90"))
+        self.assertEqual(plan.final_approved_incoming, Decimal("110"))
+        self.assertEqual(requirement.approved_qty, Decimal("110"))
+        self.assertEqual(requirement.revision, 2)
+
+    def test_scenario_revision_requires_superadmin_reason_and_unallocated_ppic(self):
+        superadmin = User.objects.create_superuser(
+            username="owner",
+            password="test-password",
+        )
+        projection = self._projection()
+        projection.beginning_qty = Decimal("30")
+        projection.save(update_fields=["beginning_qty"])
+        approve_scenario(self.scenario.id, self.user, reason="Approval awal")
+
+        with self.assertRaises(ValidationError):
+            open_scenario_revision(self.scenario.id, self.user, "Koreksi")
+        with self.assertRaises(ValidationError):
+            open_scenario_revision(self.scenario.id, superadmin, "")
+
+        plan = IncomingPlan.objects.get(sales_projection=projection)
+        requirement = PPICRequirement.objects.get(incoming_plan=plan)
+        supplier = Supplier.objects.create(code="SUP-REV", name="Supplier Revision")
+        po = PurchaseOrder.objects.create(
+            supplier=supplier,
+            need_month=plan.month,
+            created_by=superadmin,
+        )
+        PurchaseOrderLine.objects.create(
+            po=po,
+            requirement=requirement,
+            sku=self.sku,
+            ordered_qty=Decimal("10"),
+            cogs_snapshot=Decimal("100000"),
+        )
+        with self.assertRaisesMessage(ValidationError, "sudah dialokasikan ke PO"):
+            open_scenario_revision(
+                self.scenario.id,
+                superadmin,
+                "Target perlu dikoreksi",
+            )
+        self.scenario.refresh_from_db()
+        self.assertEqual(self.scenario.status, ProjectionScenario.Status.APPROVED)
 
     def test_scenario_approval_rolls_back_when_a_target_month_is_missing(self):
         self.scenario.end_month = date(2026, 10, 1)

@@ -141,13 +141,100 @@ def _whole_nonnegative(value, label):
 
 
 @transaction.atomic
+def open_scenario_revision(scenario_id, actor, reason):
+    """Reopen an approved scenario while preserving the approved values in audit."""
+    reason = (reason or "").strip()
+    if not getattr(actor, "is_superuser", False):
+        raise ValidationError("Hanya Super Admin yang dapat membuka revisi Scenario Approved.")
+    if not reason:
+        raise ValidationError("Alasan revisi wajib diisi.")
+
+    scenario = ProjectionScenario.objects.select_for_update().get(pk=scenario_id)
+    if scenario.status != ProjectionScenario.Status.APPROVED:
+        raise ValidationError("Hanya Scenario Approved yang dapat dibuka untuk revisi.")
+
+    projections = list(
+        SalesProjection.objects.select_for_update()
+        .filter(scenario=scenario)
+        .select_related("sku")
+        .order_by("month", "sku__sku")
+    )
+    plans = list(
+        IncomingPlan.objects.select_for_update()
+        .filter(scenario=scenario)
+        .select_related("sku")
+        .order_by("month", "sku__sku")
+    )
+    allocated_requirements = [
+        requirement
+        for plan in plans
+        for requirement in plan.ppic_requirements.select_for_update().all()
+        if requirement.po_lines.exclude(po__status="CANCELLED").exists()
+    ]
+    if allocated_requirements:
+        labels = ", ".join(
+            sorted({f"{item.sku.sku} {item.need_month:%b %Y}" for item in allocated_requirements})
+        )
+        raise ValidationError(
+            "Revisi diblokir karena Incoming sudah dialokasikan ke PO: " + labels + "."
+        )
+
+    before_values = {
+        "status": scenario.status,
+        "approved_at": scenario.approved_at.isoformat() if scenario.approved_at else None,
+        "sales_projections": [
+            {
+                "id": str(item.id),
+                "month": item.month.isoformat(),
+                "sku": item.sku.sku,
+                "final_approved_qty": str(item.final_approved_qty),
+            }
+            for item in projections
+        ],
+        "incoming_plans": [
+            {
+                "id": str(item.id),
+                "month": item.month.isoformat(),
+                "sku": item.sku.sku,
+                "final_approved_incoming": str(item.final_approved_incoming),
+            }
+            for item in plans
+        ],
+    }
+    SalesProjection.objects.filter(scenario=scenario).update(
+        approval_status=SalesProjection.ApprovalStatus.DRAFT,
+        approved_by=None,
+        approved_at=None,
+    )
+    IncomingPlan.objects.filter(scenario=scenario).update(
+        approval_status=IncomingPlan.ApprovalStatus.DRAFT,
+        approved_by=None,
+        approved_at=None,
+    )
+    scenario.status = ProjectionScenario.Status.REVISION_DRAFT
+    scenario.approved_by = None
+    scenario.approved_at = None
+    scenario.save(update_fields=["status", "approved_by", "approved_at"])
+    record_audit(
+        actor=actor,
+        action="projection_scenario_revision_opened",
+        entity_type="merchandising.projectionscenario",
+        entity_id=scenario.id,
+        reason=reason,
+        before_values=before_values,
+        after_values={"status": scenario.status},
+    )
+    return scenario
+
+
+@transaction.atomic
 def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=None, reason=""):
     """Save auditable SKU-level Sales and Incoming adjustments before scenario approval."""
     sales_values = sales_values or {}
     incoming_values = incoming_values or {}
     scenario = ProjectionScenario.objects.select_for_update().get(pk=scenario_id)
-    if scenario.status != ProjectionScenario.Status.DRAFT:
-        raise ValidationError("Hanya Scenario Draft yang dapat diedit.")
+    if not scenario.quantities_editable:
+        raise ValidationError("Hanya Scenario Draft atau Revision Draft yang dapat diedit.")
     projections = list(
         SalesProjection.objects.select_for_update().filter(scenario=scenario).select_related(
             "sku__product_variant__product__status",
@@ -264,7 +351,7 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
 def approve_scenario(scenario_id, actor, sales_values=None, incoming_values=None, reason=""):
     """Atomically approve every Sales and Incoming row in a complete scenario."""
     scenario = ProjectionScenario.objects.select_for_update().get(pk=scenario_id)
-    if scenario.status != ProjectionScenario.Status.DRAFT:
+    if not scenario.quantities_editable:
         raise ValidationError("Scenario sudah approved atau tidak lagi aktif.")
     projected_months = set(scenario.projections.values_list("month", flat=True))
     missing_months = [month for month in _scenario_months(scenario) if month not in projected_months]

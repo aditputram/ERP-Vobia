@@ -32,7 +32,10 @@ def current_month_target_sales(*, sku_ids, planning_year, current_month_number):
     draft_rows = SalesProjection.objects.filter(
         sku_id__in=sku_ids,
         month=target_month,
-        scenario__status=ProjectionScenario.Status.DRAFT,
+        scenario__status__in=[
+            ProjectionScenario.Status.DRAFT,
+            ProjectionScenario.Status.REVISION_DRAFT,
+        ],
         approval_status=SalesProjection.ApprovalStatus.DRAFT,
     ).select_related("scenario").order_by("scenario__created_at", "id")
     for row in draft_rows:
@@ -40,7 +43,10 @@ def current_month_target_sales(*, sku_ids, planning_year, current_month_number):
 
     draft_scenarios = list(
         ProjectionScenario.objects.filter(
-            status=ProjectionScenario.Status.DRAFT,
+            status__in=[
+                ProjectionScenario.Status.DRAFT,
+                ProjectionScenario.Status.REVISION_DRAFT,
+            ],
             projections__sku_id__in=sku_ids,
             projections__month=target_month,
         )
@@ -81,7 +87,10 @@ def future_planning_values(
     draft_sales = {}
     draft_rows = SalesProjection.objects.filter(
         **future_filter,
-        scenario__status=ProjectionScenario.Status.DRAFT,
+        scenario__status__in=[
+            ProjectionScenario.Status.DRAFT,
+            ProjectionScenario.Status.REVISION_DRAFT,
+        ],
     ).select_related("scenario").order_by("scenario__created_at", "id")
     for row in draft_rows:
         draft_sales[(row.sku_id, row.month.month)] = row
@@ -99,7 +108,10 @@ def future_planning_values(
     draft_incoming = {}
     for row in IncomingPlan.objects.filter(
         **future_filter,
-        scenario__status=ProjectionScenario.Status.DRAFT,
+        scenario__status__in=[
+            ProjectionScenario.Status.DRAFT,
+            ProjectionScenario.Status.REVISION_DRAFT,
+        ],
     ).order_by("scenario__created_at", "id"):
         draft_incoming[(row.sku_id, row.month.month)] = row.proposed_incoming
 
@@ -187,7 +199,10 @@ def future_planning_values(
 
     draft_scenarios = list(
         ProjectionScenario.objects.filter(
-            status=ProjectionScenario.Status.DRAFT,
+            status__in=[
+                ProjectionScenario.Status.DRAFT,
+                ProjectionScenario.Status.REVISION_DRAFT,
+            ],
             projections__sku_id__in=sku_ids,
             projections__month__year=planning_year,
             projections__month__gt=current_month_date,

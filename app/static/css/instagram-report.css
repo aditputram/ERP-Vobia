@@ -16,7 +16,7 @@
 .social-header-controls .ig-period select,.social-header-controls .ig-period input { min-height:36px; }
 .social-header-controls .primary-button,.social-header-controls .secondary-button { min-height:36px; margin:0; padding:8px 14px; }
 .ig-refresh-form .secondary-button { margin:0; }
-.social-refresh-status { justify-self:end; max-width:330px; margin:0; padding:10px 12px; border:1px solid #ead89a; border-radius:9px; background:#fff6d8; color:#6d570f; font-size:10px; font-weight:700; line-height:1.45; text-align:left; }
+.page-header .social-refresh-status { justify-self:end; max-width:330px; margin:0; padding:7px 10px; border:1px solid #ead89a; border-radius:8px; background:#fff6d8; color:#6d570f; font-size:11px; font-weight:500; line-height:1.65; text-align:left; }
 .social-connection-menu { position:relative; }
 .social-connection-menu summary { list-style:none; cursor:pointer; }
 .social-connection-menu summary::-webkit-details-marker { display:none; }

@@ -102,7 +102,7 @@ def callback(request):
         return HttpResponseForbidden("Koneksi TikTok hanya dapat dikelola Super Admin.")
     expected = request.session.pop("tiktok_business_oauth_state", "")
     returned = request.GET.get("state", "")
-    auth_code = request.GET.get("auth_code", "")
+    auth_code = request.GET.get("code", "") or request.GET.get("auth_code", "")
     if not expected or not secrets.compare_digest(expected, returned) or not auth_code:
         return HttpResponseBadRequest("Otorisasi TikTok Business tidak valid atau dibatalkan.")
     try:

@@ -96,7 +96,7 @@ class TikTokConnectionTests(TestCase):
         session = self.client.session
         session["tiktok_business_oauth_state"] = "business-state"
         session.save()
-        response = self.client.get(reverse("dashboard:tiktok_business_callback"), {"auth_code": "code-1", "state": "business-state"})
+        response = self.client.get(reverse("dashboard:tiktok_business_callback"), {"code": "code-1", "state": "business-state"})
         self.assertRedirects(response, reverse("dashboard:tiktok_connection"))
         saved = json.loads(tiktok_business.store_path().read_text())
         self.assertEqual(saved["open_id"], "open-business")

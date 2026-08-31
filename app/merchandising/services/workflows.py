@@ -156,6 +156,13 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
     )
     if not projections:
         raise ValidationError("Scenario belum memiliki Draft Projection.")
+    targeted_projection_ids = set(sales_values) | set(incoming_values)
+    if targeted_projection_ids:
+        projections = [
+            projection
+            for projection in projections
+            if str(projection.id) in targeted_projection_ids
+        ]
     plans_by_projection = {
         plan.sales_projection_id: plan
         for plan in IncomingPlan.objects.select_for_update().filter(scenario=scenario)

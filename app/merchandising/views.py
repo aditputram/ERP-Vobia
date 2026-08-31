@@ -861,6 +861,33 @@ def update_scenario_draft(request, scenario_id):
     }
     reason = request.POST.get("reason", "").strip()
     action = request.POST.get("action", "save")
+    if action == "save":
+        current_sales = {
+            str(projection.id): projection.proposed_qty
+            for projection in SalesProjection.objects.filter(scenario=scenario)
+        }
+        current_incoming = {
+            str(plan.sales_projection_id): plan.proposed_incoming
+            for plan in IncomingPlan.objects.filter(scenario=scenario)
+        }
+
+        def changed_values(posted, current):
+            changed = {}
+            for key, value in posted.items():
+                try:
+                    unchanged = key in current and Decimal(value) == current[key]
+                except (ArithmeticError, TypeError, ValueError):
+                    unchanged = False
+                if not unchanged:
+                    changed[key] = value
+            return changed
+
+        sales_values = changed_values(sales_values, current_sales)
+        incoming_values = changed_values(incoming_values, current_incoming)
+        if not sales_values and not incoming_values:
+            messages.info(request, "Tidak ada perubahan pada Scenario Draft.")
+            draft_url = reverse("merchandising:planning_builder")
+            return redirect(f"{draft_url}?view_draft={scenario.id}#draft-projection")
     try:
         if action == "approve":
             approve_scenario(
@@ -886,7 +913,6 @@ def update_scenario_draft(request, scenario_id):
                 request,
                 "Scenario Draft tersimpan. Penyesuaian Sales dan Incoming tetap dapat diedit sebelum approval.",
             )
-            return redirect("merchandising:planning_builder")
     except (ValidationError, ArithmeticError, TypeError, ValueError) as exc:
         messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
     draft_url = reverse("merchandising:planning_builder")

@@ -1491,7 +1491,7 @@ class MerchandisingReportViewTests(TestCase):
             ["AVAILABLE-SKU"],
         )
 
-    def test_save_scenario_draft_returns_to_library_until_view_draft_is_clicked(self):
+    def test_save_scenario_draft_keeps_the_saved_draft_open(self):
         current_month = timezone.localdate().replace(day=1)
         scenario = ProjectionScenario.objects.create(
             name="Save And Close Draft Matrix",
@@ -1511,17 +1511,69 @@ class MerchandisingReportViewTests(TestCase):
             {"action": "save"},
         )
 
-        self.assertRedirects(response, "/merchandising/planning-builder/")
-        library_response = self.client.get("/merchandising/planning-builder/")
-        self.assertContains(library_response, "View Draft · 1 SKU")
-        self.assertNotContains(library_response, "SCENARIO DRAFT")
-
+        self.assertRedirects(
+            response,
+            f"/merchandising/planning-builder/?view_draft={scenario.id}#draft-projection",
+        )
         reopened_response = self.client.get(
             "/merchandising/planning-builder/",
             {"view_draft": scenario.id},
         )
         self.assertContains(reopened_response, "SCENARIO DRAFT")
         self.assertContains(reopened_response, "Save And Close Draft Matrix")
+
+    def test_save_draft_ignores_unchanged_invalid_legacy_row(self):
+        scenario = ProjectionScenario.objects.create(
+            name="Legacy Invalid Row",
+            start_month=date(2026, 9, 1),
+            end_month=date(2026, 9, 1),
+            created_by=self.user,
+        )
+        editable = SalesProjection.objects.create(
+            scenario=scenario,
+            month=date(2026, 9, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("200"),
+            system_recommendation=Decimal("100"),
+        )
+        stale_status = ProductStatus.objects.create(code="DISCONTINUE", name="Discontinue")
+        stale_product = Product.objects.create(
+            code="STALE-PRODUCT",
+            name="Stale Product",
+            status=stale_status,
+            category=self.product.category,
+        )
+        stale_variant = ProductVariant.objects.create(
+            product=stale_product,
+            name="Default",
+            color="Default",
+        )
+        stale_sku = SKU.objects.create(sku="ST345", product_variant=stale_variant)
+        stale = SalesProjection.objects.create(
+            scenario=scenario,
+            month=date(2026, 9, 1),
+            sku=stale_sku,
+            beginning_qty=Decimal("-31"),
+            system_recommendation=Decimal("0"),
+        )
+
+        response = self.client.post(
+            f"/merchandising/planning-builder/scenario/{scenario.id}/draft/",
+            {
+                "action": "save",
+                f"sales_qty_{editable.id}": "120",
+                f"sales_qty_{stale.id}": "0",
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            f"/merchandising/planning-builder/?view_draft={scenario.id}#draft-projection",
+        )
+        editable.refresh_from_db()
+        stale.refresh_from_db()
+        self.assertEqual(editable.proposed_qty, Decimal("120"))
+        self.assertEqual(stale.proposed_qty, Decimal("0"))
 
     def test_scenario_library_edit_button_starts_disabled_until_a_field_changes(self):
         current_month = timezone.localdate().replace(day=1)

@@ -3,6 +3,7 @@ import json
 import os
 import secrets
 import tempfile
+import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
 from urllib.parse import urlencode
@@ -185,6 +186,43 @@ def get_report(start, end):
         return None, str(exc)
     except Exception:
         return None, "Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan."
+
+
+def video_id_from_url(url):
+    match = re.search(r"/(?:video|photo)/(\d+)", url or "")
+    return match.group(1) if match else ""
+
+
+@sensitive_variables()
+def query_videos(video_ids):
+    """Read specific linked-account posts without relying on feed pagination."""
+    ids = list(dict.fromkeys(str(item) for item in video_ids if item))
+    if not ids:
+        return {}
+    token = access_token()
+    fields = "id,create_time,cover_image_url,share_url,video_description,duration,title,like_count,comment_count,share_count,view_count"
+    found = {}
+    for offset in range(0, len(ids), 20):
+        payload = api_request(
+            "https://open.tiktokapis.com/v2/video/query/?" + urlencode({"fields": fields}),
+            json_data={"filters": {"video_ids": ids[offset:offset + 20]}}, token=token,
+        )
+        videos = payload.get("data", {}).get("videos", [])
+        if not isinstance(videos, list):
+            raise TikTokConnectionError("Data video TikTok tidak dapat dibaca.")
+        for video in videos:
+            video_id = str(video.get("id") or "")
+            if not video_id:
+                continue
+            likes = max(0, int(video.get("like_count") or 0))
+            comments = max(0, int(video.get("comment_count") or 0))
+            shares = max(0, int(video.get("share_count") or 0))
+            views = max(0, int(video.get("view_count") or 0))
+            engagement = likes + comments + shares
+            found[video_id] = {**video, "likes": likes, "comments": comments, "shares": shares,
+                               "views": views, "engagement": engagement,
+                               "er": engagement / views * 100 if views else None}
+    return found
 
 
 @never_cache

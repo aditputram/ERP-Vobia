@@ -15,6 +15,21 @@ from . import tiktok, tiktok_business
 
 
 class TikTokConnectionTests(TestCase):
+    def test_video_id_from_url_supports_video_and_photo(self):
+        self.assertEqual(tiktok.video_id_from_url("https://www.tiktok.com/@vobia.id/video/123?lang=en"), "123")
+        self.assertEqual(tiktok.video_id_from_url("https://www.tiktok.com/@vobia.id/photo/456"), "456")
+
+    @patch.object(tiktok, "access_token", return_value="ACCESS_PRIVATE")
+    @patch.object(tiktok, "api_request")
+    def test_query_videos_calculates_public_metrics(self, api_request, _token):
+        api_request.return_value = {"data": {"videos": [{
+            "id": "123", "view_count": 1000, "like_count": 80,
+            "comment_count": 10, "share_count": 10,
+        }]}, "error": {"code": "ok"}}
+        result = tiktok.query_videos(["123"])["123"]
+        self.assertEqual(result["engagement"], 100)
+        self.assertEqual(result["er"], 10)
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

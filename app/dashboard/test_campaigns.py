@@ -118,6 +118,22 @@ class CampaignTests(TestCase):
         self.assertContains(response, "View Comments (1)")
         self.assertContains(response, "Great post")
 
+    @patch("dashboard.campaigns.tiktok.query_videos")
+    def test_tiktok_creative_matches_directly_by_video_id(self, query_videos):
+        CampaignCreative.objects.create(
+            campaign=self.campaign, platform="TIKTOK",
+            post_url="https://www.tiktok.com/@vobia.id/video/123?lang=en",
+        )
+        query_videos.return_value = {"123": {
+            "views": 1000, "likes": 80, "comments": 10, "shares": 10,
+            "engagement": 100, "er": 10,
+        }}
+        response = self.client.get(reverse("dashboard:campaign_detail", args=[self.campaign.id]))
+        self.assertContains(response, "API matched")
+        self.assertContains(response, "1.000")
+        self.assertContains(response, "10,00%")
+        self.assertNotContains(response, "Menunggu koneksi dan persetujuan API TikTok")
+
     def test_create_snapshots_target_and_timeline_validation(self):
         response = self.client.post(reverse("dashboard:campaign_create"), {
             "name": "New", "description": "New campaign", "campaign_plan_url": "https://example.com/moodboard", "approval_date": "2026-02-01", "sample_date": "2026-02-02",

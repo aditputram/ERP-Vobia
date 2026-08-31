@@ -19,6 +19,7 @@ from traffic.models import TrafficProductMetric
 from .forms_campaign import CampaignActualTimelineForm, CampaignExpenseForm, CampaignForm, CampaignProductFormSet, CreativeForm
 from .models import Campaign, CampaignExpense
 from .instagram_report import get_report
+from . import tiktok
 
 
 def _end_date(launch):
@@ -197,13 +198,17 @@ def campaign_detail(request, campaign_id):
     actual_spent = campaign.actual_spent + kol_budget
     roi = gross / actual_spent if actual_spent else None
     instagram = [item for item in campaign.creatives.all() if item.platform == "INSTAGRAM"]
+    tiktok_items = [item for item in campaign.creatives.all() if item.platform == "TIKTOK"]
     for item in campaign.creatives.all():
         item.api_matched = False
         item.embed_url = _instagram_embed_url(item.post_url) if item.platform == "INSTAGRAM" else ""
         item.post_metrics = None
         item.comments = None
         item.comments_complete = False
-    social = {"Instagram": {"posts": len(instagram), "matched": 0, "reach": 0, "views": 0, "engagement": 0}}
+    social = {
+        "Instagram": {"posts": len(instagram), "matched": 0, "reach": 0, "views": 0, "engagement": 0},
+        "TikTok": {"posts": len(tiktok_items), "matched": 0, "reach": 0, "views": 0, "engagement": 0},
+    }
     report_error = ""
     if instagram:
         report, report_error = get_report(campaign.prelaunch_date, end)
@@ -227,6 +232,24 @@ def campaign_detail(request, campaign_id):
                 value = media["metrics"].get(source)
                 if value is not None:
                     social["Instagram"][target_key] += value
+    if tiktok_items:
+        try:
+            by_id = tiktok.query_videos(tiktok.video_id_from_url(item.post_url) for item in tiktok_items)
+            for creative_item in tiktok_items:
+                media = by_id.get(tiktok.video_id_from_url(creative_item.post_url))
+                if not media:
+                    continue
+                creative_item.api_matched = True
+                creative_item.post_metrics = {
+                    "views": media["views"], "reach": None, "likes": media["likes"],
+                    "comments": media["comments"], "saves": None, "shares": media["shares"],
+                    "engagement": media["engagement"], "er": media["er"],
+                }
+                social["TikTok"]["matched"] += 1
+                social["TikTok"]["views"] += media["views"]
+                social["TikTok"]["engagement"] += media["engagement"]
+        except tiktok.TikTokConnectionError as exc:
+            report_error = " · ".join(filter(None, (report_error, str(exc))))
     for values in social.values():
         count = values["matched"]
         values["avg_reach"] = values["reach"] / count if count else None

@@ -2,7 +2,9 @@ import json
 import os
 import tempfile
 from datetime import date
+from io import BytesIO
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
@@ -86,6 +88,22 @@ class TikTokConnectionTests(TestCase):
         self.assertIn("video.insights", response.url)
         self.assertTrue(self.client.session["tiktok_business_oauth_state"])
         self.assertNotIn("BUSINESS_SECRET_NEVER_RENDER", response.url)
+
+    @patch.object(tiktok_business, "urlopen")
+    def test_business_api_surfaces_tiktok_http_error(self, urlopen):
+        urlopen.side_effect = HTTPError(
+            "https://business-api.tiktok.com/open_api/v1.3/tt_user/oauth2/token/",
+            400,
+            "Bad Request",
+            {},
+            BytesIO(b'{"code": 40002, "message": "Invalid client secret"}'),
+        )
+
+        with self.assertRaisesMessage(
+            tiktok.TikTokConnectionError,
+            "Invalid client secret (code 40002)",
+        ):
+            tiktok_business.api_request("https://business-api.tiktok.com/test")
 
     @patch.object(tiktok_business, "api_request")
     def test_business_callback_stores_token_privately(self, api_request):

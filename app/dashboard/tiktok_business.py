@@ -4,6 +4,7 @@ import os
 import secrets
 import tempfile
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -62,6 +63,11 @@ def api_request(url, *, json_data=None, token=""):
     try:
         with urlopen(Request(url, data=body, headers=headers), timeout=15) as response:
             payload = json.loads(response.read(1024 * 1024))
+    except HTTPError as exc:
+        try:
+            payload = json.loads(exc.read(1024 * 1024))
+        except (json.JSONDecodeError, OSError, TypeError):
+            raise TikTokConnectionError("TikTok Business API belum dapat dihubungi.") from None
     except Exception:
         raise TikTokConnectionError("TikTok Business API belum dapat dihubungi.") from None
     if not isinstance(payload, dict):

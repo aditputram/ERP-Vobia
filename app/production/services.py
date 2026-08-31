@@ -875,7 +875,7 @@ def submit_production_activity(
     notes="",
     delivery_order=None,
 ):
-    production_order = ProductionOrder.objects.select_for_update().select_related("po", "plan").get(
+    production_order = ProductionOrder.objects.select_for_update().select_related("po").get(
         pk=production_order.pk
     )
     eligible = {value for value, _label in eligible_activity_choices(production_order)}

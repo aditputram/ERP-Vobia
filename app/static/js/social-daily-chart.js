@@ -10,7 +10,7 @@
     ["profile_visits", "Profile Visit", "#a56828"],
     ["website_clicks", "Click Website", "#a8466d"],
   ];
-  const active = new Set(["reach", "impressions", "total_engagement"]);
+  const active = new Set(["reach"]);
   const options = document.querySelector("[data-chart-options]");
   const tooltip = document.querySelector("[data-chart-tooltip]");
   choices.forEach(([key, label, color]) => {

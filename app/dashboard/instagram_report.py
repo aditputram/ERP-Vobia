@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from django import forms
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponseForbidden
+from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
@@ -25,7 +25,7 @@ from .tiktok import (
     get_report as get_tiktok_report,
 )
 from .models import SocialDailyMetric
-from .social_sync import daily_series, sync_status
+from .social_sync import daily_series, manual_refresh_state, run_manual_refresh, sync_status
 
 
 ACCOUNT_METRICS = {
@@ -356,8 +356,17 @@ def get_report(start, end, force=False, fetch=True):
 def dashboard(request):
     if not runtime_allowed(request):
         return HttpResponseForbidden("Dashboard Instagram memerlukan koneksi aman.")
-    if request.method == "POST" and not request.user.is_superuser:
-        return HttpResponseForbidden("Refresh data hanya dapat dijalankan Super Admin.")
+    access_level = (getattr(request.user, "module_access", None) or {}).get("marketing", "approve")
+    can_refresh = request.user.is_superuser or access_level in {"edit", "approve"}
+    if request.method == "POST" and not can_refresh:
+        return HttpResponseForbidden("Refresh data memerlukan akses Input / Edit atau Approve Marketing.")
+    refresh_run = manual_refresh_state()
+    refresh_claimed = False
+    if request.method == "POST":
+        refresh_run, _daily_runs, refresh_claimed = run_manual_refresh(request.user.get_username())
+        if not refresh_claimed:
+            message = "Refresh sedang berjalan." if refresh_run.status == refresh_run.Status.RUNNING else "Data sudah di-refresh hari ini."
+            return HttpResponse(message, status=409)
     request.session["active_module"] = "marketing"
     data = request.POST if request.method == "POST" else request.GET
     form = PeriodForm(data or {"period": "7"})
@@ -369,10 +378,10 @@ def dashboard(request):
     comparison_start = comparison_end = None
     if form.is_valid():
         start, end = form.cleaned_data["date_from"], form.cleaned_data["date_to"]
-        report, error = get_report(start, end, force=request.method == "POST", fetch=request.method == "POST")
+        force = request.method == "POST" and refresh_run.status == refresh_run.Status.COMPLETED
+        report, error = get_report(start, end, force=force, fetch=force)
         comparison_start, comparison_end = previous_period(start, end, form.cleaned_data["period"])
-        comparison, comparison_error = get_report(comparison_start, comparison_end, force=request.method == "POST", fetch=request.method == "POST")
-        force = request.method == "POST"
+        comparison, comparison_error = get_report(comparison_start, comparison_end, force=force, fetch=force)
         tiktok_report, tiktok_error = get_tiktok_report(start, end, force=force, fetch=force)
         if tiktok_report and tiktok_report.get("business"):
             tiktok_comparison, _tiktok_comparison_error = get_tiktok_business_profile_report(
@@ -433,5 +442,6 @@ def dashboard(request):
         "tiktok_details": tiktok_details, "tiktok_comparison": tiktok_comparison,
         "tiktok_er_growth": tiktok_er_growth, "tiktok_previous_er": tiktok_previous_er,
         "instagram_series": instagram_series, "instagram_sync": instagram_sync,
-        "tiktok_sync": tiktok_sync,
+        "tiktok_sync": tiktok_sync, "can_refresh": can_refresh,
+        "manual_refresh_run": manual_refresh_state(),
     })

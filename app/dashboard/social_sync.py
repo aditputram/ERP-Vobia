@@ -19,6 +19,7 @@ from .tiktok import TikTokConnectionError
 
 PLATFORMS = (SocialDailyMetric.Platform.INSTAGRAM, SocialDailyMetric.Platform.TIKTOK)
 ACCOUNT = "vobia.id"
+MANUAL_LOCK_ACCOUNT = "vobia.id:manual-refresh"
 METRICS = (
     "reach", "impressions", "total_engagement", "accounts_engaged",
     "profile_visits", "website_clicks", "likes", "comments", "shares",
@@ -32,7 +33,10 @@ def _instagram_values(token, day):
         "period": "day", "metric_type": "total_value",
         "since": day.isoformat(), "until": (day + timedelta(days=1)).isoformat(),
     }
-    names = tuple(instagram_report.ACCOUNT_METRICS)
+    names = (
+        "reach", "views", "total_interactions", "accounts_engaged",
+        "profile_views", "website_clicks", "likes", "comments", "shares",
+    )
     payload = api_get(token, ACCOUNT_ID + "/insights", {**period, "metric": ",".join(names)})
     totals = instagram_report.metric_values(payload, names)
     for name in (name for name, value in totals.items() if value is None):
@@ -79,13 +83,13 @@ def fetch_tiktok_days(days):
     return result
 
 
-def _claim(platform, cutoff, source, actor, key):
+def _claim(platform, cutoff, source, actor, key, *, account=ACCOUNT):
     now = timezone.now()
     with transaction.atomic():
         run, created = SocialSyncRun.objects.select_for_update().get_or_create(
             idempotency_key=key,
             defaults={
-                "platform": platform, "account": ACCOUNT, "source": source,
+                "platform": platform, "account": account, "source": source,
                 "actor": actor, "status": SocialSyncRun.Status.RUNNING,
                 "cutoff": cutoff, "started_at": now,
             },
@@ -165,6 +169,35 @@ def sync_status(platform):
     ).first()
     latest = SocialSyncRun.objects.filter(platform=platform, account=ACCOUNT).first()
     return {"latest": latest, "latest_valid": latest_valid}
+
+
+def manual_refresh_state(day=None):
+    day = day or timezone.localdate()
+    return SocialSyncRun.objects.filter(
+        idempotency_key=f"manual-global:{day.isoformat()}", account=MANUAL_LOCK_ACCOUNT,
+    ).first()
+
+
+def run_manual_refresh(actor):
+    today = timezone.localdate()
+    cutoff = today - timedelta(days=1)
+    coordinator, claimed = _claim(
+        SocialDailyMetric.Platform.INSTAGRAM, cutoff, "manual", actor,
+        f"manual-global:{today.isoformat()}", account=MANUAL_LOCK_ACCOUNT,
+    )
+    if not claimed:
+        return coordinator, [], False
+    runs = sync_daily(
+        cutoff=cutoff, lookback_days=4, source="manual", actor=actor,
+        key_prefix=f"manual:{today.isoformat()}",
+    )
+    completed = all(run.status == SocialSyncRun.Status.COMPLETED for run in runs)
+    coordinator.status = SocialSyncRun.Status.COMPLETED if completed else SocialSyncRun.Status.FAILED
+    coordinator.completed_at = timezone.now()
+    coordinator.snapshot_at = coordinator.completed_at if completed else None
+    coordinator.error = "" if completed else "Satu atau lebih platform gagal; refresh dapat dicoba lagi."
+    coordinator.save(update_fields=("status", "completed_at", "snapshot_at", "error"))
+    return coordinator, runs, True
 
 
 @csrf_exempt

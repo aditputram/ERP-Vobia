@@ -7,7 +7,7 @@ from django.urls import reverse
 
 from . import instagram_report
 from .models import SocialDailyMetric, SocialSyncRun
-from .social_sync import daily_series, sync_platform
+from .social_sync import daily_series, manual_refresh_state, run_manual_refresh, sync_platform
 
 
 class SocialSyncTests(TestCase):
@@ -87,7 +87,7 @@ class SocialSyncTests(TestCase):
     @patch("dashboard.instagram_report.fetch_report")
     def test_dashboard_get_never_calls_external_api_and_refresh_is_admin_only(self, ig_fetch, tt_fetch):
         user = get_user_model().objects.create_user(
-            "marketing-viewer", password="Strong-Test-2026!", module_access={"marketing": "approve"},
+            "marketing-viewer", password="Strong-Test-2026!", module_access={"marketing": "view"},
         )
         self.client.force_login(user)
         response = self.client.get(reverse("dashboard:instagram_dashboard"))
@@ -96,3 +96,36 @@ class SocialSyncTests(TestCase):
         tt_fetch.assert_not_called()
         self.assertNotContains(response, "Refresh data")
         self.assertEqual(self.client.post(reverse("dashboard:instagram_dashboard"), {"period": "7"}).status_code, 403)
+
+    @patch("dashboard.social_sync.fetch_tiktok_days")
+    @patch("dashboard.social_sync.fetch_instagram_days")
+    def test_manual_refresh_is_global_once_per_wib_day(self, instagram_days, tiktok_days):
+        instagram_days.return_value = [(self.day, self.values)]
+        tiktok_days.return_value = [(self.day, self.values)]
+
+        first, runs, claimed = run_manual_refresh("marketing.user")
+        second, second_runs, second_claimed = run_manual_refresh("another.user")
+
+        self.assertTrue(claimed)
+        self.assertEqual(first.status, SocialSyncRun.Status.COMPLETED)
+        self.assertEqual(len(runs), 2)
+        self.assertFalse(second_claimed)
+        self.assertEqual(second.pk, first.pk)
+        self.assertEqual(second_runs, [])
+        self.assertEqual(manual_refresh_state().actor, "marketing.user")
+
+    @patch("dashboard.instagram_report.get_tiktok_report", return_value=(None, ""))
+    @patch("dashboard.instagram_report.get_report", return_value=(None, ""))
+    @patch("dashboard.instagram_report.run_manual_refresh")
+    def test_marketing_edit_user_can_start_refresh(self, manual_refresh, _instagram, _tiktok):
+        now = datetime(2026, 9, 1, tzinfo=dt_timezone.utc)
+        manual_refresh.return_value = (
+            SocialSyncRun(status=SocialSyncRun.Status.FAILED, started_at=now), [], True,
+        )
+        user = get_user_model().objects.create_user(
+            "marketing-editor", password="Strong-Test-2026!", module_access={"marketing": "edit"},
+        )
+        self.client.force_login(user)
+        response = self.client.post(reverse("dashboard:instagram_dashboard"), {"period": "7"})
+        self.assertEqual(response.status_code, 200)
+        manual_refresh.assert_called_once_with("marketing-editor")

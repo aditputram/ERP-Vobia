@@ -128,10 +128,7 @@ class TikTokConnectionTests(TestCase):
 
     @patch.object(tiktok_business, "api_request")
     def test_business_callback_stores_token_privately(self, api_request):
-        api_request.side_effect = [
-            {"access_token": "BUSINESS_ACCESS", "refresh_token": "BUSINESS_REFRESH", "open_id": "open-business", "expires_in": 86400},
-            {"scope": "user.info.basic,user.insights"},
-        ]
+        api_request.return_value = {"access_token": "BUSINESS_ACCESS", "refresh_token": "BUSINESS_REFRESH", "open_id": "open-business", "expires_in": 86400, "scope": "user.info.basic,user.insights"}
         session = self.client.session
         session["tiktok_business_oauth_state"] = "business-state"
         session.save()
@@ -139,14 +136,13 @@ class TikTokConnectionTests(TestCase):
         self.assertRedirects(response, reverse("dashboard:tiktok_connection"))
         saved = json.loads(tiktok_business.store_path().read_text())
         self.assertEqual(saved["open_id"], "open-business")
+        self.assertEqual(saved["scope"], "user.info.basic,user.insights")
+        api_request.assert_called_once()
         self.assertEqual(os.stat(tiktok_business.store_path()).st_mode & 0o777, 0o600)
 
     @patch.object(tiktok_business, "api_request")
     def test_business_callback_accepts_signed_state_without_session(self, api_request):
-        api_request.side_effect = [
-            {"access_token": "ACCESS", "refresh_token": "REFRESH", "open_id": "open-business"},
-            {"scope": "user.info.basic,user.insights"},
-        ]
+        api_request.return_value = {"access_token": "ACCESS", "refresh_token": "REFRESH", "open_id": "open-business", "scope": "user.info.basic,user.insights"}
         state = signing.dumps(
             {"user_id": str(self.user.pk), "nonce": "nonce"},
             salt=tiktok_business.STATE_SALT,

@@ -147,11 +147,7 @@ def callback(request):
         })
         if not token.get("access_token") or not token.get("refresh_token") or not token.get("open_id"):
             raise TikTokConnectionError("Token TikTok Business tidak lengkap.")
-        permissions = api_request(
-            "https://business-api.tiktok.com/open_api/v1.3/tt_user/token_info/get/",
-            token=token["access_token"],
-        )
-        save_connection({**token, "scope": permissions.get("scope", token.get("scope", "")), "verified_at": timezone.now().isoformat()})
+        save_connection({**token, "scope": token.get("scope", ""), "verified_at": timezone.now().isoformat()})
     except TikTokConnectionError as exc:
         logger.warning("TikTok Business OAuth failed: %s", exc)
         return HttpResponseBadRequest(str(exc))

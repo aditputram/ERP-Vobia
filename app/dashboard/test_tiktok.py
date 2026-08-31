@@ -82,10 +82,9 @@ class TikTokConnectionTests(TestCase):
     def test_business_oauth_start_uses_separate_app_and_state(self):
         response = self.client.get(reverse("dashboard:tiktok_business_oauth_start"))
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(response.url.startswith("https://www.tiktok.com/v2/auth/authorize/?"))
-        self.assertIn("client_key=7680016213652537364", response.url)
-        self.assertIn("user.insights", response.url)
-        self.assertIn("video.insights", response.url)
+        self.assertTrue(response.url.startswith("https://business-api.tiktok.com/portal/auth?"))
+        self.assertIn("app_id=7680016213652537364", response.url)
+        self.assertIn("redirect_uri=", response.url)
         self.assertTrue(self.client.session["tiktok_business_oauth_state"])
         self.assertNotIn("BUSINESS_SECRET_NEVER_RENDER", response.url)
 

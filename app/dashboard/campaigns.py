@@ -37,6 +37,11 @@ def _instagram_embed_url(url):
     return "https://www.instagram.com" + urlsplit(url).path.rstrip("/") + "/embed/"
 
 
+def _tiktok_embed_url(url):
+    post_id = tiktok.video_id_from_url(url)
+    return f"https://www.tiktok.com/player/v1/{post_id}?description=1" if post_id else ""
+
+
 def _sync_actual_spent(campaign):
     campaign.actual_spent = CampaignExpense.objects.filter(campaign=campaign).aggregate(total=Sum("amount"))["total"] or Decimal("0")
     campaign.save(update_fields=("actual_spent", "updated_at"))
@@ -201,7 +206,7 @@ def campaign_detail(request, campaign_id):
     tiktok_items = [item for item in campaign.creatives.all() if item.platform == "TIKTOK"]
     for item in campaign.creatives.all():
         item.api_matched = False
-        item.embed_url = _instagram_embed_url(item.post_url) if item.platform == "INSTAGRAM" else ""
+        item.embed_url = _instagram_embed_url(item.post_url) if item.platform == "INSTAGRAM" else _tiktok_embed_url(item.post_url)
         item.post_metrics = None
         item.comments = None
         item.comments_complete = False

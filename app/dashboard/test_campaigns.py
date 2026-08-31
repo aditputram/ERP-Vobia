@@ -12,7 +12,7 @@ from imports.models import RawFile
 from sales.models import SalesOrder, SalesOrderLine
 from traffic.models import TrafficImportBatch, TrafficProductMetric
 
-from .campaigns import _end_date, _instagram_embed_url, _post_key
+from .campaigns import _end_date, _instagram_embed_url, _post_key, _tiktok_embed_url
 from .forms_campaign import CampaignForm
 from .models import Campaign, CampaignCreative, CampaignExpense, CampaignProduct, KolPartnership
 
@@ -30,6 +30,10 @@ class CampaignTests(TestCase):
         self.assertEqual(
             _instagram_embed_url("https://www.instagram.com/reel/Db29JxwJXFB/?hl=en"),
             "https://www.instagram.com/reel/Db29JxwJXFB/embed/",
+        )
+        self.assertEqual(
+            _tiktok_embed_url("https://www.tiktok.com/@vobia.id/photo/7678674924805868820?lang=en"),
+            "https://www.tiktok.com/player/v1/7678674924805868820?description=1",
         )
 
     def setUp(self):
@@ -130,6 +134,7 @@ class CampaignTests(TestCase):
         }}
         response = self.client.get(reverse("dashboard:campaign_detail", args=[self.campaign.id]))
         self.assertContains(response, "API matched")
+        self.assertContains(response, "https://www.tiktok.com/player/v1/123?description=1")
         self.assertContains(response, "1.000")
         self.assertContains(response, "10,00%")
         self.assertNotContains(response, "Menunggu koneksi dan persetujuan API TikTok")

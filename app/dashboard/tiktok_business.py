@@ -73,8 +73,9 @@ def api_request(url, *, json_data=None, token=""):
         try:
             payload = json.loads(exc.read(1024 * 1024))
         except (json.JSONDecodeError, OSError, TypeError):
-            raise TikTokConnectionError("TikTok Business API belum dapat dihubungi.") from None
-    except Exception:
+            raise TikTokConnectionError(f"TikTok Business API gagal merespons (HTTP {exc.code}).") from None
+    except Exception as exc:
+        logger.warning("TikTok Business transport failed: %s: %s", type(exc).__name__, exc)
         raise TikTokConnectionError("TikTok Business API belum dapat dihubungi.") from None
     if not isinstance(payload, dict):
         raise TikTokConnectionError("TikTok Business API mengembalikan respons yang tidak valid.")

@@ -107,6 +107,19 @@ class TikTokConnectionTests(TestCase):
         ):
             tiktok_business.api_request("https://business-api.tiktok.com/test")
 
+    @patch.object(tiktok_business, "urlopen")
+    def test_business_api_surfaces_non_json_http_status(self, urlopen):
+        urlopen.side_effect = HTTPError(
+            "https://business-api.tiktok.com/open_api/v1.3/tt_user/oauth2/token/",
+            403,
+            "Forbidden",
+            {},
+            BytesIO(b"Forbidden"),
+        )
+
+        with self.assertRaisesMessage(tiktok.TikTokConnectionError, "HTTP 403"):
+            tiktok_business.api_request("https://business-api.tiktok.com/test")
+
     @patch.object(tiktok_business, "api_request")
     def test_business_callback_stores_token_privately(self, api_request):
         api_request.side_effect = [

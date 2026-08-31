@@ -608,7 +608,7 @@ def record_physical_return(*, sales_line, received_date, quantity, warehouse, co
     restore_needed = quantity
     restored_cost = Decimal("0")
     allocations = list(
-        sales_movement.fifo_allocations.select_for_update().select_related("layer__source_po_line__po").order_by(
+        sales_movement.fifo_allocations.select_for_update(of=("self", "layer")).select_related("layer__source_po_line__po").order_by(
             "layer__receipt_date", "layer__created_at"
         )
     )

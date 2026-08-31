@@ -1595,6 +1595,41 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(editable.proposed_qty, Decimal("120"))
         self.assertEqual(stale.proposed_qty, Decimal("0"))
 
+    def test_save_draft_forces_posted_incoming_to_zero_for_no_incoming_product(self):
+        scenario = ProjectionScenario.objects.create(
+            name="No Incoming Guard",
+            start_month=date(2026, 9, 1),
+            end_month=date(2026, 9, 1),
+            created_by=self.user,
+        )
+        self.product.status.name = "Discontinue"
+        self.product.status.save(update_fields=["name"])
+        projection = SalesProjection.objects.create(
+            scenario=scenario,
+            month=date(2026, 9, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("200"),
+            system_recommendation=Decimal("100"),
+        )
+
+        response = self.client.post(
+            f"/merchandising/planning-builder/scenario/{scenario.id}/draft/",
+            {
+                "action": "save",
+                f"sales_qty_{projection.id}": "120",
+                f"incoming_qty_{projection.id}": "13",
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            f"/merchandising/planning-builder/?view_draft={scenario.id}#draft-projection",
+        )
+        self.assertEqual(
+            IncomingPlan.objects.get(sales_projection=projection).proposed_incoming,
+            Decimal("0"),
+        )
+
     def test_scenario_library_edit_button_starts_disabled_until_a_field_changes(self):
         current_month = timezone.localdate().replace(day=1)
         ProjectionScenario.objects.create(

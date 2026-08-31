@@ -7,11 +7,13 @@ from .tiktok import callback as tiktok_callback, connection as tiktok_connection
 from .tiktok_business import callback as tiktok_business_callback, oauth_start as tiktok_business_oauth_start
 from .campaigns import campaign_cover, campaign_create, campaign_delete, campaign_detail, campaign_edit, campaign_list
 from .partnerships import partnership_create, partnership_delete, partnership_detail, partnership_edit, partnership_list
+from .social_sync import scheduled_sync
 
 
 app_name = "dashboard"
 
 urlpatterns = [
+    path("internal/social-sync/", scheduled_sync, name="scheduled_social_sync"),
     path("marketing/", instagram_dashboard, name="instagram_dashboard"),
     path("marketing/instagram/", connection, name="instagram_connection"),
     path("marketing/tiktok/", tiktok_connection, name="tiktok_connection"),

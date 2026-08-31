@@ -24,6 +24,8 @@ from .tiktok import (
     get_business_profile_report as get_tiktok_business_profile_report,
     get_report as get_tiktok_report,
 )
+from .models import SocialDailyMetric
+from .social_sync import daily_series, sync_status
 
 
 ACCOUNT_METRICS = {
@@ -313,11 +315,13 @@ def fresh(snapshot):
 
 
 @sensitive_variables()
-def get_report(start, end, force=False):
+def get_report(start, end, force=False, fetch=True):
     path = report_path(start, end)
     cached = load_snapshot(path)
     if not force and fresh(cached):
         return cached, ""
+    if not fetch:
+        return cached, "" if cached else "Snapshot periode ini belum tersedia."
     if not store_path().exists():
         return cached, "Hubungkan akun Instagram terlebih dahulu."
     try:
@@ -352,6 +356,8 @@ def get_report(start, end, force=False):
 def dashboard(request):
     if not runtime_allowed(request):
         return HttpResponseForbidden("Dashboard Instagram memerlukan koneksi aman.")
+    if request.method == "POST" and not request.user.is_superuser:
+        return HttpResponseForbidden("Refresh data hanya dapat dijalankan Super Admin.")
     request.session["active_module"] = "marketing"
     data = request.POST if request.method == "POST" else request.GET
     form = PeriodForm(data or {"period": "7"})
@@ -363,19 +369,23 @@ def dashboard(request):
     comparison_start = comparison_end = None
     if form.is_valid():
         start, end = form.cleaned_data["date_from"], form.cleaned_data["date_to"]
-        report, error = get_report(start, end, force=request.method == "POST")
+        report, error = get_report(start, end, force=request.method == "POST", fetch=request.method == "POST")
         comparison_start, comparison_end = previous_period(start, end, form.cleaned_data["period"])
-        comparison, comparison_error = get_report(comparison_start, comparison_end, force=request.method == "POST")
+        comparison, comparison_error = get_report(comparison_start, comparison_end, force=request.method == "POST", fetch=request.method == "POST")
         force = request.method == "POST"
-        tiktok_report, tiktok_error = get_tiktok_report(start, end, force=force)
+        tiktok_report, tiktok_error = get_tiktok_report(start, end, force=force, fetch=force)
         if tiktok_report and tiktok_report.get("business"):
             tiktok_comparison, _tiktok_comparison_error = get_tiktok_business_profile_report(
                 comparison_start,
                 comparison_end,
                 force=force,
+                fetch=force,
             )
         if comparison_error and not error:
             error = "Periode pembanding belum tersedia. " + comparison_error
+    instagram_series = daily_series(SocialDailyMetric.Platform.INSTAGRAM, start, end) if form.is_valid() else []
+    instagram_sync = sync_status(SocialDailyMetric.Platform.INSTAGRAM)
+    tiktok_sync = sync_status(SocialDailyMetric.Platform.TIKTOK)
     main_keys = ("reach", "views", "total_interactions", "accounts_engaged", "profile_views", "website_clicks")
     cards = [{"name": ACCOUNT_METRICS[key], "api": key, "value": report["totals"].get(key), "previous": comparison["totals"].get(key) if comparison else None, "growth": growth(report["totals"].get(key), comparison["totals"].get(key)) if comparison else None} for key in main_keys] if report else []
     details = [{"name": label, "value": report["totals"].get(key), "previous": comparison["totals"].get(key) if comparison else None, "growth": growth(report["totals"].get(key), comparison["totals"].get(key)) if comparison else None} for key, label in ACCOUNT_METRICS.items() if key not in main_keys] if report else []
@@ -422,4 +432,6 @@ def dashboard(request):
         "tiktok_error": tiktok_error, "tiktok_cards": tiktok_cards,
         "tiktok_details": tiktok_details, "tiktok_comparison": tiktok_comparison,
         "tiktok_er_growth": tiktok_er_growth, "tiktok_previous_er": tiktok_previous_er,
+        "instagram_series": instagram_series, "instagram_sync": instagram_sync,
+        "tiktok_sync": tiktok_sync,
     })

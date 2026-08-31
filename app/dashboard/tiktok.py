@@ -100,10 +100,12 @@ def cached_value(cached):
     return value
 
 
-def cached_fetch(path, fetcher, *, force=False):
+def cached_fetch(path, fetcher, *, force=False, fetch=True):
     cached = load_cache(path)
     if not force and cache_fresh(cached):
         return cached_value(cached), ""
+    if not fetch:
+        return cached_value(cached), "" if cached else "Snapshot TikTok periode ini belum tersedia."
     try:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
@@ -327,15 +329,15 @@ def fetch_available_report(start, end):
     raise TikTokConnectionError("Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan.")
 
 
-def get_report(start, end, force=False):
+def get_report(start, end, force=False, fetch=True):
     return cached_fetch(
         report_path(start, end),
         lambda: fetch_available_report(start, end),
-        force=force,
+        force=force, fetch=fetch,
     )
 
 
-def get_business_profile_report(start, end, force=False):
+def get_business_profile_report(start, end, force=False, fetch=True):
     from . import tiktok_business
 
     if not tiktok_business.store_path().exists():
@@ -343,7 +345,7 @@ def get_business_profile_report(start, end, force=False):
     return cached_fetch(
         report_path(start, end, kind="business-profile"),
         lambda: tiktok_business.fetch_profile_report(start, end),
-        force=force,
+        force=force, fetch=fetch,
     )
 
 

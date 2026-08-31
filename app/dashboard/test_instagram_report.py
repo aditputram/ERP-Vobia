@@ -6,13 +6,13 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, RequestFactory, override_settings
+from django.test import TestCase, RequestFactory, override_settings
 from django.utils import timezone
 
 from . import instagram as ig, instagram_report as report
 
 
-class InstagramReportTests(SimpleTestCase):
+class InstagramReportTests(TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

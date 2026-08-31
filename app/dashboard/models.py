@@ -124,3 +124,56 @@ class KolProduct(models.Model):
     class Meta:
         ordering = ("product__name",)
         constraints = [models.UniqueConstraint(fields=("partnership", "product"), name="dashboard_kol_product_unique")]
+
+
+class SocialDailyMetric(models.Model):
+    class Platform(models.TextChoices):
+        INSTAGRAM = "INSTAGRAM", "Instagram"
+        TIKTOK = "TIKTOK", "TikTok"
+
+    platform = models.CharField(max_length=20, choices=Platform.choices)
+    account = models.CharField(max_length=100)
+    date = models.DateField()
+    reach = models.PositiveBigIntegerField(null=True, blank=True)
+    impressions = models.PositiveBigIntegerField(null=True, blank=True)
+    total_engagement = models.PositiveBigIntegerField(null=True, blank=True)
+    accounts_engaged = models.PositiveBigIntegerField(null=True, blank=True)
+    profile_visits = models.PositiveBigIntegerField(null=True, blank=True)
+    website_clicks = models.PositiveBigIntegerField(null=True, blank=True)
+    likes = models.PositiveBigIntegerField(null=True, blank=True)
+    comments = models.PositiveBigIntegerField(null=True, blank=True)
+    shares = models.PositiveBigIntegerField(null=True, blank=True)
+    new_followers = models.PositiveBigIntegerField(null=True, blank=True)
+    lost_followers = models.PositiveBigIntegerField(null=True, blank=True)
+    synced_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ("platform", "account", "date")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("platform", "account", "date"),
+                name="dashboard_social_daily_platform_account_date_unique",
+            )
+        ]
+
+
+class SocialSyncRun(models.Model):
+    class Status(models.TextChoices):
+        RUNNING = "RUNNING", "Running"
+        COMPLETED = "COMPLETED", "Completed"
+        FAILED = "FAILED", "Failed"
+
+    idempotency_key = models.CharField(max_length=120, unique=True)
+    platform = models.CharField(max_length=20, choices=SocialDailyMetric.Platform.choices)
+    account = models.CharField(max_length=100)
+    source = models.CharField(max_length=30)
+    actor = models.CharField(max_length=150, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices)
+    cutoff = models.DateField()
+    started_at = models.DateTimeField()
+    completed_at = models.DateTimeField(null=True, blank=True)
+    snapshot_at = models.DateTimeField(null=True, blank=True)
+    error = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ("-started_at",)

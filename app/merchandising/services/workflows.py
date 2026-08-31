@@ -195,7 +195,8 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
             product.status.name in NO_INCOMING_STATUSES
             or product.category.name in NO_INCOMING_CATEGORIES
         )
-        if no_incoming and values["minimum"] > 0:
+        available_stock = max(prior_ending, Decimal("0"))
+        if no_incoming and final_sales > available_stock:
             raise ValidationError(
                 f"{projection.sku.sku}: Sales Projection melampaui stock untuk Product yang tidak boleh Incoming."
             )

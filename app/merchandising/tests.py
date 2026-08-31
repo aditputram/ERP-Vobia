@@ -1630,6 +1630,55 @@ class MerchandisingReportViewTests(TestCase):
             Decimal("0"),
         )
 
+    def test_approval_allows_zero_sales_for_negative_legacy_stock_without_incoming(self):
+        scenario = ProjectionScenario.objects.create(
+            name="Negative Legacy Stock",
+            start_month=date(2026, 9, 1),
+            end_month=date(2026, 9, 1),
+            created_by=self.user,
+        )
+        self.product.status.name = "Discontinue"
+        self.product.status.save(update_fields=["name"])
+        projection = SalesProjection.objects.create(
+            scenario=scenario,
+            month=date(2026, 9, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("-31"),
+            system_recommendation=Decimal("0"),
+        )
+
+        approve_scenario(scenario.id, self.user)
+
+        scenario.refresh_from_db()
+        projection.refresh_from_db()
+        plan = IncomingPlan.objects.get(sales_projection=projection)
+        self.assertEqual(scenario.status, ProjectionScenario.Status.APPROVED)
+        self.assertEqual(projection.final_approved_qty, Decimal("0"))
+        self.assertEqual(plan.final_approved_incoming, Decimal("0"))
+
+    def test_approval_still_rejects_sales_without_available_stock_or_incoming(self):
+        scenario = ProjectionScenario.objects.create(
+            name="Invalid No Incoming Sales",
+            start_month=date(2026, 9, 1),
+            end_month=date(2026, 9, 1),
+            created_by=self.user,
+        )
+        self.product.status.name = "Discontinue"
+        self.product.status.save(update_fields=["name"])
+        SalesProjection.objects.create(
+            scenario=scenario,
+            month=date(2026, 9, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("-31"),
+            system_recommendation=Decimal("1"),
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "Sales Projection melampaui stock",
+        ):
+            approve_scenario(scenario.id, self.user)
+
     def test_scenario_library_edit_button_starts_disabled_until_a_field_changes(self):
         current_month = timezone.localdate().replace(day=1)
         ProjectionScenario.objects.create(

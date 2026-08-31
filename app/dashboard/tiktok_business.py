@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.core import signing
 from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import redirect
 from django.utils import timezone
@@ -21,6 +22,7 @@ from .tiktok import TikTokConnectionError, runtime_allowed
 
 
 logger = logging.getLogger(__name__)
+STATE_SALT = "dashboard.tiktok_business.oauth"
 
 
 def store_path():
@@ -90,7 +92,11 @@ def oauth_start(request):
         return HttpResponseForbidden("Koneksi TikTok hanya dapat dikelola Super Admin.")
     if not runtime_allowed(request) or not settings.TIKTOK_BUSINESS_APP_ID or not settings.TIKTOK_BUSINESS_APP_SECRET:
         return HttpResponseForbidden("Konfigurasi aman TikTok Business belum aktif.")
-    state = secrets.token_urlsafe(32)
+    state = signing.dumps(
+        {"user_id": str(request.user.pk), "nonce": secrets.token_urlsafe(16)},
+        salt=STATE_SALT,
+        compress=True,
+    )
     request.session["tiktok_business_oauth_state"] = state
     return redirect("https://www.tiktok.com/v2/auth/authorize?" + urlencode({
         "client_key": settings.TIKTOK_BUSINESS_APP_ID,
@@ -125,7 +131,15 @@ def callback(request):
     expected = request.session.pop("tiktok_business_oauth_state", "")
     returned = request.GET.get("state", "")
     auth_code = request.GET.get("code", "") or request.GET.get("auth_code", "")
-    if not expected or not secrets.compare_digest(expected, returned) or not auth_code:
+    try:
+        signed_state = signing.loads(returned, salt=STATE_SALT, max_age=600)
+    except signing.BadSignature:
+        signed_state = {}
+    state_valid = (
+        bool(expected and secrets.compare_digest(expected, returned))
+        or signed_state.get("user_id") == str(request.user.pk)
+    )
+    if not state_valid or not auth_code:
         return HttpResponseBadRequest("Otorisasi TikTok Business tidak valid atau dibatalkan.")
     try:
         token = api_request("https://business-api.tiktok.com/open_api/v1.3/tt_user/oauth2/token/", json_data={

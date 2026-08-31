@@ -7,6 +7,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from django.contrib.auth import get_user_model
+from django.core import signing
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -120,6 +121,25 @@ class TikTokConnectionTests(TestCase):
         saved = json.loads(tiktok_business.store_path().read_text())
         self.assertEqual(saved["open_id"], "open-business")
         self.assertEqual(os.stat(tiktok_business.store_path()).st_mode & 0o777, 0o600)
+
+    @patch.object(tiktok_business, "api_request")
+    def test_business_callback_accepts_signed_state_without_session(self, api_request):
+        api_request.side_effect = [
+            {"access_token": "ACCESS", "refresh_token": "REFRESH", "open_id": "open-business"},
+            {"scope": "user.info.basic,user.insights"},
+        ]
+        state = signing.dumps(
+            {"user_id": str(self.user.pk), "nonce": "nonce"},
+            salt=tiktok_business.STATE_SALT,
+            compress=True,
+        )
+
+        response = self.client.get(
+            reverse("dashboard:tiktok_business_callback"),
+            {"code": "code-1", "state": state},
+        )
+
+        self.assertRedirects(response, reverse("dashboard:tiktok_connection"))
 
     @patch.object(tiktok, "access_token", return_value="ACCESS_PRIVATE")
     @patch.object(tiktok, "api_request")

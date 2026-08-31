@@ -182,15 +182,63 @@ def fetch_report(start, end):
             "fetched_at": timezone.now(), "business": business, "business_error": business_error}
 
 
+def business_only_report(start, end):
+    from . import tiktok_business
+
+    business = tiktok_business.fetch_report(start, end)
+    videos = []
+    for item in business["videos"].values():
+        try:
+            published = datetime.fromtimestamp(int(item["create_time"]), tz=dt_timezone.utc).isoformat()
+        except (KeyError, TypeError, ValueError, OSError):
+            published = ""
+        likes = max(0, int(item.get("likes") or 0))
+        comments = max(0, int(item.get("comments") or 0))
+        shares = max(0, int(item.get("shares") or 0))
+        views = max(0, int(item.get("video_views") or 0))
+        engagement = likes + comments + shares
+        videos.append({
+            "id": str(item.get("item_id") or ""), "published": published,
+            "share_url": item.get("share_url") or "", "video_description": item.get("caption") or "",
+            "likes": likes, "comments": comments, "shares": shares, "views": views,
+            "engagement": engagement, "er": engagement / views * 100 if views else None,
+            "business": item,
+        })
+    return {
+        "profile": {}, "videos": videos, "views": business.get("views"),
+        "engagement": business.get("engagement"),
+        "er": business["engagement"] / business["views"] * 100
+        if business.get("engagement") is not None and business.get("views") else None,
+        "display_views": None, "display_engagement": None, "date_from": start, "date_to": end,
+        "fetched_at": timezone.now(), "business": business, "business_error": "",
+        "display_error": "Login Kit sedang tidak tersedia; laporan akun tetap memakai Accounts API.",
+    }
+
+
 def get_report(start, end):
-    if not store_path().exists():
+    from . import tiktok_business
+
+    has_display = store_path().exists()
+    has_business = tiktok_business.store_path().exists()
+    if not has_display and not has_business:
         return None, "Hubungkan akun TikTok terlebih dahulu."
-    try:
-        return fetch_report(start, end), ""
-    except TikTokConnectionError as exc:
-        return None, str(exc)
-    except Exception:
-        return None, "Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan."
+    if has_display:
+        try:
+            return fetch_report(start, end), ""
+        except TikTokConnectionError as exc:
+            if not has_business:
+                return None, str(exc)
+        except Exception:
+            if not has_business:
+                return None, "Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan."
+    if has_business:
+        try:
+            return business_only_report(start, end), ""
+        except TikTokConnectionError as exc:
+            return None, str(exc)
+        except Exception:
+            return None, "Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan."
+    return None, "Data TikTok belum dapat dibaca; detail rahasia tidak ditampilkan."
 
 
 def video_id_from_url(url):

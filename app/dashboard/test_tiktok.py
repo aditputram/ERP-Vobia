@@ -272,6 +272,24 @@ class TikTokConnectionTests(TestCase):
             (date(2026, 7, 31), date(2026, 8, 29)),
         ])
 
+    def test_dashboard_falls_back_to_accounts_api_when_login_kit_fails(self):
+        tiktok.save_connection({"access_token": "DISPLAY"})
+        tiktok_business.save_connection({"access_token": "BUSINESS"})
+        business = {
+            "profile": {"followers_count": 100}, "videos": {},
+            "reach": 80, "views": 100, "engagement": 10,
+        }
+        with (
+            patch.object(tiktok, "fetch_report", side_effect=tiktok.TikTokConnectionError("Display gagal")),
+            patch.object(tiktok_business, "fetch_report", return_value=business),
+        ):
+            report, error = tiktok.get_report(date(2026, 8, 2), date(2026, 8, 29))
+
+        self.assertEqual(error, "")
+        self.assertEqual(report["business"]["reach"], 80)
+        self.assertEqual(report["views"], 100)
+        self.assertIn("Accounts API", report["display_error"])
+
     @patch.object(tiktok, "access_token", return_value="ACCESS_PRIVATE")
     @patch.object(tiktok, "api_request")
     def test_report_uses_real_video_metrics(self, api_request, access_token):

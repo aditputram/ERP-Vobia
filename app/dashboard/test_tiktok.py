@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from . import tiktok
+from . import tiktok, tiktok_business
 
 
 class TikTokConnectionTests(TestCase):
@@ -19,6 +19,8 @@ class TikTokConnectionTests(TestCase):
             TIKTOK_CONNECTION_DIR=directory.name,
             TIKTOK_CLIENT_KEY="test-client-key",
             TIKTOK_CLIENT_SECRET="TEST_SECRET_NEVER_RENDER",
+            TIKTOK_BUSINESS_APP_ID="7680016213652537364",
+            TIKTOK_BUSINESS_APP_SECRET="BUSINESS_SECRET_NEVER_RENDER",
             TIKTOK_LIVE_ENABLED=True,
         )
         override.enable()
@@ -71,9 +73,31 @@ class TikTokConnectionTests(TestCase):
 
     def test_connection_shows_business_accounts_api_prototype(self):
         response = self.client.get(reverse("dashboard:tiktok_connection"))
-        self.assertContains(response, "BUSINESS ACCOUNTS API · PROTOTYPE")
+        self.assertContains(response, "BUSINESS ACCOUNTS API")
         self.assertContains(response, "Reached Audience")
-        self.assertContains(response, "Hubungkan TikTok Business · tersedia setelah approval")
+        self.assertContains(response, "Hubungkan TikTok Business")
+
+    def test_business_oauth_start_uses_separate_app_and_state(self):
+        response = self.client.get(reverse("dashboard:tiktok_business_oauth_start"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("app_id=7680016213652537364", response.url)
+        self.assertTrue(self.client.session["tiktok_business_oauth_state"])
+        self.assertNotIn("BUSINESS_SECRET_NEVER_RENDER", response.url)
+
+    @patch.object(tiktok_business, "api_request")
+    def test_business_callback_stores_token_privately(self, api_request):
+        api_request.side_effect = [
+            {"access_token": "BUSINESS_ACCESS", "refresh_token": "BUSINESS_REFRESH", "open_id": "open-business", "expires_in": 86400},
+            {"scope": "user.info.basic,user.insights"},
+        ]
+        session = self.client.session
+        session["tiktok_business_oauth_state"] = "business-state"
+        session.save()
+        response = self.client.get(reverse("dashboard:tiktok_business_callback"), {"auth_code": "code-1", "state": "business-state"})
+        self.assertRedirects(response, reverse("dashboard:tiktok_connection"))
+        saved = json.loads(tiktok_business.store_path().read_text())
+        self.assertEqual(saved["open_id"], "open-business")
+        self.assertEqual(os.stat(tiktok_business.store_path()).st_mode & 0o777, 0o600)
 
     @patch.object(tiktok, "access_token", return_value="ACCESS_PRIVATE")
     @patch.object(tiktok, "api_request")

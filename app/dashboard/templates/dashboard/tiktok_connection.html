@@ -18,7 +18,7 @@
   <p class="muted">Vobia Space hanya meminta akses baca profil, statistik akun, dan video publik. Token serta refresh token disimpan di server privat dan tidak ditampilkan kembali.</p>
 </section>
 <section class="panel narrow-panel section-gap">
-  <div class="panel-header"><div><p class="eyebrow">BUSINESS ACCOUNTS API · PROTOTYPE</p><h2>Organic Account Insights</h2></div><span class="status-badge">Menunggu persetujuan TikTok</span></div>
+  <div class="panel-header"><div><p class="eyebrow">BUSINESS ACCOUNTS API</p><h2>Organic Account Insights</h2></div><span class="status-badge">{% if business_status %}Terhubung{% elif business_configured %}Siap diotorisasi{% else %}Menunggu konfigurasi server{% endif %}</span></div>
   <p>Setelah TikTok menyetujui akses <strong>TikTok Accounts</strong>, Super Admin akan mengotorisasi akun bisnis Vobia. Vobia Space lalu membaca analytics organik akun yang sudah diberi izin dan menampilkannya pada Social Media Report.</p>
   <div class="ig-kpis section-gap">
     <article class="metric-card"><span>Reached Audience</span><strong class="metric-text">Setelah disetujui</strong><small>Akun unik yang dijangkau pada periode</small></article>
@@ -32,7 +32,7 @@
     <li>Token disimpan di server privat; token tidak ditampilkan kepada pengguna ERP.</li>
     <li>Dashboard mengambil data resmi sesuai periode dan tetap memakai Display API sebagai fallback.</li>
   </ol>
-  <button class="primary-button" type="button" disabled>Hubungkan TikTok Business · tersedia setelah approval</button>
+  {% if business_status %}<p><strong>Akun Business terhubung.</strong></p><p class="muted">Scope: {{ business_status.scope }} · diverifikasi {{ business_status.verified_at }}</p>{% elif business_configured %}<a class="primary-button" href="{% url 'dashboard:tiktok_business_oauth_start' %}">Hubungkan TikTok Business</a>{% else %}<button class="primary-button" type="button" disabled>Pasang App ID & Secret di server</button>{% endif %}
   <p class="muted">Prototype untuk pengajuan Accounts API. Tidak melakukan publish, edit, hapus konten, atau mengelola akun pihak ketiga.</p>
 </section>
 {% endblock %}

@@ -188,7 +188,16 @@ def connection(request):
     except Exception:
         status, error = None, "Status koneksi TikTok tidak dapat dibaca."
     configured = bool(settings.TIKTOK_CLIENT_KEY and settings.TIKTOK_CLIENT_SECRET)
-    return render(request, "dashboard/tiktok_connection.html", {"status": status, "configured": configured, "error": error})
+    from . import tiktok_business
+    try:
+        business_status = tiktok_business.status_only()
+    except Exception:
+        business_status = None
+    business_configured = bool(settings.TIKTOK_BUSINESS_APP_ID and settings.TIKTOK_BUSINESS_APP_SECRET)
+    return render(request, "dashboard/tiktok_connection.html", {
+        "status": status, "configured": configured, "error": error,
+        "business_status": business_status, "business_configured": business_configured,
+    })
 
 
 @never_cache

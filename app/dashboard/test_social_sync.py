@@ -60,6 +60,26 @@ class SocialSyncTests(TestCase):
         self.assertEqual([row["date"] for row in rows], ["2026-08-30", "2026-08-31"])
         self.assertIsNone(rows[0]["impressions"])
 
+    def test_dashboard_renders_matching_instagram_and_tiktok_charts(self):
+        chart_day = date(2026, 8, 30)
+        for platform in ("INSTAGRAM", "TIKTOK"):
+            SocialDailyMetric.objects.create(
+                platform=platform, account="vobia.id", date=chart_day,
+                reach=10, synced_at=datetime(2026, 9, 1, tzinfo=dt_timezone.utc),
+            )
+        user = get_user_model().objects.create_user(
+            "marketing-chart-viewer", password="Strong-Test-2026!",
+            module_access={"marketing": "view"},
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard:instagram_dashboard"))
+
+        self.assertContains(response, "Grafik Instagram")
+        self.assertContains(response, "Grafik TikTok")
+        self.assertContains(response, 'data-source="instagram-daily-data"')
+        self.assertContains(response, 'data-source="tiktok-daily-data"')
+
     @override_settings(SOCIAL_SYNC_SECRET="scheduler-secret")
     @patch("dashboard.social_sync.sync_daily")
     def test_scheduled_endpoint_requires_secret(self, sync_daily):

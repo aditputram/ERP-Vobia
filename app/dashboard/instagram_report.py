@@ -393,6 +393,7 @@ def dashboard(request):
         if comparison_error and not error:
             error = "Periode pembanding belum tersedia. " + comparison_error
     instagram_series = daily_series(SocialDailyMetric.Platform.INSTAGRAM, start, end) if form.is_valid() else []
+    tiktok_series = daily_series(SocialDailyMetric.Platform.TIKTOK, start, end) if form.is_valid() else []
     instagram_sync = sync_status(SocialDailyMetric.Platform.INSTAGRAM)
     tiktok_sync = sync_status(SocialDailyMetric.Platform.TIKTOK)
     main_keys = ("reach", "views", "total_interactions", "accounts_engaged", "profile_views", "website_clicks")
@@ -441,7 +442,8 @@ def dashboard(request):
         "tiktok_error": tiktok_error, "tiktok_cards": tiktok_cards,
         "tiktok_details": tiktok_details, "tiktok_comparison": tiktok_comparison,
         "tiktok_er_growth": tiktok_er_growth, "tiktok_previous_er": tiktok_previous_er,
-        "instagram_series": instagram_series, "instagram_sync": instagram_sync,
+        "instagram_series": instagram_series, "tiktok_series": tiktok_series,
+        "instagram_sync": instagram_sync,
         "tiktok_sync": tiktok_sync, "can_refresh": can_refresh,
         "manual_refresh_run": manual_refresh_state(),
     })

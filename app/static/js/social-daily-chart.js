@@ -1,8 +1,4 @@
 (() => {
-  const canvas = document.getElementById("instagram-daily-chart");
-  const source = document.getElementById("instagram-daily-data");
-  if (!canvas || !source) return;
-  const rows = JSON.parse(source.textContent);
   const choices = [
     ["reach", "Reach", "#117f79"], ["impressions", "Impression", "#df6c45"],
     ["total_engagement", "Total Engagement", "#7767b8"],
@@ -10,9 +6,14 @@
     ["profile_visits", "Profile Visit", "#a56828"],
     ["website_clicks", "Click Website", "#a8466d"],
   ];
+  document.querySelectorAll("[data-daily-chart]").forEach(chart => {
+  const canvas = chart.querySelector("canvas");
+  const source = document.getElementById(chart.dataset.source);
+  if (!canvas || !source) return;
+  const rows = JSON.parse(source.textContent);
   const active = new Set(["reach"]);
-  const options = document.querySelector("[data-chart-options]");
-  const tooltip = document.querySelector("[data-chart-tooltip]");
+  const options = chart.querySelector("[data-chart-options]");
+  const tooltip = chart.querySelector("[data-chart-tooltip]");
   choices.forEach(([key, label, color]) => {
     const item = document.createElement("label");
     item.innerHTML = `<input type="checkbox" value="${key}" ${active.has(key) ? "checked" : ""}><i style="--series:${color}"></i>${label}`;
@@ -63,4 +64,5 @@
   });
   canvas.addEventListener("mouseleave", () => { tooltip.hidden = true; });
   new ResizeObserver(draw).observe(canvas.parentElement); draw();
+  });
 })();

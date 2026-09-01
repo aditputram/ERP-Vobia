@@ -94,7 +94,7 @@ class BaseManualSaleLineFormSet(BaseFormSet):
 ManualSaleLineFormSet = formset_factory(
     ManualSaleLineForm,
     formset=BaseManualSaleLineFormSet,
-    extra=1,
+    extra=0,
     can_delete=True,
     min_num=1,
     validate_min=True,

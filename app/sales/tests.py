@@ -1501,6 +1501,7 @@ class ManualSalesAndRequirementTests(TestCase):
         self.assertContains(manual_response, "Input Transaction")
         self.assertContains(manual_response, "Post transaksi")
         self.assertContains(manual_response, "Tambah Product")
+        self.assertEqual(manual_response.context["formset"].total_form_count(), 1)
         self.assertNotContains(import_response, "Input transaksi manual")
         self.assertNotContains(import_response, "Post transaksi")
 

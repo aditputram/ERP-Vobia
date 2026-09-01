@@ -157,6 +157,34 @@ class SocialDailyMetric(models.Model):
         ]
 
 
+class SocialPeriodMetric(models.Model):
+    platform = models.CharField(max_length=20, choices=SocialDailyMetric.Platform.choices)
+    account = models.CharField(max_length=100)
+    date_from = models.DateField()
+    date_to = models.DateField()
+    reach = models.PositiveBigIntegerField(null=True, blank=True)
+    impressions = models.PositiveBigIntegerField(null=True, blank=True)
+    total_engagement = models.PositiveBigIntegerField(null=True, blank=True)
+    accounts_engaged = models.PositiveBigIntegerField(null=True, blank=True)
+    profile_visits = models.PositiveBigIntegerField(null=True, blank=True)
+    website_clicks = models.PositiveBigIntegerField(null=True, blank=True)
+    likes = models.PositiveBigIntegerField(null=True, blank=True)
+    comments = models.PositiveBigIntegerField(null=True, blank=True)
+    shares = models.PositiveBigIntegerField(null=True, blank=True)
+    new_followers = models.PositiveBigIntegerField(null=True, blank=True)
+    lost_followers = models.PositiveBigIntegerField(null=True, blank=True)
+    synced_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ("platform", "account", "date_from", "date_to")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("platform", "account", "date_from", "date_to"),
+                name="dashboard_social_period_platform_account_dates_unique",
+            )
+        ]
+
+
 class SocialSyncRun(models.Model):
     class Status(models.TextChoices):
         RUNNING = "RUNNING", "Running"

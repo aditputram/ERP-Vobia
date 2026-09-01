@@ -1,13 +1,17 @@
-from datetime import date, datetime, timezone as dt_timezone
+from datetime import date, datetime, timedelta, timezone as dt_timezone
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from . import instagram_report
-from .models import SocialDailyMetric, SocialSyncRun
-from .social_sync import daily_series, manual_refresh_state, run_manual_refresh, sync_platform, sync_status
+from .models import SocialDailyMetric, SocialPeriodMetric, SocialSyncRun
+from .social_sync import (
+    daily_series, manual_refresh_state, run_manual_refresh, sync_period_metrics,
+    supported_period_ranges, sync_platform, sync_status,
+)
 
 
 class SocialSyncTests(TestCase):
@@ -75,6 +79,60 @@ class SocialSyncTests(TestCase):
 
         self.assertEqual(status["latest"].cutoff, self.day)
         self.assertEqual(status["latest_valid"].cutoff, self.day)
+
+    @patch("dashboard.social_sync.supported_period_ranges")
+    @patch("dashboard.social_sync.fetch_instagram_period_uniques")
+    def test_period_metrics_use_exact_instagram_uniques_and_complete_daily_sums(self, uniques, ranges):
+        start = date(2026, 8, 30)
+        ranges.return_value = [(start, self.day)]
+        uniques.return_value = {(start, self.day): {"reach": 99, "accounts_engaged": 33}}
+        for platform in ("INSTAGRAM", "TIKTOK"):
+            for day in (start, self.day):
+                SocialDailyMetric.objects.create(
+                    platform=platform, account="vobia.id", date=day,
+                    synced_at=datetime(2026, 9, 1, tzinfo=dt_timezone.utc), **self.values,
+                )
+
+        self.assertEqual(sync_period_metrics(self.day), 2)
+
+        instagram = SocialPeriodMetric.objects.get(platform="INSTAGRAM")
+        tiktok = SocialPeriodMetric.objects.get(platform="TIKTOK")
+        self.assertEqual((instagram.reach, instagram.accounts_engaged), (99, 33))
+        self.assertEqual(instagram.impressions, 40)
+        self.assertEqual(tiktok.reach, 20)
+        self.assertIsNone(tiktok.accounts_engaged)
+
+    def test_supported_period_ranges_cover_presets_month_and_comparisons(self):
+        ranges = supported_period_ranges(self.day)
+        for expected in (
+            (date(2026, 8, 25), self.day),
+            (date(2026, 8, 18), self.day),
+            (date(2026, 8, 2), self.day),
+            (date(2026, 8, 1), self.day),
+            (date(2026, 7, 1), date(2026, 7, 31)),
+        ):
+            self.assertIn(expected, ranges)
+
+    @patch("dashboard.social_sync.supported_period_ranges")
+    @patch("dashboard.social_sync.fetch_instagram_period_uniques", side_effect=OSError("temporary"))
+    def test_failed_period_sync_keeps_previous_snapshot(self, _uniques, ranges):
+        ranges.return_value = [(self.day, self.day)]
+        for platform in ("INSTAGRAM", "TIKTOK"):
+            SocialDailyMetric.objects.create(
+                platform=platform, account="vobia.id", date=self.day,
+                synced_at=datetime(2026, 9, 1, tzinfo=dt_timezone.utc), **self.values,
+            )
+        previous = SocialPeriodMetric.objects.create(
+            platform="INSTAGRAM", account="vobia.id",
+            date_from=self.day, date_to=self.day, reach=77,
+            synced_at=datetime(2026, 9, 1, tzinfo=dt_timezone.utc),
+        )
+
+        with self.assertRaises(OSError):
+            sync_period_metrics(self.day)
+
+        previous.refresh_from_db()
+        self.assertEqual(previous.reach, 77)
 
     def test_dashboard_renders_matching_instagram_and_tiktok_charts(self):
         chart_day = date(2026, 8, 30)
@@ -146,14 +204,48 @@ class SocialSyncTests(TestCase):
 
         self.assertContains(response, "Refresh data")
 
+    @patch("dashboard.instagram_report.get_tiktok_report", return_value=(None, "Snapshot TikTok periode ini belum tersedia."))
+    @patch("dashboard.instagram_report.get_report", return_value=(None, "Snapshot periode ini belum tersedia."))
+    def test_dashboard_uses_period_database_when_full_snapshot_is_missing(self, _instagram, _tiktok):
+        today = timezone.localdate()
+        end = today - timedelta(days=1)
+        start = today - timedelta(days=14)
+        previous_end = start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=13)
+        for platform in ("INSTAGRAM", "TIKTOK"):
+            for date_from, date_to, reach in (
+                (start, end, 140), (previous_start, previous_end, 100),
+            ):
+                SocialPeriodMetric.objects.create(
+                    platform=platform, account="vobia.id",
+                    date_from=date_from, date_to=date_to,
+                    reach=reach, impressions=200, total_engagement=20,
+                    accounts_engaged=50, profile_visits=5, website_clicks=2,
+                    likes=10, comments=5, shares=5,
+                    synced_at=timezone.now(),
+                )
+        user = get_user_model().objects.create_user(
+            "marketing-period-reader", password="Strong-Test-2026!",
+            module_access={"marketing": "view"},
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard:instagram_dashboard"), {"period": "14"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "KPI periode dibaca dari sinkronisasi harian PostgreSQL", count=2)
+        self.assertNotContains(response, "Belum ada snapshot laporan")
+        self.assertNotContains(response, "Belum ada laporan TikTok untuk periode ini")
+
     @patch("dashboard.social_sync.fetch_tiktok_days")
     @patch("dashboard.social_sync.fetch_instagram_days")
     def test_manual_refresh_is_global_once_per_wib_day(self, instagram_days, tiktok_days):
         instagram_days.return_value = [(self.day, self.values)]
         tiktok_days.return_value = [(self.day, self.values)]
 
-        first, runs, claimed = run_manual_refresh("marketing.user")
-        second, second_runs, second_claimed = run_manual_refresh("another.user")
+        with patch("dashboard.social_sync.sync_period_metrics") as period_sync:
+            first, runs, claimed = run_manual_refresh("marketing.user")
+            second, second_runs, second_claimed = run_manual_refresh("another.user")
 
         self.assertTrue(claimed)
         self.assertEqual(first.status, SocialSyncRun.Status.COMPLETED)
@@ -162,6 +254,7 @@ class SocialSyncTests(TestCase):
         self.assertEqual(second.pk, first.pk)
         self.assertEqual(second_runs, [])
         self.assertEqual(manual_refresh_state().actor, "marketing.user")
+        period_sync.assert_called_once()
 
     @patch("dashboard.instagram_report.get_tiktok_report", return_value=(None, ""))
     @patch("dashboard.instagram_report.get_report", return_value=(None, ""))

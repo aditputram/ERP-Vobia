@@ -1,6 +1,7 @@
 """Daily social metrics sync. External calls happen only from explicit jobs."""
 import json
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 from django.db import transaction
@@ -13,7 +14,7 @@ from django.views.decorators.http import require_POST
 
 from . import tiktok_business
 from .instagram import ACCOUNT_ID, USERNAME, ConnectionError as InstagramError, api_get, store_path
-from .models import SocialDailyMetric, SocialSyncRun
+from .models import SocialDailyMetric, SocialPeriodMetric, SocialSyncRun
 from .tiktok import TikTokConnectionError
 
 
@@ -25,6 +26,110 @@ METRICS = (
     "profile_visits", "website_clicks", "likes", "comments", "shares",
     "new_followers", "lost_followers",
 )
+
+
+def supported_period_ranges(cutoff):
+    ranges = set()
+    for days in (7, 14, 30, 60, 90):
+        start = cutoff - timedelta(days=days - 1)
+        ranges.add((start, cutoff))
+        ranges.add((start - timedelta(days=days), start - timedelta(days=1)))
+    month_start = cutoff.replace(day=1)
+    previous_end = month_start - timedelta(days=1)
+    previous_start = previous_end.replace(day=1)
+    ranges.update({(month_start, cutoff), (previous_start, previous_end)})
+    previous_mtd_end = previous_start.replace(day=min(cutoff.day, previous_end.day))
+    ranges.add((previous_start, previous_mtd_end))
+    return sorted(ranges)
+
+
+def _complete_period_values(rows_by_date, start, end):
+    rows = [rows_by_date.get(start + timedelta(days=offset)) for offset in range((end - start).days + 1)]
+    if any(row is None for row in rows):
+        return None
+
+    def total(name):
+        values = [getattr(row, name) for row in rows]
+        return sum(values) if all(value is not None for value in values) else None
+
+    return {name: total(name) for name in METRICS}
+
+
+@sensitive_variables()
+def fetch_instagram_period_uniques(ranges):
+    if not ranges:
+        return {}
+    with store_path().open() as handle:
+        token = json.load(handle)["access_token"]
+    profile = api_get(token, "me", {"fields": "user_id,username"})
+    if str(profile.get("user_id")) != ACCOUNT_ID or profile.get("username", "").lower() != USERNAME:
+        raise InstagramError("Akun token Instagram tidak cocok.")
+
+    def fetch(date_range):
+        from .instagram_report import metric_values
+
+        start, end = date_range
+        names = ("reach", "accounts_engaged")
+        params = {
+            "period": "day", "metric_type": "total_value",
+            "since": start.isoformat(), "until": (end + timedelta(days=1)).isoformat(),
+            "metric": ",".join(names),
+        }
+        values = metric_values(api_get(token, ACCOUNT_ID + "/insights", params), names)
+        for name in (name for name, value in values.items() if value is None):
+            values[name] = metric_values(
+                api_get(token, ACCOUNT_ID + "/insights", {**params, "metric": name}),
+                (name,),
+            )[name]
+        if all(values[name] is None for name in names):
+            raise InstagramError("Metrik unik periode Instagram tidak tersedia.")
+        return date_range, values
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        return dict(pool.map(fetch, ranges))
+
+
+def sync_period_metrics(cutoff):
+    ranges = supported_period_ranges(cutoff)
+    rows_by_platform = {
+        platform: {
+            row.date: row for row in SocialDailyMetric.objects.filter(
+                platform=platform, account=ACCOUNT,
+                date__range=(ranges[0][0], cutoff),
+            )
+        }
+        for platform in PLATFORMS
+    }
+    complete = {
+        platform: {
+            date_range: values
+            for date_range in ranges
+            if (values := _complete_period_values(rows_by_platform[platform], *date_range)) is not None
+        }
+        for platform in PLATFORMS
+    }
+    instagram_uniques = fetch_instagram_period_uniques(complete[SocialDailyMetric.Platform.INSTAGRAM])
+    synced_at = timezone.now()
+    with transaction.atomic():
+        for platform in PLATFORMS:
+            for (start, end), values in complete[platform].items():
+                if platform == SocialDailyMetric.Platform.INSTAGRAM:
+                    values = {
+                        **values,
+                        "reach": instagram_uniques[(start, end)]["reach"],
+                        "accounts_engaged": instagram_uniques[(start, end)]["accounts_engaged"],
+                    }
+                SocialPeriodMetric.objects.update_or_create(
+                    platform=platform, account=ACCOUNT, date_from=start, date_to=end,
+                    defaults={**values, "synced_at": synced_at},
+                )
+    return sum(len(periods) for periods in complete.values())
+
+
+def period_metric(platform, start, end):
+    return SocialPeriodMetric.objects.filter(
+        platform=platform, account=ACCOUNT, date_from=start, date_to=end,
+    ).first()
 
 
 def _instagram_values(token, day):
@@ -192,11 +297,19 @@ def run_manual_refresh(actor):
         cutoff=cutoff, lookback_days=4, source="manual", actor=actor,
         key_prefix=f"manual:{today.isoformat()}",
     )
-    completed = all(run.status == SocialSyncRun.Status.COMPLETED for run in runs)
+    period_metrics_completed = True
+    try:
+        sync_period_metrics(cutoff)
+    except Exception:
+        period_metrics_completed = False
+    completed = (
+        all(run.status == SocialSyncRun.Status.COMPLETED for run in runs)
+        and period_metrics_completed
+    )
     coordinator.status = SocialSyncRun.Status.COMPLETED if completed else SocialSyncRun.Status.FAILED
     coordinator.completed_at = timezone.now()
     coordinator.snapshot_at = coordinator.completed_at if completed else None
-    coordinator.error = "" if completed else "Satu atau lebih platform gagal; refresh dapat dicoba lagi."
+    coordinator.error = "" if completed else "Refresh belum lengkap; dapat dicoba lagi."
     coordinator.save(update_fields=("status", "completed_at", "snapshot_at", "error"))
     return coordinator, runs, True
 

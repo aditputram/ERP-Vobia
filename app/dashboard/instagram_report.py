@@ -25,7 +25,7 @@ from .tiktok import (
     get_report as get_tiktok_report,
 )
 from .models import SocialDailyMetric
-from .social_sync import daily_series, manual_refresh_state, run_manual_refresh, sync_status
+from .social_sync import daily_series, manual_refresh_state, period_metric, run_manual_refresh, sync_status
 
 
 ACCOUNT_METRICS = {
@@ -138,6 +138,57 @@ def metric_values(payload, names):
 
 def rate(engagement, views):
     return engagement / views * 100 if engagement is not None and views not in (None, 0) else None
+
+
+def instagram_period_report(metric):
+    totals = {
+        "reach": metric.reach, "views": metric.impressions,
+        "total_interactions": metric.total_engagement,
+        "accounts_engaged": metric.accounts_engaged,
+        "profile_views": metric.profile_visits,
+        "website_clicks": metric.website_clicks,
+        "likes": metric.likes, "comments": metric.comments, "shares": metric.shares,
+        "saves": None, "replies": None, "reposts": None, "profile_links_taps": None,
+    }
+    follows, unfollows = metric.new_followers, metric.lost_followers
+    return {
+        "totals": totals, "er": rate(metric.total_engagement, metric.impressions),
+        "follows": follows, "unfollows": unfollows,
+        "net_follows": follows - unfollows if follows is not None and unfollows is not None else None,
+        "profile": {"followers": None, "media_count": None},
+        "demographics": [], "contents": [], "warnings": [], "library_complete": False,
+        "date_from": metric.date_from.isoformat(), "date_to": metric.date_to.isoformat(),
+        "fetched_at": metric.synced_at.isoformat(), "summary_only": True,
+    }
+
+
+def tiktok_period_business(metric):
+    return {
+        "reach": metric.reach, "views": metric.impressions,
+        "engagement": metric.total_engagement,
+        "accounts_engaged": metric.accounts_engaged,
+        "profile_views": metric.profile_visits,
+        "website_clicks": metric.website_clicks,
+        "likes": metric.likes, "comments": metric.comments, "shares": metric.shares,
+        "new_followers": metric.new_followers, "lost_followers": metric.lost_followers,
+        "follower_growth": (
+            metric.new_followers - metric.lost_followers
+            if metric.new_followers is not None and metric.lost_followers is not None else None
+        ),
+        "profile": {},
+    }
+
+
+def tiktok_period_report(metric):
+    business = tiktok_period_business(metric)
+    return {
+        "business": business, "business_error": "", "display_error": "",
+        "profile": {}, "videos": [],
+        "views": metric.impressions, "engagement": metric.total_engagement,
+        "er": rate(metric.total_engagement, metric.impressions),
+        "date_from": metric.date_from.isoformat(), "date_to": metric.date_to.isoformat(),
+        "fetched_at": metric.synced_at, "summary_only": True,
+    }
 
 
 def breakdown_rows(payload):
@@ -395,6 +446,22 @@ def dashboard(request):
                 force=force,
                 fetch=force,
             )
+        instagram_period = period_metric(SocialDailyMetric.Platform.INSTAGRAM, start, end)
+        instagram_previous_period = period_metric(
+            SocialDailyMetric.Platform.INSTAGRAM, comparison_start, comparison_end,
+        )
+        tiktok_period = period_metric(SocialDailyMetric.Platform.TIKTOK, start, end)
+        tiktok_previous_period = period_metric(
+            SocialDailyMetric.Platform.TIKTOK, comparison_start, comparison_end,
+        )
+        if not report and instagram_period:
+            report, error = instagram_period_report(instagram_period), ""
+        if not comparison and instagram_previous_period:
+            comparison, comparison_error = instagram_period_report(instagram_previous_period), ""
+        if not tiktok_report and tiktok_period:
+            tiktok_report, tiktok_error = tiktok_period_report(tiktok_period), ""
+        if not tiktok_comparison and tiktok_previous_period:
+            tiktok_comparison = tiktok_period_business(tiktok_previous_period)
         if comparison_error and not error:
             error = "Periode pembanding belum tersedia. " + comparison_error
     instagram_series = daily_series(SocialDailyMetric.Platform.INSTAGRAM, start, end) if form.is_valid() else []

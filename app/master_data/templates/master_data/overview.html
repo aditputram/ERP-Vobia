@@ -33,19 +33,31 @@
 </section>
 
 <form method="get" class="panel inventory-filter section-gap" data-auto-submit>
+    <div class="preview-grain-selector">
+        <span class="preview-grain-label">Tampilan data</span>
+        <label class="preview-grain-option"><input type="radio" name="grain" value="sku" data-chip-filter {% if grain == 'sku' %}checked{% endif %}><span>SKU</span></label>
+        <label class="preview-grain-option"><input type="radio" name="grain" value="parent" data-chip-filter {% if grain == 'parent' %}checked{% endif %}><span>Parent SKU</span></label>
+    </div>
     <div class="inventory-filter-grid">
-        <label class="inventory-search-field">Cari Product / SKU<input type="search" name="q" value="{{ query }}" placeholder="Nama produk, Article, Parent SKU, atau SKU" autocomplete="off" data-auto-search></label>
+        <label class="inventory-search-field">Cari data produk<input type="search" name="q" value="{{ query }}" placeholder="Product, Article, SKU, Parent SKU, kode Shopee/TikTok" autocomplete="off" data-auto-search></label>
         <button class="primary-button" type="submit">Cari</button>
         <a class="secondary-button" href="{% url 'master_data:overview' %}">Reset</a>
     </div>
 </form>
 
 <section class="panel section-gap">
-    <div class="panel-header"><div><p class="eyebrow">CURRENT MASTER</p><h2>{{ products|length|floatformat:"0g" }} Product{% if query %} ditemukan{% endif %}</h2></div><span class="pill">Seluruh product canonical</span></div>
-    {% if products %}
-    <div class="table-wrap warehouse-table-wrap"><table><thead><tr><th>Product</th><th>Parent SKU</th><th>Article</th><th>Status</th><th>Category</th><th>Subcategory</th><th>Jumlah SKU</th><th>Aktif</th></tr></thead><tbody>
-    {% for product in products %}<tr><td><strong>{{ product.name }}</strong></td><td><span class="code-label">{{ product.parent_sku|default:"—" }}</span></td><td>{{ product.article|default:"—" }}</td><td>{{ product.status.name }}</td><td>{{ product.category.name }}</td><td>{{ product.subcategory.name|default:"—" }}</td><td>{{ product.sku_count|floatformat:"0g" }}</td><td><span class="status-badge {% if product.is_active %}ready{% endif %}">{% if product.is_active %}Aktif{% else %}Nonaktif{% endif %}</span></td></tr>{% endfor %}
+    <div class="panel-header"><div><p class="eyebrow">CURRENT MASTER</p><h2>{{ rows|length|floatformat:"0g" }} {% if grain == 'parent' %}Parent SKU{% else %}SKU{% endif %}{% if query %} ditemukan{% endif %}</h2><p>Retail Price adalah dasar Gross Sales per unit; Gross Sales aktual dihitung dari Qty × Retail Price pada modul Sales.</p></div><span class="pill">Data canonical lengkap</span></div>
+    {% if rows %}
+    <div class="table-wrap warehouse-table-wrap"><table><thead>
+    {% if grain == 'parent' %}<tr><th>Parent SKU</th><th>Product</th><th>Article</th><th>Category</th><th>Subcategory</th><th>Status</th><th>Jumlah SKU</th><th>COGS / SKU</th><th>Retail Price / SKU</th><th>Kode Shopee</th><th>Kode TikTok</th><th>Aktif</th></tr>
+    {% else %}<tr><th>Source</th><th>SKU</th><th>Parent SKU</th><th>Product</th><th>Article</th><th>Category</th><th>Subcategory</th><th>Variant</th><th>Sub Variant</th><th>Status</th><th>COGS</th><th>Retail Price</th><th>Kode Shopee</th><th>Kode TikTok</th><th>Aktif</th></tr>{% endif %}
+    </thead><tbody>
+    {% if grain == 'parent' %}
+    {% for product in rows %}<tr><td><span class="code-label">{{ product.parent_sku|default:"—" }}</span></td><td><strong>{{ product.name }}</strong></td><td>{{ product.article|default:"—" }}</td><td>{{ product.category.name }}</td><td>{{ product.subcategory.name|default:"—" }}</td><td>{{ product.status.name }}</td><td>{{ product.sku_count|floatformat:"0g" }}</td><td>{% if product.cogs_min == None %}—{% elif product.cogs_min == product.cogs_max %}Rp {{ product.cogs_min|floatformat:"0g" }}{% else %}Rp {{ product.cogs_min|floatformat:"0g" }}–{{ product.cogs_max|floatformat:"0g" }}{% endif %}</td><td>{% if product.retail_min == None %}—{% elif product.retail_min == product.retail_max %}Rp {{ product.retail_min|floatformat:"0g" }}{% else %}Rp {{ product.retail_min|floatformat:"0g" }}–{{ product.retail_max|floatformat:"0g" }}{% endif %}</td><td>{{ product.shopee_code|default:"—" }}</td><td>{{ product.tiktok_code|default:"—" }}</td><td><span class="status-badge {% if product.is_active %}ready{% endif %}">{% if product.is_active %}Aktif{% else %}Nonaktif{% endif %}</span></td></tr>{% endfor %}
+    {% else %}
+    {% for sku in rows %}<tr><td>Vobia</td><td><strong class="code-label">{{ sku.sku }}</strong></td><td><span class="code-label">{{ sku.product_variant.product.parent_sku|default:"—" }}</span></td><td>{{ sku.product_variant.product.name }}</td><td>{{ sku.product_variant.product.article|default:"—" }}</td><td>{{ sku.product_variant.product.category.name }}</td><td>{{ sku.product_variant.product.subcategory.name|default:"—" }}</td><td>{% if sku.product_variant.name == 'Default' %}—{% else %}{{ sku.product_variant.name }}{% endif %}</td><td>{{ sku.size|default:"—" }}</td><td>{{ sku.product_variant.product.status.name }}</td><td>{% if sku.current_master_cogs == None %}—{% else %}Rp {{ sku.current_master_cogs|floatformat:"0g" }}{% endif %}</td><td>{% if sku.current_retail_price == None %}—{% else %}Rp {{ sku.current_retail_price|floatformat:"0g" }}{% endif %}</td><td>{{ sku.shopee_code|default:"—" }}</td><td>{{ sku.tiktok_code|default:"—" }}</td><td><span class="status-badge {% if sku.is_active %}ready{% endif %}">{% if sku.is_active %}Aktif{% else %}Nonaktif{% endif %}</span></td></tr>{% endfor %}
+    {% endif %}
     </tbody></table></div>
-    {% else %}<div class="empty-state">Tidak ada Product yang cocok dengan pencarian ini.</div>{% endif %}
+    {% else %}<div class="empty-state">Tidak ada data yang cocok dengan pencarian ini.</div>{% endif %}
 </section>
 {% endblock %}

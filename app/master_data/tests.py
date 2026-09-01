@@ -112,12 +112,28 @@ class MasterDataOverviewTests(TestCase):
             product=product,
         )
 
-    def test_overview_lists_products_and_searches_child_sku(self):
+    def test_overview_defaults_to_complete_sku_view_and_searches_child_sku(self):
         response = self.client.get(reverse("master_data:overview"), {"q": "VOBSH01"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(list(response.context["products"]), [self.sku.product_variant.product])
+        self.assertEqual(response.context["grain"], "sku")
+        self.assertEqual(response.context["rows"], [self.sku])
         self.assertContains(response, "Flannel Shirt - Sembara")
+        self.assertContains(response, "Rp 125.000")
+        self.assertContains(response, "Rp 275.000")
+        self.assertContains(response, "123456789")
+        self.assertContains(response, "1736877864034403729")
+
+    def test_overview_can_switch_to_parent_sku_summary(self):
+        response = self.client.get(
+            reverse("master_data:overview"), {"grain": "parent", "q": "VOBSH01"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["grain"], "parent")
+        self.assertEqual(response.context["rows"], [self.sku.product_variant.product])
+        self.assertContains(response, "1 Parent SKU ditemukan")
+        self.assertContains(response, "COGS / SKU")
 
     def test_export_matches_canonical_import_contract(self):
         response = self.client.get(reverse("master_data:export_bank_data"))

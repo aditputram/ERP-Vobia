@@ -383,7 +383,7 @@ def dashboard(request):
     comparison_start = comparison_end = None
     if form.is_valid():
         start, end = form.cleaned_data["date_from"], form.cleaned_data["date_to"]
-        force = request.method == "POST" and refresh_run.status == refresh_run.Status.COMPLETED
+        force = request.method == "POST" and refresh_claimed
         report, error = get_report(start, end, force=force, fetch=force)
         comparison_start, comparison_end = previous_period(start, end, form.cleaned_data["period"])
         comparison, comparison_error = get_report(comparison_start, comparison_end, force=force, fetch=force)

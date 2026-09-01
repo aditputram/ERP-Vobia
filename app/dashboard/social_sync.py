@@ -164,10 +164,11 @@ def daily_series(platform, start, end):
 
 
 def sync_status(platform):
-    latest_valid = SocialSyncRun.objects.filter(
-        platform=platform, account=ACCOUNT, status=SocialSyncRun.Status.COMPLETED,
+    runs = SocialSyncRun.objects.filter(platform=platform, account=ACCOUNT)
+    latest_valid = runs.filter(status=SocialSyncRun.Status.COMPLETED).order_by(
+        "-cutoff", "-completed_at",
     ).first()
-    latest = SocialSyncRun.objects.filter(platform=platform, account=ACCOUNT).first()
+    latest = runs.order_by("-cutoff", "-started_at").first()
     return {"latest": latest, "latest_valid": latest_valid}
 
 

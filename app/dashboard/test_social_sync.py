@@ -7,7 +7,7 @@ from django.urls import reverse
 
 from . import instagram_report
 from .models import SocialDailyMetric, SocialSyncRun
-from .social_sync import daily_series, manual_refresh_state, run_manual_refresh, sync_platform
+from .social_sync import daily_series, manual_refresh_state, run_manual_refresh, sync_platform, sync_status
 
 
 class SocialSyncTests(TestCase):
@@ -59,6 +59,22 @@ class SocialSyncTests(TestCase):
         rows = daily_series("INSTAGRAM", date(2026, 8, 1), self.day)
         self.assertEqual([row["date"] for row in rows], ["2026-08-30", "2026-08-31"])
         self.assertIsNone(rows[0]["impressions"])
+
+    def test_sync_status_uses_freshest_cutoff_not_latest_backfill(self):
+        for key, cutoff, started_at, status in (
+            ("daily:instagram:2026-08-31", self.day, datetime(2026, 9, 1, 0, tzinfo=dt_timezone.utc), "COMPLETED"),
+            ("backfill:instagram:2026-06-02", date(2026, 6, 2), datetime(2026, 9, 1, 2, tzinfo=dt_timezone.utc), "COMPLETED"),
+        ):
+            SocialSyncRun.objects.create(
+                idempotency_key=key, platform="INSTAGRAM", account="vobia.id",
+                source="test", status=status, cutoff=cutoff, started_at=started_at,
+                completed_at=started_at, snapshot_at=started_at,
+            )
+
+        status = sync_status("INSTAGRAM")
+
+        self.assertEqual(status["latest"].cutoff, self.day)
+        self.assertEqual(status["latest_valid"].cutoff, self.day)
 
     def test_dashboard_renders_matching_instagram_and_tiktok_charts(self):
         chart_day = date(2026, 8, 30)
@@ -117,6 +133,19 @@ class SocialSyncTests(TestCase):
         self.assertNotContains(response, "Refresh data")
         self.assertEqual(self.client.post(reverse("dashboard:instagram_dashboard"), {"period": "7"}).status_code, 403)
 
+    @patch("dashboard.instagram_report.get_tiktok_report", return_value=(None, ""))
+    @patch("dashboard.instagram_report.get_report", return_value=(None, ""))
+    def test_marketing_editor_sees_refresh_when_snapshot_is_missing(self, _instagram, _tiktok):
+        user = get_user_model().objects.create_user(
+            "marketing-missing-snapshot", password="Strong-Test-2026!",
+            module_access={"marketing": "edit"},
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard:instagram_dashboard"))
+
+        self.assertContains(response, "Refresh data")
+
     @patch("dashboard.social_sync.fetch_tiktok_days")
     @patch("dashboard.social_sync.fetch_instagram_days")
     def test_manual_refresh_is_global_once_per_wib_day(self, instagram_days, tiktok_days):
@@ -149,3 +178,7 @@ class SocialSyncTests(TestCase):
         response = self.client.post(reverse("dashboard:instagram_dashboard"), {"period": "7"})
         self.assertEqual(response.status_code, 200)
         manual_refresh.assert_called_once_with("marketing-editor")
+        self.assertEqual(_instagram.call_count, 2)
+        self.assertTrue(all(call.kwargs == {"force": True, "fetch": True} for call in _instagram.call_args_list))
+        _tiktok.assert_called_once()
+        self.assertEqual(_tiktok.call_args.kwargs, {"force": True, "fetch": True})

@@ -1,10 +1,22 @@
+import csv
+import io
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.urls import reverse
 
-from .models import Category, Product, ProductStatus, ProductVariant, SKU, Subcategory
+from .models import (
+    Category,
+    MarketplaceProductMapping,
+    Product,
+    ProductStatus,
+    ProductVariant,
+    SKU,
+    Subcategory,
+)
 
 
 class MasterDataIntegrityTests(TestCase):
@@ -66,3 +78,65 @@ class MasterDataIntegrityTests(TestCase):
         with self.assertRaises(ValidationError):
             product.full_clean()
 
+
+class MasterDataOverviewTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username="adit", password="test")
+        self.client.force_login(self.user)
+        status = ProductStatus.objects.create(code="REGULAR", name="Regular")
+        category = Category.objects.create(code="SHIRT", name="Shirt")
+        product = Product.objects.create(
+            code="PARENT-001::ARTICLE::Sembara",
+            parent_sku="PARENT-001",
+            article="Sembara",
+            name="Flannel Shirt - Sembara",
+            status=status,
+            category=category,
+        )
+        variant = ProductVariant.objects.create(product=product, name="Black", color="Black")
+        self.sku = SKU.objects.create(
+            sku="VOBSH01.L",
+            product_variant=variant,
+            size="L",
+            current_retail_price=Decimal("275000.00"),
+            current_master_cogs=Decimal("125000.0000"),
+        )
+        MarketplaceProductMapping.objects.create(
+            source=MarketplaceProductMapping.Source.SHOPEE,
+            marketplace_product_code="123456789",
+            product=product,
+        )
+        MarketplaceProductMapping.objects.create(
+            source=MarketplaceProductMapping.Source.TIKTOK,
+            marketplace_product_code="1736877864034403729",
+            product=product,
+        )
+
+    def test_overview_lists_products_and_searches_child_sku(self):
+        response = self.client.get(reverse("master_data:overview"), {"q": "VOBSH01"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context["products"]), [self.sku.product_variant.product])
+        self.assertContains(response, "Flannel Shirt - Sembara")
+
+    def test_export_matches_canonical_import_contract(self):
+        response = self.client.get(reverse("master_data:export_bank_data"))
+
+        self.assertEqual(response.status_code, 200)
+        rows = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
+        self.assertEqual(
+            rows[0],
+            [
+                "SOURCE", "SKU", "Parrent Sku", "ARTICLE", "CATEGORY",
+                "SUB CATAGORY", "VARIANT", "SUB VARIANT", "STATUS PRODUCT",
+                "COGS", "Retail Price", "Kode Shopee", "Kode Tiktok",
+            ],
+        )
+        self.assertEqual(
+            rows[1],
+            [
+                "Vobia", "VOBSH01.L", "PARENT-001", "Sembara", "Shirt", "",
+                "Black", "L", "Regular", "125000.0000", "275000.00",
+                "123456789", "1736877864034403729",
+            ],
+        )

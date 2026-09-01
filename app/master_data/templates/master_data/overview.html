@@ -5,11 +5,12 @@
     <div>
         <p class="eyebrow">CANONICAL DATA</p>
         <h1>Master Data</h1>
-        <p>Sumber canonical tetap Bank Data All Source 26. Belum ada sinkronisasi otomatis pada tahap ini.</p>
+        <p>Mulai perubahan dari Export Bank Data terbaru, edit file tersebut, lalu Import kembali untuk preview dan approval.</p>
     </div>
     <div class="header-actions">
+        <a class="primary-button" href="{% url 'master_data:export_bank_data' %}">Export Bank Data terbaru</a>
+        <a class="secondary-button" href="{% url 'imports:master_upload' %}">Import Bank Data</a>
         <a class="secondary-button" href="{% url 'imports:master_list' %}">Riwayat import</a>
-        <a class="primary-button" href="{% url 'imports:master_upload' %}">Import Bank Data</a>
     </div>
 </header>
 
@@ -21,24 +22,30 @@
     <article class="metric-card"><span>Warehouse</span><strong>{{ counts.warehouses|floatformat:"0g" }}</strong></article>
 </section>
 
-<section class="dashboard-grid">
-    <article class="panel span-two">
-        <div class="panel-header"><div><p class="eyebrow">SKU PREVIEW</p><h2>SKU terbaru</h2></div></div>
-        {% if recent_skus %}
-        <div class="table-wrap"><table><thead><tr><th>SKU</th><th>Product</th><th>Status</th><th>Category</th><th>Retail</th><th>COGS</th></tr></thead><tbody>
-        {% for item in recent_skus %}<tr><td><strong>{{ item.sku }}</strong></td><td>{{ item.product_variant.product.name }}</td><td>{{ item.product_variant.product.status.name }}</td><td>{{ item.product_variant.product.category.name }}</td><td>{% if item.current_retail_price != None %}Rp {{ item.current_retail_price|floatformat:"0g" }}{% else %}Missing{% endif %}</td><td>{% if item.current_master_cogs != None %}Rp {{ item.current_master_cogs|floatformat:"0g" }}{% else %}Missing{% endif %}</td></tr>{% endfor %}
-        </tbody></table></div>
-        {% else %}<div class="empty-state">Master Product belum diimpor. Tahap berikutnya akan menambahkan upload, preview, validasi, dan approval.</div>{% endif %}
-    </article>
+<section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">QUALITY FLAGS</p><h2>Kelengkapan SKU</h2></div></div>
+    <dl class="quality-grid">
+        <div><dt>COGS kosong</dt><dd>{{ sku_quality.missing_cogs|floatformat:"0g" }}</dd></div>
+        <div><dt>Retail Price kosong</dt><dd>{{ sku_quality.missing_retail|floatformat:"0g" }}</dd></div>
+        <div><dt>Keduanya kosong</dt><dd>{{ sku_quality.missing_both|floatformat:"0g" }}</dd></div>
+        <div><dt>SKU inactive</dt><dd>{{ sku_quality.inactive|floatformat:"0g" }}</dd></div>
+    </dl>
+</section>
 
-    <article class="panel">
-        <div class="panel-header"><div><p class="eyebrow">QUALITY FLAGS</p><h2>Kelengkapan SKU</h2></div></div>
-        <dl class="quality-list">
-            <div><dt>COGS kosong</dt><dd>{{ sku_quality.missing_cogs|floatformat:"0g" }}</dd></div>
-            <div><dt>Retail Price kosong</dt><dd>{{ sku_quality.missing_retail|floatformat:"0g" }}</dd></div>
-            <div><dt>Keduanya kosong</dt><dd>{{ sku_quality.missing_both|floatformat:"0g" }}</dd></div>
-            <div><dt>SKU inactive</dt><dd>{{ sku_quality.inactive|floatformat:"0g" }}</dd></div>
-        </dl>
-    </article>
+<form method="get" class="panel inventory-filter section-gap" data-auto-submit>
+    <div class="inventory-filter-grid">
+        <label class="inventory-search-field">Cari Product / SKU<input type="search" name="q" value="{{ query }}" placeholder="Nama produk, Article, Parent SKU, atau SKU" autocomplete="off" data-auto-search></label>
+        <button class="primary-button" type="submit">Cari</button>
+        <a class="secondary-button" href="{% url 'master_data:overview' %}">Reset</a>
+    </div>
+</form>
+
+<section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">CURRENT MASTER</p><h2>{{ products|length|floatformat:"0g" }} Product{% if query %} ditemukan{% endif %}</h2></div><span class="pill">Seluruh product canonical</span></div>
+    {% if products %}
+    <div class="table-wrap warehouse-table-wrap"><table><thead><tr><th>Product</th><th>Parent SKU</th><th>Article</th><th>Status</th><th>Category</th><th>Subcategory</th><th>Jumlah SKU</th><th>Aktif</th></tr></thead><tbody>
+    {% for product in products %}<tr><td><strong>{{ product.name }}</strong></td><td><span class="code-label">{{ product.parent_sku|default:"—" }}</span></td><td>{{ product.article|default:"—" }}</td><td>{{ product.status.name }}</td><td>{{ product.category.name }}</td><td>{{ product.subcategory.name|default:"—" }}</td><td>{{ product.sku_count|floatformat:"0g" }}</td><td><span class="status-badge {% if product.is_active %}ready{% endif %}">{% if product.is_active %}Aktif{% else %}Nonaktif{% endif %}</span></td></tr>{% endfor %}
+    </tbody></table></div>
+    {% else %}<div class="empty-state">Tidak ada Product yang cocok dengan pencarian ini.</div>{% endif %}
 </section>
 {% endblock %}

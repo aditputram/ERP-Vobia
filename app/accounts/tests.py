@@ -1,3 +1,4 @@
+import uuid
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -211,3 +212,21 @@ class UserManagementTests(TestCase):
         self.client.force_login(user)
         self.assertEqual(self.client.get(reverse("sales:dashboard")).status_code, 200)
         self.assertEqual(self.client.get(reverse("merchandising:overview")).status_code, 200)
+
+    def test_master_import_respects_master_data_access_level(self):
+        user = get_user_model().objects.create_user(
+            username="master-viewer",
+            password=self.password,
+            module_access={"master_data": "view"},
+        )
+        self.client.force_login(user)
+        self.assertEqual(self.client.get(reverse("master_data:overview")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("master_data:export_bank_data")).status_code, 200)
+        self.assertEqual(self.client.post(reverse("imports:master_upload")).status_code, 403)
+
+        user.module_access = {"master_data": "edit"}
+        user.save(update_fields=["module_access"])
+        self.assertEqual(
+            self.client.post(reverse("imports:master_approve", args=[uuid.uuid4()])).status_code,
+            403,
+        )

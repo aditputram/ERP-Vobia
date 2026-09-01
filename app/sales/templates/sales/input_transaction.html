@@ -1,6 +1,7 @@
-{% extends "base.html" %}
+{% extends "base.html" %}{% load static %}
 {% block title %}Input Transaction · Vobia ERP{% endblock %}
 {% block content %}
+<link rel="stylesheet" href="{% static 'css/instagram-report.css' %}?v=20260901-sales-input-01">
 <header class="page-header">
     <div>
         <p class="eyebrow">SALES · INPUT TRANSACTION</p>
@@ -20,9 +21,20 @@
                 <h2>Detail transaksi</h2>
             </div>
         </div>
-        <form method="post" class="stack-form">
+        <form method="post" class="stack-form" data-single-submit>
             {% csrf_token %}
-            {{ form.as_p }}
+            {{ form.non_field_errors }}
+            {% for field in form %}<label>{{ field.label }}{{ field }}{{ field.errors }}</label>{% endfor %}
+            <section class="section-gap">
+                <div class="panel-header"><div><p class="eyebrow">PRODUCT LINES</p><h2>Product yang dibeli</h2></div></div>
+                {{ formset.management_form }}{{ formset.non_form_errors }}
+                <div class="campaign-products" id="campaign-products">
+                {% for row in formset %}<div class="campaign-product-row" data-campaign-product-row data-manual-sale-row>{{ row.non_field_errors }}{{ row.product.errors }}<div class="product-field"><span>Product</span><span class="product-picker" data-product-picker>{{ row.product }}</span></div>{{ row.sku.errors }}<label>SKU{{ row.sku }}<small data-retail-preview>Pilih SKU untuk melihat Retail Price</small></label>{{ row.quantity.errors }}<label>Quantity{{ row.quantity }}</label>{{ row.net_unit_price.errors }}<label>Harga net per unit{{ row.net_unit_price }}</label><label>Hapus baris {{ row.DELETE }}</label></div>{% endfor %}
+                </div>
+                <button class="secondary-button campaign-add-product" id="add-campaign-product" type="button">+ Tambah Product</button>
+                <template id="campaign-product-template"><div class="campaign-product-row" data-campaign-product-row data-manual-sale-row>{{ formset.empty_form.non_field_errors }}<div class="product-field"><span>Product</span><span class="product-picker" data-product-picker>{{ formset.empty_form.product }}</span></div><label>SKU{{ formset.empty_form.sku }}<small data-retail-preview>Pilih SKU untuk melihat Retail Price</small></label><label>Quantity{{ formset.empty_form.quantity }}</label><label>Harga net per unit{{ formset.empty_form.net_unit_price }}</label><label>Hapus baris {{ formset.empty_form.DELETE }}</label></div></template>
+                {{ sku_catalog|json_script:"manual-sale-sku-catalog" }}
+            </section>
             <button class="primary-button" type="submit">Post transaksi</button>
         </form>
     </article>
@@ -31,10 +43,12 @@
         <h2>Sebelum diposting</h2>
         <ul class="guide-list">
             <li>Gunakan nomor pesanan atau invoice yang unik.</li>
-            <li>Pilih SKU dan quantity sesuai transaksi aktual.</li>
+            <li>Cari Product terlebih dahulu, lalu pilih SKU anak yang sesuai.</li>
+            <li>Gunakan Tambah Product untuk transaksi dengan beberapa produk.</li>
             <li>Harga net disimpan sebagai snapshot transaksi.</li>
             <li>Centang barang sudah keluar jika stok fisik memang sudah dikirim.</li>
         </ul>
     </article>
 </section>
+<script src="{% static 'js/campaign-products.js' %}?v=20260901-sales-input-01" defer></script>
 {% endblock %}

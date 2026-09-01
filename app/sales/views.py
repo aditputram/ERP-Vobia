@@ -27,9 +27,9 @@ from merchandising.services.planning_activity import (
 from merchandising.services.builder import historical_sales_qty_for_skus, official_values_for_skus
 from traffic.models import TrafficProductMetric
 
-from .forms import ManualSaleForm
+from .forms import ManualSaleHeaderForm, ManualSaleLineFormSet
 from .models import SalesOrder, SalesOrderLine, SalesPlan, SalesPlanSKU, SalesPlanningScenario
-from .services.manual import create_manual_sale
+from .services.manual import create_manual_sales
 
 
 MONTH_NAMES = [
@@ -1510,24 +1510,47 @@ def transactions(request):
 
 @login_required
 def input_transaction(request):
-    form = ManualSaleForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
+    form = ManualSaleHeaderForm(request.POST or None)
+    formset = ManualSaleLineFormSet(request.POST or None, prefix="products")
+    if request.method == "POST" and form.is_valid() and formset.is_valid():
+        line_data = [
+            {
+                "sku": row.cleaned_data["sku"],
+                "quantity": row.cleaned_data["quantity"],
+                "net_unit_price": row.cleaned_data["net_unit_price"],
+            }
+            for row in formset.forms
+            if row.cleaned_data and not row.cleaned_data.get("DELETE")
+        ]
         try:
-            line = create_manual_sale(actor=request.user, **form.cleaned_data)
+            lines = create_manual_sales(actor=request.user, lines=line_data, **form.cleaned_data)
         except ValidationError as exc:
             form.add_error(None, exc)
         else:
-            if getattr(line, "retail_price_special_case", False):
-                master_retail = f"{line.master_retail_price_at_entry:,.0f}".replace(",", ".")
-                retail_snapshot = f"{line.retail_price_snapshot:,.0f}".replace(",", ".")
+            special_lines = [line for line in lines if line.retail_price_special_case]
+            if special_lines:
+                special_skus = ", ".join(line.sku_code_snapshot for line in special_lines)
                 messages.warning(
                     request,
-                    f"SPECIAL CASE HARGA · Transaksi {line.business_key} berhasil diposting. "
-                    f"Retail Price master tetap Rp {master_retail}; snapshot transaksi ini saja "
-                    f"disesuaikan menjadi Rp {retail_snapshot}.",
+                    f"SPECIAL CASE HARGA · Transaksi {lines[0].order.order_number} berhasil "
+                    f"diposting dengan {len(lines)} Product. Snapshot Retail Price disesuaikan "
+                    f"hanya untuk SKU {special_skus}; master tetap tidak berubah.",
                 )
             else:
-                messages.success(request, f"Transaksi manual {line.business_key} berhasil diposting.")
+                messages.success(
+                    request,
+                    f"Transaksi manual {lines[0].order.order_number} berhasil diposting "
+                    f"dengan {len(lines)} Product.",
+                )
             return redirect("sales:input_transaction")
 
-    return render(request, "sales/input_transaction.html", {"form": form})
+    sku_catalog = list(
+        SKU.objects.filter(is_active=True, product_variant__product__is_active=True)
+        .order_by("sku")
+        .values("id", "product_variant__product_id", "current_retail_price")
+    )
+    return render(
+        request,
+        "sales/input_transaction.html",
+        {"form": form, "formset": formset, "sku_catalog": sku_catalog},
+    )

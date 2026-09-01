@@ -95,6 +95,47 @@ document.querySelectorAll("[data-rupiah]").forEach((input) => {
 
 document.querySelectorAll("[data-product-picker]").forEach(initProductPicker);
 
+const skuCatalogElement = document.querySelector("#manual-sale-sku-catalog");
+const skuCatalog = skuCatalogElement ? JSON.parse(skuCatalogElement.textContent) : [];
+const skuDetails = new Map(skuCatalog.map((item) => [String(item.id), item]));
+const rupiah = new Intl.NumberFormat("id-ID", {
+  style: "currency",
+  currency: "IDR",
+  maximumFractionDigits: 0,
+});
+
+const initManualSaleRow = (row) => {
+  if (!row || row.dataset.manualSaleReady || !skuCatalog.length) return;
+  row.dataset.manualSaleReady = "true";
+  const product = row.querySelector("[data-product-picker] select");
+  const sku = row.querySelector("[data-sku-select]");
+  const retail = row.querySelector("[data-retail-preview]");
+  if (!product || !sku || !retail) return;
+
+  const updateRetail = () => {
+    const detail = skuDetails.get(sku.value);
+    retail.textContent = detail?.current_retail_price == null
+      ? "Retail Price belum tersedia"
+      : `Retail Price: ${rupiah.format(Number(detail.current_retail_price))}`;
+  };
+  const filterSku = (reset) => {
+    [...sku.options].forEach((option) => {
+      if (!option.value) return;
+      const matches = String(skuDetails.get(option.value)?.product_variant__product_id) === product.value;
+      option.hidden = !matches;
+      option.disabled = !matches;
+    });
+    if (reset || sku.selectedOptions[0]?.disabled) sku.value = "";
+    sku.disabled = !product.value;
+    updateRetail();
+  };
+  product.addEventListener("change", () => filterSku(true));
+  sku.addEventListener("change", updateRetail);
+  filterSku(false);
+};
+
+document.querySelectorAll("[data-manual-sale-row]").forEach(initManualSaleRow);
+
 const addProduct = document.querySelector("#add-campaign-product");
 const productRows = document.querySelector("#campaign-products");
 const productTemplate = document.querySelector("#campaign-product-template");
@@ -108,6 +149,8 @@ if (addProduct && productRows && productTemplate && totalForms) {
     row.innerHTML = row.innerHTML.replaceAll("__prefix__", String(index));
     productRows.append(fragment);
     totalForms.value = String(index + 1);
-    initProductPicker(productRows.lastElementChild.querySelector("[data-product-picker]"));
+    const newRow = productRows.lastElementChild;
+    initProductPicker(newRow.querySelector("[data-product-picker]"));
+    initManualSaleRow(newRow);
   });
 }

@@ -1340,7 +1340,7 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(valid.context["selected_categories"], ["Knitwear"])
         self.assertEqual(valid.context["totals"]["orders"], 1)
 
-from .services.manual import create_manual_sale
+from .services.manual import create_manual_sale, create_manual_sales
 from .services.requirements import import_requirements, summarize_import_requirements
 
 
@@ -1395,6 +1395,20 @@ class ManualSalesAndRequirementTests(TestCase):
         self.assertEqual(line.total_gross_sales, line.total_net_sales)
 
     def test_manual_sale_special_case_shows_warning_notification(self):
+        product = self.sku.product_variant.product
+        second_product = Product.objects.create(
+            code="P-2",
+            name="Second Product",
+            status=product.status,
+            category=product.category,
+        )
+        second_variant = ProductVariant.objects.create(product=second_product, name="Navy")
+        second_sku = SKU.objects.create(
+            sku="SKU-2",
+            product_variant=second_variant,
+            current_retail_price=Decimal("150000"),
+            current_master_cogs=Decimal("75000"),
+        )
         self.client.force_login(self.user)
         response = self.client.post(
             reverse("sales:input_transaction"),
@@ -1402,17 +1416,81 @@ class ManualSalesAndRequirementTests(TestCase):
                 "source_label": "Whatsapp",
                 "order_number": "WA-NOTIFICATION",
                 "order_datetime": "2026-08-19T10:00",
-                "sku": self.sku.pk,
-                "quantity": 1,
-                "net_unit_price": "220000",
                 "status": "Selesai",
                 "shipped": "",
+                "products-TOTAL_FORMS": "2",
+                "products-INITIAL_FORMS": "0",
+                "products-MIN_NUM_FORMS": "1",
+                "products-MAX_NUM_FORMS": "1000",
+                "products-0-product": product.pk,
+                "products-0-sku": self.sku.pk,
+                "products-0-quantity": "1",
+                "products-0-net_unit_price": "220000",
+                "products-1-product": second_product.pk,
+                "products-1-sku": second_sku.pk,
+                "products-1-quantity": "2",
+                "products-1-net_unit_price": "140000",
             },
             follow=True,
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "SPECIAL CASE HARGA")
-        self.assertContains(response, "Retail Price master tetap Rp 200.000")
+        self.assertContains(response, "2 Product")
+        order = SalesOrder.objects.get(source_label="Whatsapp", order_number="WA-NOTIFICATION")
+        self.assertEqual(order.lines.count(), 2)
+        self.assertEqual(order.lines.get(sku=second_sku).quantity, 2)
+
+    def test_manual_transaction_rejects_duplicate_sku_before_creating_order(self):
+        product = self.sku.product_variant.product
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("sales:input_transaction"),
+            {
+                "source_label": "Whatsapp",
+                "order_number": "WA-DUPLICATE-SKU",
+                "order_datetime": "2026-08-19T10:00",
+                "status": "Selesai",
+                "products-TOTAL_FORMS": "2",
+                "products-INITIAL_FORMS": "0",
+                "products-MIN_NUM_FORMS": "1",
+                "products-MAX_NUM_FORMS": "1000",
+                "products-0-product": product.pk,
+                "products-0-sku": self.sku.pk,
+                "products-0-quantity": "1",
+                "products-0-net_unit_price": "200000",
+                "products-1-product": product.pk,
+                "products-1-sku": self.sku.pk,
+                "products-1-quantity": "1",
+                "products-1-net_unit_price": "200000",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "SKU yang sama hanya boleh dipilih sekali")
+        self.assertFalse(SalesOrder.objects.filter(order_number="WA-DUPLICATE-SKU").exists())
+
+    def test_manual_multi_product_rolls_back_when_one_sku_is_not_financially_ready(self):
+        missing_sku = SKU.objects.create(
+            sku="SKU-MISSING-PRICE",
+            product_variant=self.sku.product_variant,
+            current_retail_price=None,
+            current_master_cogs=None,
+        )
+
+        with self.assertRaises(ValidationError):
+            create_manual_sales(
+                source_label="Whatsapp",
+                order_number="WA-ATOMIC",
+                order_datetime=timezone.make_aware(datetime(2026, 8, 19, 10, 0)),
+                lines=[
+                    {"sku": self.sku, "quantity": 1, "net_unit_price": Decimal("200000")},
+                    {"sku": missing_sku, "quantity": 1, "net_unit_price": Decimal("100000")},
+                ],
+                status="Selesai",
+                actor=self.user,
+            )
+
+        self.assertFalse(SalesOrder.objects.filter(order_number="WA-ATOMIC").exists())
 
     def test_manual_transaction_is_separate_from_data_import(self):
         self.client.force_login(self.user)
@@ -1422,6 +1500,7 @@ class ManualSalesAndRequirementTests(TestCase):
 
         self.assertContains(manual_response, "Input Transaction")
         self.assertContains(manual_response, "Post transaksi")
+        self.assertContains(manual_response, "Tambah Product")
         self.assertNotContains(import_response, "Input transaksi manual")
         self.assertNotContains(import_response, "Post transaksi")
 

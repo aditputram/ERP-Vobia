@@ -37,6 +37,11 @@ DAILY_SUM_FIELDS = (
     "engaged_audience", "profile_views", "bio_link_clicks", "daily_new_followers",
     "daily_lost_followers",
 )
+VIDEO_FIELDS = (
+    "item_id", "thumbnail_url", "share_url", "embed_url", "caption", "likes",
+    "comments", "shares", "favorites", "video_views", "create_time",
+    "total_time_watched", "average_time_watched", "reach",
+)
 
 
 def store_path():
@@ -232,19 +237,16 @@ def fetch_profile_report(start, end, *, saved=None, token=None):
 def fetch_video_report(start, end, *, saved=None, token=None):
     saved = saved or load_connection()
     token = token or access_token()
-    video_fields = [
-        "item_id", "thumbnail_url", "share_url", "embed_url", "caption", "likes",
-        "comments", "shares", "favorites", "video_views", "create_time",
-        "total_time_watched", "average_time_watched", "reach",
-    ]
-    videos, cursor = {}, 0
+    videos, cursor = {}, None
     for _ in range(20):
+        params = {
+            "business_id": saved["open_id"], "max_count": 20,
+            "fields": json.dumps(VIDEO_FIELDS),
+        }
+        if cursor is not None:
+            params["cursor"] = cursor
         page = api_request(
-            "https://business-api.tiktok.com/open_api/v1.3/business/video/list/?" + urlencode({
-                "business_id": saved["open_id"],
-                "cursor": cursor,
-                "fields": json.dumps(video_fields),
-            }),
+            "https://business-api.tiktok.com/open_api/v1.3/business/video/list/?" + urlencode(params),
             token=token,
         )
         stop = False
@@ -263,6 +265,27 @@ def fetch_video_report(start, end, *, saved=None, token=None):
         if next_cursor in (None, cursor):
             break
         cursor = next_cursor
+    return videos
+
+
+@sensitive_variables()
+def fetch_video_insights(video_ids, *, saved=None, token=None):
+    saved = saved or load_connection()
+    token = token or access_token()
+    videos = {}
+    ids = list(dict.fromkeys(str(item) for item in video_ids if item))
+    for offset in range(0, len(ids), 20):
+        page = api_request(
+            "https://business-api.tiktok.com/open_api/v1.3/business/video/list/?" + urlencode({
+                "business_id": saved["open_id"], "max_count": 20,
+                "filters": json.dumps({"video_ids": ids[offset:offset + 20]}),
+                "fields": json.dumps(VIDEO_FIELDS),
+            }),
+            token=token,
+        )
+        for item in page.get("videos", []):
+            if item.get("item_id"):
+                videos[str(item["item_id"])] = item
     return videos
 
 

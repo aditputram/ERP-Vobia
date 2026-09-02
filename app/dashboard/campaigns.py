@@ -241,13 +241,17 @@ def campaign_detail(request, campaign_id):
                         social["Instagram"]["reach_matched"] += 1
     if tiktok_items:
         try:
-            by_id = tiktok.query_videos(tiktok.video_id_from_url(item.post_url) for item in tiktok_items)
+            video_ids = [tiktok.video_id_from_url(item.post_url) for item in tiktok_items]
+            by_id = tiktok.query_videos(video_ids)
+            business_by_id, business_error = tiktok.query_business_videos(video_ids)
+            report_error = " · ".join(filter(None, (report_error, business_error)))
             for creative_item in tiktok_items:
-                media = by_id.get(tiktok.video_id_from_url(creative_item.post_url))
+                video_id = tiktok.video_id_from_url(creative_item.post_url)
+                media = by_id.get(video_id)
                 if not media:
                     continue
                 creative_item.api_matched = True
-                reach = (media.get("business") or {}).get("reach")
+                reach = business_by_id.get(video_id, {}).get("reach")
                 creative_item.post_metrics = {
                     "views": media["views"], "reach": reach, "likes": media["likes"],
                     "comments": media["comments"], "saves": None, "shares": media["shares"],

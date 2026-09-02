@@ -75,20 +75,28 @@ class TikTokConnectionTests(TestCase):
         self.assertEqual(result["engagement"], 100)
         self.assertEqual(result["er"], 10)
 
-    @patch.object(tiktok_business, "fetch_video_report", return_value={"123": {"reach": "800"}})
-    @patch.object(tiktok, "access_token", return_value="ACCESS_PRIVATE")
-    @patch.object(tiktok, "api_request")
-    def test_query_videos_merges_business_reach(self, api_request, _token, fetch_business):
+    @patch.object(tiktok_business, "fetch_video_insights", return_value={"123": {"reach": "800"}})
+    def test_business_video_query_caches_normalized_reach(self, fetch_business):
         tiktok_business.save_connection({"access_token": "BUSINESS_PRIVATE"})
-        api_request.return_value = {"data": {"videos": [{
-            "id": "123", "create_time": 1788134400, "view_count": 1000,
-            "like_count": 80, "comment_count": 10, "share_count": 10,
-        }]}, "error": {"code": "ok"}}
 
-        result = tiktok.query_videos(["123"])["123"]
+        result, error = tiktok.query_business_videos(["123"])
 
-        self.assertEqual(result["business"]["reach"], 800)
-        fetch_business.assert_called_once_with(date(2026, 8, 31), date(2026, 8, 31))
+        self.assertEqual(error, "")
+        self.assertEqual(result["123"]["reach"], 800)
+        fetch_business.assert_called_once_with(["123"])
+
+    @patch.object(tiktok_business, "access_token", return_value="BUSINESS_PRIVATE")
+    @patch.object(tiktok_business, "api_request")
+    def test_business_video_insights_queries_exact_video_ids(self, api_request, _token):
+        api_request.return_value = {"videos": [{"item_id": "123", "reach": 800}]}
+
+        result = tiktok_business.fetch_video_insights(["123"], saved={"open_id": "business-1"})
+
+        self.assertEqual(result["123"]["reach"], 800)
+        request_url = api_request.call_args.args[0]
+        self.assertIn("filters=", request_url)
+        self.assertIn("video_ids", request_url)
+        self.assertNotIn("cursor=0", request_url)
 
     def setUp(self):
         directory = tempfile.TemporaryDirectory()

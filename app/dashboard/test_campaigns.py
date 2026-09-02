@@ -122,8 +122,9 @@ class CampaignTests(TestCase):
         self.assertContains(response, "View Comments (1)")
         self.assertContains(response, "Great post")
 
+    @patch("dashboard.campaigns.tiktok.query_business_videos", return_value=({"123": {"reach": 800}}, ""))
     @patch("dashboard.campaigns.tiktok.query_videos")
-    def test_tiktok_creative_matches_directly_by_video_id(self, query_videos):
+    def test_tiktok_creative_matches_directly_by_video_id(self, query_videos, _query_business):
         CampaignCreative.objects.create(
             campaign=self.campaign, platform="TIKTOK",
             post_url="https://www.tiktok.com/@vobia.id/video/123?lang=en",
@@ -135,7 +136,7 @@ class CampaignTests(TestCase):
         query_videos.return_value = {
             "123": {
                 "views": 1000, "likes": 80, "comments": 10, "shares": 10,
-                "engagement": 100, "er": 10, "business": {"reach": 800},
+                "engagement": 100, "er": 10,
             },
             "456": {
                 "views": 500, "likes": 40, "comments": 5, "shares": 5,
@@ -152,8 +153,9 @@ class CampaignTests(TestCase):
         self.assertContains(response, "10,00%")
         self.assertNotContains(response, "Menunggu koneksi dan persetujuan API TikTok")
 
+    @patch("dashboard.campaigns.tiktok.query_business_videos", return_value=({}, ""))
     @patch("dashboard.campaigns.tiktok.query_videos")
-    def test_tiktok_missing_reach_stays_unavailable_instead_of_zero(self, query_videos):
+    def test_tiktok_missing_reach_stays_unavailable_instead_of_zero(self, query_videos, _query_business):
         CampaignCreative.objects.create(
             campaign=self.campaign, platform="TIKTOK",
             post_url="https://www.tiktok.com/@vobia.id/video/123",

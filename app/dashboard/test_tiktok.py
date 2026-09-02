@@ -75,7 +75,7 @@ class TikTokConnectionTests(TestCase):
         self.assertEqual(result["engagement"], 100)
         self.assertEqual(result["er"], 10)
 
-    @patch.object(tiktok_business, "fetch_video_insights", return_value={"123": {"reach": "800"}})
+    @patch.object(tiktok_business, "fetch_video_insights", return_value={"123": {"reach": "800", "favorites": "300"}})
     def test_business_video_query_caches_normalized_reach(self, fetch_business):
         tiktok_business.save_connection({"access_token": "BUSINESS_PRIVATE"})
 
@@ -83,6 +83,7 @@ class TikTokConnectionTests(TestCase):
 
         self.assertEqual(error, "")
         self.assertEqual(result["123"]["reach"], 800)
+        self.assertEqual(result["123"]["favorites"], 300)
         fetch_business.assert_called_once_with(["123"])
 
     @patch.object(tiktok_business, "access_token", return_value="BUSINESS_PRIVATE")

@@ -122,7 +122,7 @@ class CampaignTests(TestCase):
         self.assertContains(response, "View Comments (1)")
         self.assertContains(response, "Great post")
 
-    @patch("dashboard.campaigns.tiktok.query_business_videos", return_value=({"123": {"reach": 800}}, ""))
+    @patch("dashboard.campaigns.tiktok.query_business_videos", return_value=({"123": {"reach": 800, "favorites": 300}}, ""))
     @patch("dashboard.campaigns.tiktok.query_videos")
     def test_tiktok_creative_matches_directly_by_video_id(self, query_videos, _query_business):
         CampaignCreative.objects.create(
@@ -148,6 +148,7 @@ class CampaignTests(TestCase):
         self.assertContains(response, "https://www.tiktok.com/player/v1/123?description=1")
         self.assertContains(response, "1.000")
         self.assertContains(response, "800")
+        self.assertContains(response, "<span>Total Saves</span><strong>300</strong>", html=True)
         self.assertEqual(response.context["social"]["TikTok"]["reach"], 800)
         self.assertEqual(response.context["social"]["TikTok"]["avg_reach"], 800)
         self.assertContains(response, "10,00%")

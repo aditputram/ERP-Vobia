@@ -410,7 +410,11 @@ def query_business_videos(video_ids, force=False):
         force=force,
     )
     normalized = {
-        video_id: {**item, "reach": tiktok_business.nonnegative_int(item.get("reach"))}
+        video_id: {
+            **item,
+            "reach": tiktok_business.nonnegative_int(item.get("reach")),
+            "favorites": tiktok_business.nonnegative_int(item.get("favorites")),
+        }
         for video_id, item in (result or {}).items()
     }
     return normalized, error

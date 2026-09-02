@@ -251,10 +251,11 @@ def campaign_detail(request, campaign_id):
                 if not media:
                     continue
                 creative_item.api_matched = True
-                reach = business_by_id.get(video_id, {}).get("reach")
+                business = business_by_id.get(video_id, {})
+                reach = business.get("reach")
                 creative_item.post_metrics = {
                     "views": media["views"], "reach": reach, "likes": media["likes"],
-                    "comments": media["comments"], "saves": None, "shares": media["shares"],
+                    "comments": media["comments"], "saves": business.get("favorites"), "shares": media["shares"],
                     "engagement": media["engagement"], "er": media["er"],
                 }
                 social["TikTok"]["matched"] += 1

@@ -235,3 +235,37 @@ def approve_master_import(batch_id, actor):
         },
     )
     return batch, committed_counts
+
+
+@transaction.atomic
+def cancel_master_import(batch_id, actor):
+    batch = MasterImportBatch.objects.select_for_update().select_related("raw_file").get(
+        pk=batch_id
+    )
+    if batch.status == MasterImportBatch.Status.COMMITTED:
+        raise ValidationError("Import yang sudah committed tidak dapat dibatalkan.")
+    if batch.status == MasterImportBatch.Status.REJECTED:
+        return batch
+    if batch.status not in {MasterImportBatch.Status.READY, MasterImportBatch.Status.BLOCKED}:
+        raise ValidationError("Import belum siap untuk dibatalkan.")
+
+    previous_status = batch.status
+    batch.status = MasterImportBatch.Status.REJECTED
+    batch.save(update_fields=["status"])
+    record_audit(
+        actor=actor,
+        action="master_import_cancelled",
+        entity_type="imports.masterimportbatch",
+        entity_id=batch.pk,
+        before_values={"status": previous_status},
+        after_values={
+            "status": batch.status,
+            "raw_file_preserved": True,
+            "commit_locked": True,
+        },
+        metadata={
+            "filename": batch.raw_file.original_filename,
+            "checksum_sha256": batch.raw_file.checksum_sha256,
+        },
+    )
+    return batch

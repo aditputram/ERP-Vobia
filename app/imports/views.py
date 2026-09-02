@@ -14,7 +14,7 @@ from .models import (
     SalesImportIssue,
     StagedSalesRow,
 )
-from .services.master_commit import approve_master_import
+from .services.master_commit import approve_master_import, cancel_master_import
 from .services.sales_commit import approve_sales_import
 from .services.storage import DuplicateRawFile, create_master_import, create_sales_import
 from sales.services.requirements import import_requirements, summarize_import_requirements
@@ -95,6 +95,20 @@ def master_import_approve(request, batch_id):
             f"{counts['created']} baru, {counts['updated']} berubah, "
             f"{counts['unchanged']} tidak berubah.",
         )
+    return redirect("imports:master_detail", batch_id=batch.id)
+
+
+@login_required
+def master_import_cancel(request, batch_id):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    batch = get_object_or_404(MasterImportBatch, pk=batch_id)
+    try:
+        cancel_master_import(batch.id, request.user)
+    except ValidationError as exc:
+        messages.error(request, " ".join(exc.messages))
+    else:
+        messages.success(request, "Import dibatalkan. Master Data tidak berubah.")
     return redirect("imports:master_detail", batch_id=batch.id)
 
 

@@ -53,7 +53,7 @@ class MasterImportBatch(models.Model):
         READY = "READY", "Ready for approval"
         BLOCKED = "BLOCKED", "Blocked"
         COMMITTED = "COMMITTED", "Committed"
-        REJECTED = "REJECTED", "Rejected"
+        REJECTED = "REJECTED", "Dibatalkan"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     raw_file = models.ForeignKey(RawFile, on_delete=models.PROTECT, related_name="master_batches")

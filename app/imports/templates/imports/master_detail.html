@@ -41,10 +41,18 @@
         {% elif batch.status == 'COMMITTED' %}
             <h2>Sudah di-commit</h2>
             <p class="muted">Approved oleh {{ batch.approved_by.username }} pada {{ batch.committed_at|date:"d M Y, H:i" }}.</p>
+        {% elif batch.status == 'REJECTED' %}
+            <h2>Import dibatalkan</h2>
+            <p class="muted">Batch ini tidak mengubah Master Data dan tidak dapat di-approve.</p>
         {% else %}
             <h2>Commit diblokir</h2>
             <p class="muted">Perbaiki file sumber dan upload batch baru. Raw file ini tetap disimpan sebagai evidence.</p>
             <button class="primary-button wide" type="button" disabled>Ada blocking issue</button>
+        {% endif %}
+        {% if batch.status == 'READY' or batch.status == 'BLOCKED' %}
+            <form class="section-gap" method="post" action="{% url 'imports:master_cancel' batch.id %}" onsubmit="return confirm('Batalkan import ini? Master Data tidak akan berubah.');">
+                {% csrf_token %}<button class="secondary-button wide" type="submit">Cancel Import</button>
+            </form>
         {% endif %}
     </article>
 </section>

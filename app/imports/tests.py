@@ -232,6 +232,37 @@ class MasterImportWorkflowTests(TestCase):
             batch.warning_count,
         )
 
+    def test_ready_master_import_can_be_cancelled_without_reason(self):
+        self._upload(csv_upload([valid_row()]))
+        batch = MasterImportBatch.objects.get()
+
+        response = self.client.post(reverse("imports:master_cancel", args=[batch.id]))
+
+        self.assertRedirects(response, reverse("imports:master_detail", args=[batch.id]))
+        batch.refresh_from_db()
+        self.assertEqual(batch.status, MasterImportBatch.Status.REJECTED)
+        self.assertEqual(SKU.objects.count(), 0)
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="master_import_cancelled",
+                entity_id=str(batch.id),
+                actor=self.user,
+            ).exists()
+        )
+        detail = self.client.get(reverse("imports:master_detail", args=[batch.id]))
+        self.assertContains(detail, "Import dibatalkan")
+        self.assertNotContains(detail, "Approve &amp; Commit")
+
+    def test_committed_master_import_cannot_be_cancelled(self):
+        self._upload(csv_upload([valid_row()]))
+        batch = MasterImportBatch.objects.get()
+        approve_master_import(batch.id, self.user)
+
+        self.client.post(reverse("imports:master_cancel", args=[batch.id]))
+
+        batch.refresh_from_db()
+        self.assertEqual(batch.status, MasterImportBatch.Status.COMMITTED)
+
     def test_second_batch_detects_update_and_preserves_value_history(self):
         self._upload(csv_upload([valid_row()], name="initial.csv"))
         first_batch = MasterImportBatch.objects.get()

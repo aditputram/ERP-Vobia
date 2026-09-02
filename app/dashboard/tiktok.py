@@ -46,7 +46,7 @@ def report_path(start, end, kind="report"):
 
 def query_path(video_ids):
     digest = hashlib.sha256(",".join(video_ids).encode()).hexdigest()[:24]
-    return store_path().parent / f"tiktok-videos-{digest}.json"
+    return store_path().parent / f"tiktok-videos-v2-{digest}.json"
 
 
 def write_cache(path, value):
@@ -380,6 +380,24 @@ def fetch_videos(video_ids):
             found[video_id] = {**video, "likes": likes, "comments": comments, "shares": shares,
                                "views": views, "engagement": engagement,
                                "er": engagement / views * 100 if views else None}
+    try:
+        from . import tiktok_business
+
+        published = [
+            datetime.fromtimestamp(int(item["create_time"]), tz=dt_timezone.utc).date()
+            for item in found.values() if item.get("create_time")
+        ]
+        if published and tiktok_business.store_path().exists():
+            insights = tiktok_business.fetch_video_report(min(published), max(published))
+            for video_id, video in found.items():
+                insight = insights.get(video_id)
+                if insight:
+                    video["business"] = {
+                        **insight,
+                        "reach": tiktok_business.nonnegative_int(insight.get("reach")),
+                    }
+    except (TikTokConnectionError, TypeError, ValueError, OSError):
+        pass
     return found
 
 

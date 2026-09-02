@@ -128,16 +128,45 @@ class CampaignTests(TestCase):
             campaign=self.campaign, platform="TIKTOK",
             post_url="https://www.tiktok.com/@vobia.id/video/123?lang=en",
         )
-        query_videos.return_value = {"123": {
-            "views": 1000, "likes": 80, "comments": 10, "shares": 10,
-            "engagement": 100, "er": 10,
-        }}
+        CampaignCreative.objects.create(
+            campaign=self.campaign, platform="TIKTOK",
+            post_url="https://www.tiktok.com/@vobia.id/video/456",
+        )
+        query_videos.return_value = {
+            "123": {
+                "views": 1000, "likes": 80, "comments": 10, "shares": 10,
+                "engagement": 100, "er": 10, "business": {"reach": 800},
+            },
+            "456": {
+                "views": 500, "likes": 40, "comments": 5, "shares": 5,
+                "engagement": 50, "er": 10,
+            },
+        }
         response = self.client.get(reverse("dashboard:campaign_detail", args=[self.campaign.id]))
         self.assertContains(response, "API matched")
         self.assertContains(response, "https://www.tiktok.com/player/v1/123?description=1")
         self.assertContains(response, "1.000")
+        self.assertContains(response, "800")
+        self.assertEqual(response.context["social"]["TikTok"]["reach"], 800)
+        self.assertEqual(response.context["social"]["TikTok"]["avg_reach"], 800)
         self.assertContains(response, "10,00%")
         self.assertNotContains(response, "Menunggu koneksi dan persetujuan API TikTok")
+
+    @patch("dashboard.campaigns.tiktok.query_videos")
+    def test_tiktok_missing_reach_stays_unavailable_instead_of_zero(self, query_videos):
+        CampaignCreative.objects.create(
+            campaign=self.campaign, platform="TIKTOK",
+            post_url="https://www.tiktok.com/@vobia.id/video/123",
+        )
+        query_videos.return_value = {"123": {
+            "views": 1000, "likes": 80, "comments": 10, "shares": 10,
+            "engagement": 100, "er": 10,
+        }}
+
+        response = self.client.get(reverse("dashboard:campaign_detail", args=[self.campaign.id]))
+
+        self.assertIsNone(response.context["social"]["TikTok"]["reach"])
+        self.assertIsNone(response.context["social"]["TikTok"]["avg_reach"])
 
     def test_create_snapshots_target_and_timeline_validation(self):
         response = self.client.post(reverse("dashboard:campaign_create"), {

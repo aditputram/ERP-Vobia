@@ -211,8 +211,8 @@ def campaign_detail(request, campaign_id):
         item.comments = None
         item.comments_complete = False
     social = {
-        "Instagram": {"posts": len(instagram), "matched": 0, "reach": 0, "views": 0, "engagement": 0},
-        "TikTok": {"posts": len(tiktok_items), "matched": 0, "reach": 0, "views": 0, "engagement": 0},
+        "Instagram": {"posts": len(instagram), "matched": 0, "reach": 0, "reach_matched": 0, "views": 0, "engagement": 0},
+        "TikTok": {"posts": len(tiktok_items), "matched": 0, "reach": 0, "reach_matched": 0, "views": 0, "engagement": 0},
     }
     report_error = ""
     if instagram:
@@ -237,6 +237,8 @@ def campaign_detail(request, campaign_id):
                 value = media["metrics"].get(source)
                 if value is not None:
                     social["Instagram"][target_key] += value
+                    if target_key == "reach":
+                        social["Instagram"]["reach_matched"] += 1
     if tiktok_items:
         try:
             by_id = tiktok.query_videos(tiktok.video_id_from_url(item.post_url) for item in tiktok_items)
@@ -245,19 +247,25 @@ def campaign_detail(request, campaign_id):
                 if not media:
                     continue
                 creative_item.api_matched = True
+                reach = (media.get("business") or {}).get("reach")
                 creative_item.post_metrics = {
-                    "views": media["views"], "reach": None, "likes": media["likes"],
+                    "views": media["views"], "reach": reach, "likes": media["likes"],
                     "comments": media["comments"], "saves": None, "shares": media["shares"],
                     "engagement": media["engagement"], "er": media["er"],
                 }
                 social["TikTok"]["matched"] += 1
                 social["TikTok"]["views"] += media["views"]
                 social["TikTok"]["engagement"] += media["engagement"]
+                if reach is not None:
+                    social["TikTok"]["reach"] += reach
+                    social["TikTok"]["reach_matched"] += 1
         except tiktok.TikTokConnectionError as exc:
             report_error = " · ".join(filter(None, (report_error, str(exc))))
     for values in social.values():
         count = values["matched"]
-        values["avg_reach"] = values["reach"] / count if count else None
+        reach_count = values.pop("reach_matched")
+        values["reach"] = values["reach"] if reach_count else None
+        values["avg_reach"] = values["reach"] / reach_count if reach_count else None
         values["avg_views"] = values["views"] / count if count else None
         values["avg_engagement"] = values["engagement"] / count if count else None
         values["er"] = values["engagement"] / values["views"] * 100 if values["views"] else None

@@ -1,12 +1,18 @@
-import csv
 import io
+import tempfile
 from decimal import Decimal
+from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
+from openpyxl import load_workbook
+
+from imports.models import MasterImportBatch
+from imports.services.master_parser import CANONICAL_HEADERS
 
 from .models import (
     Category,
@@ -139,20 +145,44 @@ class MasterDataOverviewTests(TestCase):
         response = self.client.get(reverse("master_data:export_bank_data"))
 
         self.assertEqual(response.status_code, 200)
-        rows = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
         self.assertEqual(
-            rows[0],
-            [
-                "SOURCE", "SKU", "Parrent Sku", "ARTICLE", "CATEGORY",
-                "SUB CATAGORY", "VARIANT", "SUB VARIANT", "STATUS PRODUCT",
-                "COGS", "Retail Price", "Kode Shopee", "Kode Tiktok",
-            ],
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+        self.assertIn(".xlsx", response["Content-Disposition"])
+        workbook = load_workbook(io.BytesIO(response.content), data_only=True)
+        sheet = workbook["VOBIA"]
+        rows = list(sheet.iter_rows(values_only=True))
+        self.assertEqual(list(rows[0]), CANONICAL_HEADERS)
         self.assertEqual(
-            rows[1],
+            list(rows[1]),
             [
-                "Vobia", "VOBSH01.L", "PARENT-001", "Sembara", "Shirt", "",
-                "Black", "L", "Regular", "125000.0000", "275000.00",
+                "Vobia", "VOBSH01.L", "PARENT-001", "Sembara", "Shirt", None,
+                "Black", "L", "Regular", 125000, 275000,
                 "123456789", "1736877864034403729",
             ],
         )
+        self.assertEqual(sheet.freeze_panes, "A2")
+        self.assertEqual(sheet.auto_filter.ref, "A1:M2")
+        self.assertEqual(sheet["L2"].number_format, "@")
+        self.assertEqual(sheet["M2"].number_format, "@")
+        workbook.close()
+
+    def test_exported_xlsx_can_be_imported_without_conversion(self):
+        export = self.client.get(reverse("master_data:export_bank_data"))
+        uploaded = SimpleUploadedFile(
+            "VOBIA-Bank-Data.xlsx",
+            export.content,
+            content_type=export["Content-Type"],
+        )
+        with tempfile.TemporaryDirectory() as private_dir:
+            with self.settings(PRIVATE_UPLOAD_ROOT=Path(private_dir)):
+                response = self.client.post(
+                    reverse("imports:master_upload"),
+                    {"file": uploaded},
+                )
+
+        batch = MasterImportBatch.objects.get()
+        self.assertRedirects(response, reverse("imports:master_detail", args=[batch.id]))
+        self.assertEqual(batch.status, MasterImportBatch.Status.READY)
+        self.assertEqual(batch.unchanged_rows, 1)

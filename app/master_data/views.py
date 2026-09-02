@@ -1,10 +1,13 @@
-import csv
+import io
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Max, Min, Q
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from imports.services.master_parser import CANONICAL_HEADERS
 
@@ -107,13 +110,16 @@ def overview(request):
 
 @login_required
 def export_bank_data(request):
-    response = HttpResponse(content_type="text/csv; charset=utf-8")
-    response["Content-Disposition"] = (
-        f'attachment; filename="VOBIA-Bank-Data-{timezone.localdate():%Y-%m-%d}.csv"'
-    )
-    response.write("\ufeff")
-    writer = csv.writer(response)
-    writer.writerow(CANONICAL_HEADERS)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "VOBIA"
+    sheet.append(CANONICAL_HEADERS)
+    sheet.freeze_panes = "A2"
+
+    header_fill = PatternFill("solid", fgColor="111111")
+    for cell in sheet[1]:
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.fill = header_fill
 
     mappings = _active_product_codes()
 
@@ -125,7 +131,7 @@ def export_bank_data(request):
     for sku in skus:
         variant = sku.product_variant
         product = variant.product
-        writer.writerow(
+        sheet.append(
             [
                 "Vobia",
                 sku.sku,
@@ -142,4 +148,26 @@ def export_bank_data(request):
                 mappings.get((product.id, MarketplaceProductMapping.Source.TIKTOK), ""),
             ]
         )
+
+    for row in sheet.iter_rows(min_row=2):
+        for column in (*range(1, 10), 12, 13):
+            row[column - 1].number_format = "@"
+        row[9].number_format = "#,##0.0000"
+        row[10].number_format = "#,##0.00"
+
+    widths = (12, 20, 20, 28, 18, 20, 18, 18, 20, 16, 16, 22, 22)
+    for column, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(column)].width = width
+    sheet.auto_filter.ref = sheet.dimensions
+
+    output = io.BytesIO()
+    workbook.save(output)
+    workbook.close()
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="VOBIA-Bank-Data-{timezone.localdate():%Y-%m-%d}.xlsx"'
+    )
     return response

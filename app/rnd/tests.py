@@ -7,7 +7,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import ArrayObject, NameObject
 from reportlab.pdfgen import canvas
 
 from master_data.models import Product
@@ -72,6 +73,17 @@ class RndWorkflowTests(TestCase):
         document.drawString(515, 501, "Approval Date :")
         document.drawString(744, 537, "Approved By,")
         document.save()
+        return SimpleUploadedFile(name, output.getvalue(), content_type="application/pdf")
+
+    def _pdf_with_array_contents(self, name, label):
+        source = self._pdf(name, label)
+        reader = PdfReader(BytesIO(source.read()))
+        writer = PdfWriter()
+        writer.add_page(reader.pages[0])
+        page = writer.pages[0]
+        page[NameObject("/Contents")] = ArrayObject((page.raw_get("/Contents"),))
+        output = BytesIO()
+        writer.write(output)
         return SimpleUploadedFile(name, output.getvalue(), content_type="application/pdf")
 
     def _product_payload(self, product, status):
@@ -393,6 +405,32 @@ class RndWorkflowTests(TestCase):
         product.mockup.open("rb")
         self.assertEqual(product.mockup.read(), source_mockup)
         product.mockup.close()
+
+    def test_submit_preserves_pdf_pages_with_array_content_streams(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.mockup = self._pdf("mockup.pdf", "MDR PAGE")
+        product.technical_drawing = self._pdf_with_array_contents(
+            "drawing.pdf",
+            "TECH PACK ARRAY PAGE",
+        )
+        product.save(update_fields=("mockup", "technical_drawing", "updated_at"))
+        self.client.force_login(self.rnd_editor)
+
+        self.client.post(reverse("rnd:product_submit", args=[product.id]))
+        product.refresh_from_db()
+        submitted_pdf = PdfReader(product.submitted_document.path)
+
+        self.assertEqual(len(submitted_pdf.pages), 2)
+        self.assertIn("MDR PAGE", submitted_pdf.pages[0].extract_text())
+        self.assertIn("TECH PACK ARRAY PAGE", submitted_pdf.pages[1].extract_text())
+
+        live_preview = self.client.get(
+            reverse("rnd:product_revision_file", args=[product.id, 0])
+        )
+        live_pdf = PdfReader(BytesIO(b"".join(live_preview.streaming_content)))
+        self.assertEqual(len(live_pdf.pages), 2)
+        self.assertIn("TECH PACK ARRAY PAGE", live_pdf.pages[1].extract_text())
 
     def test_document_revision_history_is_selectable_and_old_pdf_is_preserved(self):
         collection = self._collection()

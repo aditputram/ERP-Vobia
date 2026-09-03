@@ -335,10 +335,30 @@ def product_file(request, product_id, file_kind):
 @xframe_options_sameorigin
 def product_revision_file(request, product_id, revision):
     document_revision = get_object_or_404(
-        DevelopmentProductDocumentRevision.objects.select_related("product"),
+        DevelopmentProductDocumentRevision.objects.select_related("product", "product__collection"),
         product_id=product_id,
         revision=revision,
     )
+    product = document_revision.product
+    if (
+        revision == product.document_revision
+        and document_revision.status != DevelopmentProductDocumentRevision.Status.APPROVED
+        and product.mockup
+        and product.technical_drawing
+    ):
+        document = build_combined_document(
+            product=product,
+            submitted_at=document_revision.submitted_at,
+        )
+        response = FileResponse(
+            BytesIO(document),
+            as_attachment=False,
+            filename=document_revision.submitted_document.name.rsplit("/", 1)[-1],
+            content_type="application/pdf",
+        )
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
+        return response
     field = document_revision.approved_document or document_revision.submitted_document
     if not field:
         raise Http404

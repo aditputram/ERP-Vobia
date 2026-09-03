@@ -125,7 +125,12 @@ def _stamp_page(page, *, writer, submitted_at, revision, approved_at=None, appro
     stamp.set_data(b"".join(commands))
     stamp_reference = writer._add_object(stamp)
     if "/Contents" in page:
-        page[NameObject("/Contents")] = ArrayObject((page.raw_get("/Contents"), stamp_reference))
+        existing_contents = page.raw_get("/Contents")
+        resolved_contents = existing_contents.get_object()
+        if isinstance(resolved_contents, ArrayObject):
+            page[NameObject("/Contents")] = ArrayObject((*resolved_contents, stamp_reference))
+        else:
+            page[NameObject("/Contents")] = ArrayObject((existing_contents, stamp_reference))
     else:
         page[NameObject("/Contents")] = stamp_reference
 

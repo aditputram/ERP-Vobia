@@ -5,10 +5,40 @@ from django.forms import inlineformset_factory
 
 from .models import (
     Collection,
+    DesignAsset,
     DevelopmentProduct,
     DevelopmentProductMaterial,
     MarketingRecommendation,
 )
+
+
+class DesignAssetForm(forms.ModelForm):
+    FILE_MAX_BYTES = 10 * 1024 * 1024
+    FILE_TYPES = {
+        "image/jpeg": (b"\xff\xd8\xff",),
+        "image/png": (b"\x89PNG\r\n\x1a\n",),
+        "image/webp": (b"RIFF",),
+    }
+
+    class Meta:
+        model = DesignAsset
+        fields = ("image",)
+        labels = {"image": "Upload Foto Design"}
+        help_texts = {"image": "JPG, PNG, atau WebP. Maksimal 10 MB."}
+        widgets = {"image": forms.FileInput(attrs={"accept": ".jpg,.jpeg,.png,.webp"})}
+
+    def clean_image(self):
+        uploaded = self.cleaned_data["image"]
+        if uploaded.size > self.FILE_MAX_BYTES:
+            raise forms.ValidationError("File maksimal 10 MB.")
+        signatures = self.FILE_TYPES.get(uploaded.content_type, ())
+        header = uploaded.read(12)
+        uploaded.seek(0)
+        if not signatures or not any(header.startswith(signature) for signature in signatures):
+            raise forms.ValidationError("Foto harus berupa JPG, PNG, atau WebP yang valid.")
+        if uploaded.content_type == "image/webp" and header[8:12] != b"WEBP":
+            raise forms.ValidationError("File WebP tidak valid.")
+        return uploaded
 
 
 class CollectionForm(forms.ModelForm):

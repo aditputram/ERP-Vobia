@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Designing · R&amp;D{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">R&amp;D · DESIGN LIBRARY</p>
+        <h1>Designing</h1>
+        <p>Ruang visual anak drafting. Foto yang direkomendasikan tetap menjadi ide dan belum otomatis masuk ke Collection.</p>
+    </div>
+</header>
+
+{% if can_upload %}
+<section class="panel narrow-panel">
+    <div class="panel-header"><div><p class="eyebrow">UPLOAD</p><h2>Tambah Foto Design</h2></div></div>
+    <form class="stack-form" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button class="primary-button" type="submit">Upload Foto</button>
+    </form>
+</section>
+{% endif %}
+
+<section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">7 HARI TERAKHIR</p><h2>Desain Terbaru</h2></div></div>
+    <div class="rnd-design-grid">
+        {% for design in recent_designs %}
+        <a class="rnd-design-card" href="{% url 'rnd:design_detail' design.id %}">
+            <div class="rnd-design-image"><img src="{% url 'rnd:design_file' design.id %}" alt="{{ design.original_name }}" loading="lazy"></div>
+            <div class="rnd-design-copy"><strong>{{ design.original_name }}</strong><small>{{ design.created_at|date:"d M Y · H:i" }}{% if design.recommended_at %} · Direkomendasikan{% endif %}</small></div>
+        </a>
+        {% empty %}<p class="empty-state rnd-design-empty">Belum ada foto Design dalam 7 hari terakhir.</p>{% endfor %}
+    </div>
+</section>
+
+<section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">SHORTLIST</p><h2>Direkomendasikan untuk Collection Baru</h2></div></div>
+    <div class="rnd-design-grid">
+        {% for design in recommended_designs %}
+        <a class="rnd-design-card" href="{% url 'rnd:design_detail' design.id %}">
+            <div class="rnd-design-image"><img src="{% url 'rnd:design_file' design.id %}" alt="{{ design.original_name }}" loading="lazy"></div>
+            <div class="rnd-design-copy"><strong>{{ design.original_name }}</strong><small>Direkomendasikan {{ design.recommended_at|date:"d M Y · H:i" }}</small></div>
+        </a>
+        {% empty %}<p class="empty-state rnd-design-empty">Belum ada Design yang direkomendasikan.</p>{% endfor %}
+    </div>
+</section>
+
+{% if other_designs %}
+<section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">ARSIP</p><h2>Design Lainnya</h2></div></div>
+    <div class="rnd-design-grid">
+        {% for design in other_designs %}
+        <a class="rnd-design-card" href="{% url 'rnd:design_detail' design.id %}">
+            <div class="rnd-design-image"><img src="{% url 'rnd:design_file' design.id %}" alt="{{ design.original_name }}" loading="lazy"></div>
+            <div class="rnd-design-copy"><strong>{{ design.original_name }}</strong><small>{{ design.created_at|date:"d M Y · H:i" }}</small></div>
+        </a>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+{% endblock %}

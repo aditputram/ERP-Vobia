@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ design.original_name }} · Designing{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div>
+        <p class="eyebrow">R&amp;D · DESIGNING</p>
+        <h1>{{ design.original_name }}</h1>
+        <p>Di-upload {{ design.created_at|date:"d M Y · H:i" }}{% if design.uploaded_by %} oleh {{ design.uploaded_by.get_full_name|default:design.uploaded_by.username }}{% endif %}.</p>
+    </div>
+    <div class="header-actions">
+        <a class="secondary-button" href="{% url 'rnd:designing' %}">Kembali</a>
+        {% if can_recommend %}
+            {% if design.recommended_at %}
+            <form method="post" action="{% url 'rnd:design_unrecommend' design.id %}">{% csrf_token %}<button class="secondary-button" type="submit">Batalkan Rekomendasi</button></form>
+            {% else %}
+            <form method="post" action="{% url 'rnd:design_recommend' design.id %}">{% csrf_token %}<button class="primary-button" type="submit">Rekomendasikan untuk Collection Baru</button></form>
+            {% endif %}
+        {% endif %}
+    </div>
+</header>
+
+{% if design.recommended_at %}
+<div class="special-case-notice">
+    <div><p class="eyebrow">DIREKOMENDASIKAN</p><h2>Candidate Collection Baru</h2><p>Direkomendasikan {{ design.recommended_at|date:"d M Y · H:i" }}{% if design.recommended_by %} oleh {{ design.recommended_by.get_full_name|default:design.recommended_by.username }}{% endif %}. Belum membuat Collection atau Product.</p></div>
+    <span>SHORTLIST</span>
+</div>
+{% endif %}
+
+<section class="panel section-gap rnd-design-detail">
+    <img src="{% url 'rnd:design_file' design.id %}" alt="{{ design.original_name }}">
+</section>
+{% endblock %}

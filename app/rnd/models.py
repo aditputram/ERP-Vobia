@@ -49,6 +49,32 @@ class Collection(UUIDTimestampedModel):
         return f"{self.code} · {self.name}"
 
 
+class DesignAsset(UUIDTimestampedModel):
+    image = models.FileField(upload_to="rnd/designing/")
+    original_name = models.CharField(max_length=255)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="rnd_designs_uploaded",
+    )
+    recommended_at = models.DateTimeField(null=True, blank=True)
+    recommended_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="rnd_designs_recommended",
+    )
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return self.original_name
+
+
 class DevelopmentProduct(UUIDTimestampedModel):
     class DocumentStatus(models.TextChoices):
         DRAFT = "DRAFT", "Draft"

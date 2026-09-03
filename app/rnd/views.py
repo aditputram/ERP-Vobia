@@ -1,3 +1,4 @@
+from datetime import timedelta
 from io import BytesIO
 from mimetypes import guess_type
 from uuid import uuid4
@@ -19,6 +20,7 @@ from audit.services import record_audit
 
 from .forms import (
     CollectionForm,
+    DesignAssetForm,
     DevelopmentProductForm,
     DevelopmentProductMaterialFormSet,
     MarketingRecommendationForm,
@@ -27,6 +29,7 @@ from .forms import (
 from .documents import build_combined_document
 from .models import (
     Collection,
+    DesignAsset,
     DevelopmentProduct,
     DevelopmentProductDocumentRevision,
     MarketingRecommendation,
@@ -48,6 +51,10 @@ def _validation_message(exc):
     return "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
 
 
+def _can_edit_rnd(user):
+    return user.is_superuser or (user.module_access or {}).get("rnd", "none") in {"edit", "approve"}
+
+
 @login_required
 def dashboard(request):
     request.session["active_module"] = "rnd"
@@ -67,6 +74,116 @@ def dashboard(request):
             "marketing_review_count": collections.filter(status=Collection.Status.MARKETING_REVIEW).count(),
         },
     )
+
+
+@login_required
+@transaction.atomic
+def designing(request):
+    request.session["active_module"] = "rnd"
+    can_upload = _can_edit_rnd(request.user)
+    form = DesignAssetForm(request.POST or None, request.FILES or None)
+    if request.method == "POST":
+        if not can_upload:
+            return HttpResponseForbidden("Upload Design memerlukan akses Edit atau Approve R&D.")
+        if form.is_valid():
+            design = form.save(commit=False)
+            design.original_name = form.cleaned_data["image"].name[:255]
+            design.uploaded_by = request.user
+            design.save()
+            record_audit(
+                actor=request.user,
+                action="rnd_design_uploaded",
+                entity_type="rnd.design_asset",
+                entity_id=design.id,
+                after_values={"original_name": design.original_name},
+            )
+            messages.success(request, "Foto Design berhasil di-upload.")
+            return redirect("rnd:designing")
+
+    cutoff = timezone.now() - timedelta(days=7)
+    base = DesignAsset.objects.select_related("uploaded_by", "recommended_by")
+    return render(
+        request,
+        "rnd/designing.html",
+        {
+            "form": form,
+            "can_upload": can_upload,
+            "recent_designs": base.filter(created_at__gte=cutoff),
+            "recommended_designs": base.filter(recommended_at__isnull=False).order_by("-recommended_at"),
+            "other_designs": base.filter(created_at__lt=cutoff, recommended_at__isnull=True),
+        },
+    )
+
+
+@login_required
+def design_detail(request, design_id):
+    request.session["active_module"] = "rnd"
+    design = get_object_or_404(
+        DesignAsset.objects.select_related("uploaded_by", "recommended_by"),
+        id=design_id,
+    )
+    return render(
+        request,
+        "rnd/design_detail.html",
+        {"design": design, "can_recommend": can_approve_module(request.user, "rnd")},
+    )
+
+
+@login_required
+def design_file(request, design_id):
+    design = get_object_or_404(DesignAsset, id=design_id)
+    response = FileResponse(
+        design.image.open("rb"),
+        as_attachment=False,
+        filename=design.original_name,
+        content_type=guess_type(design.original_name)[0] or "application/octet-stream",
+    )
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = "private, no-store"
+    return response
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def design_recommend(request, design_id):
+    if not can_approve_module(request.user, "rnd"):
+        return HttpResponseForbidden("Rekomendasi Design memerlukan akses Approve R&D.")
+    design = get_object_or_404(DesignAsset.objects.select_for_update(), id=design_id)
+    if not design.recommended_at:
+        design.recommended_at = timezone.now()
+        design.recommended_by = request.user
+        design.save(update_fields=("recommended_at", "recommended_by", "updated_at"))
+        record_audit(
+            actor=request.user,
+            action="rnd_design_recommended",
+            entity_type="rnd.design_asset",
+            entity_id=design.id,
+            after_values={"recommended_at": design.recommended_at.isoformat()},
+        )
+    messages.success(request, "Design direkomendasikan untuk Collection baru.")
+    return redirect("rnd:design_detail", design_id=design.id)
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def design_unrecommend(request, design_id):
+    if not can_approve_module(request.user, "rnd"):
+        return HttpResponseForbidden("Pembatalan rekomendasi memerlukan akses Approve R&D.")
+    design = get_object_or_404(DesignAsset.objects.select_for_update(), id=design_id)
+    if design.recommended_at:
+        design.recommended_at = None
+        design.recommended_by = None
+        design.save(update_fields=("recommended_at", "recommended_by", "updated_at"))
+        record_audit(
+            actor=request.user,
+            action="rnd_design_recommendation_cancelled",
+            entity_type="rnd.design_asset",
+            entity_id=design.id,
+        )
+    messages.success(request, "Rekomendasi Design dibatalkan.")
+    return redirect("rnd:design_detail", design_id=design.id)
 
 
 @login_required

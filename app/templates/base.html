@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="light">
     <title>Vobia Space - {% block title %}ERP{% endblock %}</title>
     <link rel="icon" type="image/png" href="{% static 'img/vobia-tiktok-app-icon.png' %}?v=20260831">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260903-06">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260903-07">
     <script src="{% static 'js/app.js' %}?v=20260829-02" defer></script>
 </head>
 <body>
@@ -27,6 +27,7 @@
                 {% if request.resolver_match.namespace == 'rnd' %}
                 <span class="nav-label">R&amp;D</span>
                 <a class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'rnd:dashboard' %}"><span>Collection R&amp;D</span></a>
+                <a class="nav-item {% if 'design' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'rnd:designing' %}"><span>Designing</span></a>
                 {% elif request.resolver_match.url_name == 'instagram_connection' or request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'campaign_list' or request.resolver_match.url_name == 'campaign_create' or request.resolver_match.url_name == 'campaign_edit' or request.resolver_match.url_name == 'campaign_detail' or 'partnership_' in request.resolver_match.url_name or 'upcoming_collection' in request.resolver_match.url_name %}
                 <span class="nav-label">MARKETING</span>
                 <a class="nav-item {% if request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'instagram_connection' %}active{% endif %}" href="{% url 'dashboard:instagram_dashboard' %}">Dashboard</a>

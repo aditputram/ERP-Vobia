@@ -1,6 +1,7 @@
 import tempfile
 from io import BytesIO
 from decimal import Decimal
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -16,6 +17,7 @@ from master_data.models import Product
 
 from .models import (
     Collection,
+    DesignAsset,
     DevelopmentProduct,
     DevelopmentProductDocumentRevision,
     MarketingRecommendation,
@@ -130,6 +132,55 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(collection.products.values("working_code").distinct().count(), 2)
         self.assertTrue(all(product.working_code.startswith("RND-") for product in collection.products.all()))
         self.assertEqual(Product.objects.count(), 0)
+
+    def test_designing_upload_and_approve_only_recommendation(self):
+        self.client.force_login(self.rnd_editor)
+        uploaded = self.client.post(
+            reverse("rnd:designing"),
+            {
+                "image": SimpleUploadedFile(
+                    "draft-flannel.png",
+                    b"\x89PNG\r\n\x1a\nlocal design",
+                    content_type="image/png",
+                )
+            },
+        )
+        self.assertRedirects(uploaded, reverse("rnd:designing"))
+        design = DesignAsset.objects.get()
+        page = self.client.get(reverse("rnd:designing"))
+        self.assertContains(page, "Desain Terbaru")
+        self.assertContains(page, "Direkomendasikan untuk Collection Baru")
+        self.assertContains(page, design.original_name)
+        detail = self.client.get(reverse("rnd:design_detail", args=[design.id]))
+        self.assertNotContains(detail, "Rekomendasikan untuk Collection Baru</button>")
+        denied = self.client.post(reverse("rnd:design_recommend", args=[design.id]))
+        self.assertEqual(denied.status_code, 403)
+
+        self.client.force_login(self.rnd_approver)
+        recommended = self.client.post(reverse("rnd:design_recommend", args=[design.id]))
+        self.assertRedirects(recommended, reverse("rnd:design_detail", args=[design.id]))
+        design.refresh_from_db()
+        self.assertIsNotNone(design.recommended_at)
+        self.assertEqual(design.recommended_by, self.rnd_approver)
+        self.assertEqual(Collection.objects.count(), 0)
+        self.assertEqual(DevelopmentProduct.objects.count(), 0)
+        page = self.client.get(reverse("rnd:designing"))
+        self.assertContains(page, "Direkomendasikan")
+
+        cancelled = self.client.post(reverse("rnd:design_unrecommend", args=[design.id]))
+        self.assertRedirects(cancelled, reverse("rnd:design_detail", args=[design.id]))
+        design.refresh_from_db()
+        self.assertIsNone(design.recommended_at)
+
+        DesignAsset.objects.filter(pk=design.pk).update(created_at=timezone.now() - timedelta(days=8))
+        archive = self.client.get(reverse("rnd:designing"))
+        self.assertContains(archive, "Design Lainnya")
+
+        file_response = self.client.get(reverse("rnd:design_file", args=[design.id]))
+        self.assertEqual(file_response.status_code, 200)
+        self.assertEqual(file_response["Cache-Control"], "private, no-store")
+        self.client.logout()
+        self.assertEqual(self.client.get(reverse("rnd:design_file", args=[design.id])).status_code, 302)
 
     def test_product_form_is_minimal_and_accepts_private_design_files(self):
         collection = self._collection()

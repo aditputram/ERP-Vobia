@@ -250,10 +250,15 @@ def product_detail(request, product_id):
             "rnd:product_revision_file",
             args=(product.id, selected_revision),
         )
+        viewer_version = selected_revision_record.updated_at
     elif selected_revision == product.document_revision and product.mockup and product.technical_drawing:
         viewer_url = reverse("rnd:product_file", args=(product.id, "combined-preview"))
+        viewer_version = product.updated_at
     else:
         viewer_url = ""
+        viewer_version = None
+    if viewer_url and viewer_version:
+        viewer_url = f"{viewer_url}?v={int(viewer_version.timestamp())}"
     return render(
         request,
         "rnd/product_detail.html",
@@ -304,6 +309,7 @@ def product_file(request, product_id, file_kind):
             content_type="application/pdf",
         )
         response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
         return response
     field = {
         "product-cover": product.product_cover,
@@ -321,6 +327,7 @@ def product_file(request, product_id, file_kind):
         content_type=guess_type(field.name)[0] or "application/octet-stream",
     )
     response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = "private, no-store"
     return response
 
 
@@ -342,6 +349,7 @@ def product_revision_file(request, product_id, revision):
         content_type="application/pdf",
     )
     response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = "private, no-store"
     return response
 
 

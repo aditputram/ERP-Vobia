@@ -1,0 +1,14 @@
+<form class="rnd-revision-request-form" method="post" action="{% url 'rnd:product_request_revision' product.id %}">
+    {% csrf_token %}
+    <fieldset>
+        <legend>Bagian yang harus direvisi</legend>
+        <div class="rnd-revision-targets">
+            <label><input type="radio" name="revision_target" value="MOCKUP" required{% if selected_revision_record.revision_target == 'MOCKUP' %} checked{% endif %}> MDR / Mockup</label>
+            <label><input type="radio" name="revision_target" value="TECHNICAL_DRAWING"{% if selected_revision_record.revision_target == 'TECHNICAL_DRAWING' %} checked{% endif %}> Technical Drawing</label>
+            <label><input type="radio" name="revision_target" value="BOTH"{% if selected_revision_record.revision_target == 'BOTH' %} checked{% endif %}> Keduanya</label>
+        </div>
+    </fieldset>
+    <label for="revision-note">Notes revisi</label>
+    <textarea id="revision-note" name="revision_note" rows="3" maxlength="2000" required placeholder="Jelaskan bagian yang harus direvisi.">{{ selected_revision_record.revision_note }}</textarea>
+    <button class="secondary-button" type="submit">{{ button_label }}</button>
+</form>

@@ -33,8 +33,8 @@ MODULES = (
         "name": "RnD",
         "eyebrow": "PRODUCT DEVELOPMENT",
         "description": "Riset produk, sampling, material, costing awal, dan lifecycle development.",
-        "status": "Segera hadir",
-        "available": False,
+        "status": "Fondasi aktif",
+        "available": True,
         "accent": "violet",
         "image": "img/modules/module-rnd.jpg",
         "image_position": "center 52%",
@@ -79,7 +79,11 @@ MODULES = (
 def index(request):
     access = request.user.module_access or {}
     modules = [
-        {**module, "accessible": request.user.is_superuser or access.get(module["slug"], "approve") != "none"}
+        {
+            **module,
+            "accessible": request.user.is_superuser
+            or access.get(module["slug"], "none" if module["slug"] == "rnd" else "approve") != "none",
+        }
         for module in MODULES
     ]
     return render(request, "dashboard/index.html", {"modules": modules})
@@ -97,7 +101,8 @@ def enter_module(request, module_slug):
             f"Modul {module['name']} sudah masuk roadmap dan akan diaktifkan setelah proses bisnisnya siap.",
         )
         return redirect("dashboard:index")
-    if not request.user.is_superuser and (request.user.module_access or {}).get(module_slug, "approve") == "none":
+    default_level = "none" if module_slug == "rnd" else "approve"
+    if not request.user.is_superuser and (request.user.module_access or {}).get(module_slug, default_level) == "none":
         messages.error(request, "yang tidak berkepentingan dilarang masuk!")
         return redirect("dashboard:index")
 
@@ -113,6 +118,8 @@ def enter_module(request, module_slug):
         return redirect("sales:dashboard")
     if module_slug == "marketing":
         return redirect("dashboard:instagram_dashboard")
+    if module_slug == "rnd":
+        return redirect("rnd:dashboard")
     return redirect("merchandising:overview")
 
 

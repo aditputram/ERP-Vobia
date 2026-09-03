@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="light">
     <title>Vobia Space - {% block title %}ERP{% endblock %}</title>
     <link rel="icon" type="image/png" href="{% static 'img/vobia-tiktok-app-icon.png' %}?v=20260831">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260831-10">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260903-06">
     <script src="{% static 'js/app.js' %}?v=20260829-02" defer></script>
 </head>
 <body>
@@ -19,17 +19,20 @@
             </a>
 
             <a class="module-switcher" href="{% url 'dashboard:index' %}">
-                <span>{% if request.resolver_match.url_name == 'instagram_connection' or request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'campaign_list' or request.resolver_match.url_name == 'campaign_create' or request.resolver_match.url_name == 'campaign_edit' or request.resolver_match.url_name == 'campaign_detail' or 'partnership_' in request.resolver_match.url_name %}Marketing{% elif request.session.active_module == 'operation' and request.resolver_match.namespace != 'sales' and request.resolver_match.namespace != 'traffic' and '/imports/sales/' not in request.path %}Operation{% else %}Sales{% endif %}</span>
+                <span>{% if request.resolver_match.namespace == 'rnd' %}RnD{% elif request.resolver_match.url_name == 'instagram_connection' or request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'campaign_list' or request.resolver_match.url_name == 'campaign_create' or request.resolver_match.url_name == 'campaign_edit' or request.resolver_match.url_name == 'campaign_detail' or 'partnership_' in request.resolver_match.url_name or 'upcoming_collection' in request.resolver_match.url_name %}Marketing{% elif request.session.active_module == 'operation' and request.resolver_match.namespace != 'sales' and request.resolver_match.namespace != 'traffic' and '/imports/sales/' not in request.path %}Operation{% else %}Sales{% endif %}</span>
                 <small>Ganti modul</small>
             </a>
 
             <nav class="navigation" aria-label="Navigasi utama">
-                {% if request.resolver_match.url_name == 'instagram_connection' or request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'campaign_list' or request.resolver_match.url_name == 'campaign_create' or request.resolver_match.url_name == 'campaign_edit' or request.resolver_match.url_name == 'campaign_detail' or 'partnership_' in request.resolver_match.url_name %}
+                {% if request.resolver_match.namespace == 'rnd' %}
+                <span class="nav-label">R&amp;D</span>
+                <a class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'rnd:dashboard' %}"><span>Collection R&amp;D</span></a>
+                {% elif request.resolver_match.url_name == 'instagram_connection' or request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'campaign_list' or request.resolver_match.url_name == 'campaign_create' or request.resolver_match.url_name == 'campaign_edit' or request.resolver_match.url_name == 'campaign_detail' or 'partnership_' in request.resolver_match.url_name or 'upcoming_collection' in request.resolver_match.url_name %}
                 <span class="nav-label">MARKETING</span>
                 <a class="nav-item {% if request.resolver_match.url_name == 'instagram_dashboard' or request.resolver_match.url_name == 'instagram_connection' %}active{% endif %}" href="{% url 'dashboard:instagram_dashboard' %}">Dashboard</a>
                 <a class="nav-item {% if request.resolver_match.url_name == 'campaign_list' or request.resolver_match.url_name == 'campaign_create' or request.resolver_match.url_name == 'campaign_edit' or request.resolver_match.url_name == 'campaign_detail' %}active{% endif %}" href="{% url 'dashboard:campaign_list' %}">Campaign/Project</a>
                 <a class="nav-item {% if 'partnership_' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'dashboard:partnership_list' %}">Partnership</a>
-                <span class="nav-item" aria-disabled="true">Upcoming Collection · belum aktif</span>
+                <a class="nav-item {% if 'upcoming_collection' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'dashboard:upcoming_collection_list' %}">Upcoming Collection</a>
                 {% elif request.session.active_module == 'operation' and request.resolver_match.namespace != 'sales' and request.resolver_match.namespace != 'traffic' and '/imports/sales/' not in request.path %}
                 <span class="nav-label">OPERATION</span>
                 <button class="nav-item nav-group-toggle {% if request.resolver_match.namespace == 'merchandising' %}active{% endif %}" type="button" data-nav-group-toggle="merchandising" data-nav-group-active="{% if request.resolver_match.namespace == 'merchandising' %}true{% else %}false{% endif %}" aria-expanded="{% if request.resolver_match.namespace == 'merchandising' %}true{% else %}false{% endif %}"><span>Merchandising</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Upcoming Collection · Marketing{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">MARKETING · MARKET VALIDATION</p><h1>Upcoming Collection</h1><p>Collection Final R&amp;D untuk cek ombak, riset market, dan rekomendasi Product sebelum keputusan resmi.</p></div></header>
+<section class="panel"><div class="table-wrap"><table><thead><tr><th>Collection</th><th>Product</th><th>Status</th><th>Handover</th><th></th></tr></thead><tbody>
+{% for collection in collections %}<tr><td><strong>{{ collection.code }}</strong><br>{{ collection.name }}</td><td>{{ collection.product_count }}</td><td>{{ collection.get_status_display }}</td><td>{{ collection.handed_over_at|date:"d M Y H:i"|default:"—" }}</td><td><a class="row-link" href="{% url 'dashboard:upcoming_collection_detail' collection.id %}">Review →</a></td></tr>{% empty %}<tr><td colspan="5">Belum ada Collection yang di-handover R&amp;D.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

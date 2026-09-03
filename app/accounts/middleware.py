@@ -9,6 +9,7 @@ MODULE_PATHS = (
     ("/purchasing/", "operation"),
     ("/production/", "operation"),
     ("/inventory/", "operation"),
+    ("/rnd/", "rnd"),
     ("/marketing/", "marketing"),
     ("/master-data/", "master_data"),
     ("/imports/master/", "master_data"),
@@ -30,8 +31,9 @@ class ModuleAccessMiddleware:
         if user.is_authenticated and not user.is_superuser:
             module = next((key for prefix, key in MODULE_PATHS if request.path.startswith(prefix)), None)
             if module:
-                # Akun lama tanpa konfigurasi mempertahankan akses sebelum fitur ini hadir.
-                level = (user.module_access or {}).get(module, "approve")
+                # Modul lama mempertahankan akses sebelumnya; modul baru harus diberikan eksplisit.
+                default_level = "none" if module == "rnd" else "approve"
+                level = (user.module_access or {}).get(module, default_level)
                 if level == "none":
                     return HttpResponseForbidden("Akun ini tidak memiliki akses ke modul tersebut.")
                 if request.method not in {"GET", "HEAD", "OPTIONS"}:

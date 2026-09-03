@@ -8,6 +8,7 @@ from .tiktok_business import callback as tiktok_business_callback, oauth_start a
 from .campaigns import campaign_cover, campaign_create, campaign_delete, campaign_detail, campaign_edit, campaign_list
 from .partnerships import partnership_create, partnership_delete, partnership_detail, partnership_edit, partnership_list
 from .social_sync import scheduled_sync
+from rnd import views as rnd_views
 
 
 app_name = "dashboard"
@@ -15,6 +16,12 @@ app_name = "dashboard"
 urlpatterns = [
     path("internal/social-sync/", scheduled_sync, name="scheduled_social_sync"),
     path("marketing/", instagram_dashboard, name="instagram_dashboard"),
+    path("marketing/upcoming-collections/", rnd_views.upcoming_collection_list, name="upcoming_collection_list"),
+    path("marketing/upcoming-collections/<uuid:collection_id>/", rnd_views.upcoming_collection_detail, name="upcoming_collection_detail"),
+    path("marketing/upcoming-collections/products/<uuid:product_id>/recommend/", rnd_views.upcoming_collection_recommend, name="upcoming_collection_recommend"),
+    path("marketing/upcoming-collections/products/<uuid:product_id>/files/<slug:file_kind>/", rnd_views.product_file, name="upcoming_collection_product_file"),
+    path("marketing/upcoming-collections/products/<uuid:product_id>/official-approve/", rnd_views.upcoming_collection_official_approve, name="upcoming_collection_official_approve"),
+    path("marketing/upcoming-collections/<uuid:collection_id>/commercial-approve/", rnd_views.upcoming_collection_commercial_approve, name="upcoming_collection_commercial_approve"),
     path("marketing/instagram/", connection, name="instagram_connection"),
     path("marketing/tiktok/", tiktok_connection, name="tiktok_connection"),
     path("marketing/tiktok/connect/", tiktok_oauth_start, name="tiktok_oauth_start"),

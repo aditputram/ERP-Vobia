@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "reconciliation",
     "traffic",
     "dashboard",
+    "rnd",
 ]
 
 MIDDLEWARE = [

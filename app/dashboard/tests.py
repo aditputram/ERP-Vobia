@@ -66,7 +66,7 @@ class DashboardAccessTests(TestCase):
         self.client.force_login(user)
 
         dashboard = self.client.get(reverse("dashboard:index"))
-        self.assertContains(dashboard, '<button class="module-card-action" type="button" data-access-warning>', count=2)
+        self.assertContains(dashboard, '<button class="module-card-action" type="button" data-access-warning>', count=3)
         self.assertContains(dashboard, "yang tidak berkepentingan dilarang masuk!")
 
         denied = self.client.get(reverse("dashboard:enter_module", args=["operation"]), follow=True)
@@ -111,6 +111,44 @@ class DashboardAccessTests(TestCase):
         response = self.client.get(reverse("dashboard:enter_module", args=["operation"]))
         self.assertRedirects(response, reverse("merchandising:overview"))
         self.assertEqual(self.client.session["active_module"], "operation")
+
+    def test_rnd_module_sets_context_and_opens_foundation_dashboard(self):
+        user = get_user_model().objects.create_superuser(
+            username="vobiasuperadmin",
+            password="AmanSekali-ERP-2026!",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard:enter_module", args=["rnd"]))
+
+        self.assertRedirects(response, reverse("rnd:dashboard"))
+        self.assertEqual(self.client.session["active_module"], "rnd")
+        dashboard = self.client.get(reverse("rnd:dashboard"))
+        self.assertContains(dashboard, "Collection R&amp;D")
+        self.assertContains(dashboard, "Buat Collection")
+
+    def test_rnd_dashboard_respects_module_access(self):
+        user = get_user_model().objects.create_user(
+            username="rnd.blocked",
+            password="AmanSekali-ERP-2026!",
+            module_access={"rnd": "none"},
+        )
+        self.client.force_login(user)
+
+        self.assertEqual(self.client.get(reverse("rnd:dashboard")).status_code, 403)
+
+    def test_existing_user_without_rnd_setting_does_not_gain_access(self):
+        user = get_user_model().objects.create_user(
+            username="legacy.user",
+            password="AmanSekali-ERP-2026!",
+            module_access={"sales": "edit"},
+        )
+        self.client.force_login(user)
+
+        selector = self.client.get(reverse("dashboard:index"))
+        rnd_module = next(item for item in selector.context["modules"] if item["slug"] == "rnd")
+        self.assertFalse(rnd_module["accessible"])
+        self.assertEqual(self.client.get(reverse("rnd:dashboard")).status_code, 403)
 
     def test_future_module_stays_on_selector_with_clear_status(self):
         user = get_user_model().objects.create_superuser(

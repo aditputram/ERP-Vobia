@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{{ collection.name }} · R&amp;D{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div><p class="eyebrow">R&amp;D · {{ collection.code }}</p><h1>{{ collection.name }}</h1><p>{{ collection.objective|default:"Objective Collection belum diisi." }}</p></div>
+    <div class="header-actions"><span class="status-chip"><span></span>{{ collection.get_status_display }}</span><a class="secondary-button" href="{% url 'rnd:dashboard' %}">Daftar Collection</a></div>
+</header>
+<section class="metric-grid three">
+    <article class="metric-card"><span>Status Collection</span><strong>{{ collection.get_status_display }}</strong></article>
+    <article class="metric-card"><span>Total Product</span><strong>{{ products|length }}</strong></article>
+    <article class="metric-card"><span>Gate Final R&amp;D</span><strong>{% if all_final %}Siap{% else %}Belum siap{% endif %}</strong></article>
+</section>
+<section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">PRODUCT DEVELOPMENT</p><h2>Product dalam Collection</h2></div></div>
+    {% if products %}<div class="rnd-product-grid">
+        {% for product in products %}<a class="rnd-product-card" href="{% url 'rnd:product_detail' product.id %}">
+            <div class="rnd-product-card-top"><span class="pill">{{ product.category|default:"Belum berkategori" }}</span><span class="status-chip"><span></span>{{ product.get_document_status_display }}</span></div>
+            {% if product.product_cover %}<div class="rnd-product-card-cover"><img src="{% url 'rnd:product_file' product.id 'product-cover' %}" alt="Product cover {{ product.name }}" loading="lazy"></div>{% endif %}
+            <div class="rnd-product-card-copy"><h3>{{ product.name }}</h3><p>{% if product.material_count %}{{ product.material_count }} material{% else %}BOM belum diisi{% endif %} · Rev {{ product.document_revision|stringformat:"03d" }}</p></div>
+            <div class="rnd-product-card-footer"><span>{{ product.get_status_display }}</span><strong>Buka dokumen <span aria-hidden="true">→</span></strong></div>
+        </a>{% endfor %}
+    </div>{% else %}<div class="empty-state">Belum ada Product dalam Collection ini.</div>{% endif %}
+</section>
+{% if editable %}<section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">ADD PRODUCT</p><h2>Tambah Product</h2></div></div><form method="post" enctype="multipart/form-data" class="stack-form">{% csrf_token %}{{ product_form.as_p }}{% include "rnd/_material_formset.html" %}<button class="secondary-button" type="submit">Tambah Product</button></form></section>{% endif %}
+<section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">HARD GATE</p><h2>Handover ke Marketing</h2></div></div>
+    {% if collection.status == 'MARKETING_REVIEW' or collection.status == 'COMMERCIAL_APPROVED' %}<p>Collection sudah masuk tab Upcoming Collection Marketing{% if collection.handed_over_at %} pada {{ collection.handed_over_at|date:"d M Y H:i" }}{% endif %}.</p>
+    {% else %}<p>Handover hanya dapat dilakukan setelah seluruh Product berstatus Final R&amp;D. Hanya akun dengan akses Approve R&amp;D yang dapat menjalankannya.</p><form method="post" action="{% url 'rnd:collection_handover' collection.id %}">{% csrf_token %}<button class="primary-button" type="submit"{% if not all_final or not can_handover %} disabled{% endif %}>Handover ke Marketing</button></form>{% endif %}
+</section>
+<script src="{% static 'js/rnd-materials.js' %}?v=20260901-01" defer></script>
+{% endblock %}

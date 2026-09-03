@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 MODULES = (
     ("sales", "Sales"),
     ("operation", "Operation"),
+    ("rnd", "RnD"),
     ("marketing", "Marketing"),
     ("master_data", "Master Data"),
     ("reconciliation", "Reconciliation"),

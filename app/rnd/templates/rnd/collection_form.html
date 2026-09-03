@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Buat Collection R&amp;D · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">R&amp;D · COLLECTION</p><h1>Buat Collection</h1><p>Collection menjadi project induk untuk seluruh Product yang dikembangkan bersama.</p></div><a class="secondary-button" href="{% url 'rnd:dashboard' %}">Batal</a></header>
+<form method="post" class="stack-form">{% csrf_token %}<section class="panel">{{ form.as_p }}</section><button class="primary-button section-gap" type="submit">Simpan Collection</button></form>
+{% endblock %}

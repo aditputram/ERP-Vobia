@@ -170,6 +170,7 @@ class UserManagementTests(TestCase):
                 "password": "Marketing-Aman-2026!",
                 "access_sales": "view",
                 "access_operation": "none",
+                "access_rnd": "none",
                 "access_marketing": "edit",
                 "access_master_data": "view",
                 "access_reconciliation": "none",

@@ -1,0 +1,31 @@
+<section class="rnd-bom" data-material-formset>
+    <div class="panel-header">
+        <div><p class="eyebrow">PRODUCT MATERIAL</p><h3>Bill of Material (BOM)</h3></div>
+    </div>
+    {{ material_formset.management_form }}
+    {{ material_formset.non_form_errors }}
+    <div class="table-wrap">
+        <table class="rnd-bom-table">
+            <thead><tr><th>Material</th><th>Kebutuhan</th><th>EOM / Satuan</th><th></th></tr></thead>
+            <tbody data-material-rows>
+                {% for row in material_formset %}
+                <tr data-material-row{% if row.DELETE.value %} hidden{% endif %}>
+                    <td>{{ row.id }}{{ row.DELETE.as_hidden }}{{ row.material.errors }}{{ row.material }}</td>
+                    <td>{{ row.requirement.errors }}{{ row.requirement }}</td>
+                    <td>{{ row.eom.errors }}{{ row.eom }}</td>
+                    <td><button class="text-button" type="button" data-remove-material>Hapus</button></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <button class="secondary-button compact" type="button" data-add-material>+ Tambah Material</button>
+    <template data-material-template>
+        <tr data-material-row>
+            <td>{{ material_formset.empty_form.id }}{{ material_formset.empty_form.DELETE.as_hidden }}{{ material_formset.empty_form.material }}</td>
+            <td>{{ material_formset.empty_form.requirement }}</td>
+            <td>{{ material_formset.empty_form.eom }}</td>
+            <td><button class="text-button" type="button" data-remove-material>Hapus</button></td>
+        </tr>
+    </template>
+</section>

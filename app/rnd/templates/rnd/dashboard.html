@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}R&amp;D · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div><p class="eyebrow">R&amp;D · PRODUCT DEVELOPMENT</p><h1>Collection R&amp;D</h1><p>Satu Collection adalah satu project. Seluruh Product wajib Final R&amp;D sebelum handover ke Marketing.</p></div>
+    <a class="primary-button" href="{% url 'rnd:collection_create' %}">Buat Collection</a>
+</header>
+<section class="metric-grid three">
+    <article class="metric-card"><span>Total Collection</span><strong>{{ collection_count }}</strong></article>
+    <article class="metric-card"><span>Dalam Development</span><strong>{{ development_count }}</strong></article>
+    <article class="metric-card"><span>Marketing Review</span><strong>{{ marketing_review_count }}</strong></article>
+</section>
+<section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">PROJECT PIPELINE</p><h2>Daftar Collection</h2></div></div>
+    <div class="table-wrap"><table><thead><tr><th>Collection</th><th>Product</th><th>Final R&amp;D</th><th>Status</th><th></th></tr></thead><tbody>
+        {% for collection in collections %}<tr><td><strong>{{ collection.code }}</strong><br>{{ collection.name }}</td><td>{{ collection.product_count }}</td><td>{{ collection.final_count }} / {{ collection.product_count }}</td><td>{{ collection.get_status_display }}</td><td><a class="row-link" href="{% url 'rnd:collection_detail' collection.id %}">Detail →</a></td></tr>
+        {% empty %}<tr><td colspan="5">Belum ada Collection R&amp;D.</td></tr>{% endfor %}
+    </tbody></table></div>
+</section>
+{% endblock %}

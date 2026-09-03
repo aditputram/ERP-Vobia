@@ -35,6 +35,7 @@ from .services import (
     approve_collection_commercially,
     approve_product_document,
     can_approve_module,
+    delete_collection,
     finalize_product,
     handover_to_marketing,
     move_product_to_costing,
@@ -465,6 +466,22 @@ def collection_handover(request, collection_id):
     else:
         messages.success(request, "Collection berhasil di-handover ke Marketing Upcoming Collection.")
     return redirect("rnd:collection_detail", collection_id=collection.id)
+
+
+@login_required
+@require_POST
+def collection_delete(request, collection_id):
+    collection = get_object_or_404(Collection, id=collection_id)
+    collection_name = collection.name
+    try:
+        delete_collection(collection=collection, actor=request.user)
+    except ValidationError as exc:
+        messages.error(request, _validation_message(exc))
+        return redirect("rnd:collection_detail", collection_id=collection.id)
+    except PermissionDenied:
+        return HttpResponseForbidden("Delete Collection memerlukan akses Approve R&D.")
+    messages.success(request, f"Collection {collection_name} beserta seluruh Product berhasil dihapus.")
+    return redirect("rnd:dashboard")
 
 
 @login_required

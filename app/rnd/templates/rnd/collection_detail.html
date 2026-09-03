@@ -4,7 +4,7 @@
 {% block content %}
 <header class="page-header">
     <div><p class="eyebrow">R&amp;D · {{ collection.code }}</p><h1>{{ collection.name }}</h1><p>{{ collection.objective|default:"Objective Collection belum diisi." }}</p></div>
-    <div class="header-actions"><span class="status-chip"><span></span>{{ collection.get_status_display }}</span><a class="secondary-button" href="{% url 'rnd:dashboard' %}">Daftar Collection</a></div>
+    <div class="header-actions"><span class="status-chip"><span></span>{{ collection.get_status_display }}</span>{% if editable and can_handover %}<form method="post" action="{% url 'rnd:collection_delete' collection.id %}" onsubmit="return confirm('Hapus Collection {{ collection.name|escapejs }} beserta seluruh Product, BOM, dokumen, dan revisinya? Tindakan ini tidak dapat dibatalkan.');">{% csrf_token %}<button class="secondary-button danger-button" type="submit">Delete Collection</button></form>{% endif %}<a class="secondary-button" href="{% url 'rnd:dashboard' %}">Daftar Collection</a></div>
 </header>
 <section class="metric-grid three">
     <article class="metric-card"><span>Status Collection</span><strong>{{ collection.get_status_display }}</strong></article>

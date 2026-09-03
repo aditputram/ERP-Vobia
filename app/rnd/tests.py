@@ -11,6 +11,7 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, NameObject
 from reportlab.pdfgen import canvas
 
+from audit.models import AuditEvent
 from master_data.models import Product
 
 from .models import (
@@ -628,6 +629,53 @@ class RndWorkflowTests(TestCase):
             self._product_payload(first, DevelopmentProduct.Status.REVISION),
         )
         self.assertEqual(locked.status_code, 403)
+
+    def test_collection_delete_requires_rnd_approve_and_removes_private_files(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.mockup.save("delete-me.pdf", self._pdf("delete-me.pdf", "MDR"), save=True)
+        mockup_name = product.mockup.name
+        storage = product.mockup.storage
+
+        self.client.force_login(self.rnd_editor)
+        page = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
+        self.assertNotContains(page, "Delete Collection")
+        denied = self.client.post(reverse("rnd:collection_delete", args=[collection.id]))
+        self.assertEqual(denied.status_code, 403)
+        self.assertTrue(Collection.objects.filter(pk=collection.id).exists())
+
+        self.client.force_login(self.rnd_approver)
+        page = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
+        self.assertContains(page, "Delete Collection")
+        with self.captureOnCommitCallbacks(execute=True):
+            deleted = self.client.post(reverse("rnd:collection_delete", args=[collection.id]))
+        self.assertRedirects(deleted, reverse("rnd:dashboard"))
+        self.assertFalse(Collection.objects.filter(pk=collection.id).exists())
+        self.assertFalse(DevelopmentProduct.objects.filter(pk=product.id).exists())
+        self.assertFalse(storage.exists(mockup_name))
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="rnd_collection_deleted",
+                entity_id=str(collection.id),
+            ).exists()
+        )
+
+    def test_collection_delete_is_blocked_after_marketing_handover(self):
+        collection = self._collection()
+        collection.status = Collection.Status.MARKETING_REVIEW
+        collection.handed_over_at = timezone.now()
+        collection.handed_over_by = self.rnd_approver
+        collection.save()
+        self.client.force_login(self.rnd_approver)
+
+        page = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
+        self.assertNotContains(page, "Delete Collection")
+        blocked = self.client.post(
+            reverse("rnd:collection_delete", args=[collection.id]),
+            follow=True,
+        )
+        self.assertContains(blocked, "sudah di-handover ke Marketing tidak dapat dihapus")
+        self.assertTrue(Collection.objects.filter(pk=collection.id).exists())
 
     def test_approved_product_moves_through_costing_before_approver_sets_final(self):
         collection = self._collection()

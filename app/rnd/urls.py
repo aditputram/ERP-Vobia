@@ -9,6 +9,7 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("collections/new/", views.collection_create, name="collection_create"),
     path("collections/<uuid:collection_id>/", views.collection_detail, name="collection_detail"),
+    path("collections/<uuid:collection_id>/delete/", views.collection_delete, name="collection_delete"),
     path("collections/<uuid:collection_id>/handover/", views.collection_handover, name="collection_handover"),
     path("products/<uuid:product_id>/", views.product_detail, name="product_detail"),
     path("products/<uuid:product_id>/submit-approval/", views.product_submit_approval, name="product_submit"),

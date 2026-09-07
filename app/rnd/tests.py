@@ -193,7 +193,7 @@ class RndWorkflowTests(TestCase):
         self.assertContains(page, "EOM / Satuan")
         self.assertContains(page, "+ Tambah Material")
         self.assertContains(page, "Upload Product Cover")
-        self.assertContains(page, "Upload MDR")
+        self.assertContains(page, "Upload Mockup")
         self.assertContains(page, "Upload Technical Drawing")
         for removed_label in (
             "Working Code",
@@ -295,7 +295,7 @@ class RndWorkflowTests(TestCase):
         self.assertNotContains(product_page, "Simpan Product")
         self.assertContains(product_page, preview_url)
         self.assertContains(product_page, f'{preview_url}?v=')
-        self.assertContains(product_page, "Preview MDR dan Technical Drawing")
+        self.assertContains(product_page, "Preview Mockup Development Request")
         self.assertContains(product_page, "Klik area PDF untuk scroll dan mengatur zoom.")
         self.assertContains(product_page, 'scrolling="yes"')
         self.assertContains(product_page, 'tabindex="0"')
@@ -539,7 +539,7 @@ class RndWorkflowTests(TestCase):
         )
         revision_page = self.client.get(reverse("rnd:product_detail", args=[product.id]))
         self.assertContains(revision_page, "Target revisi:")
-        self.assertContains(revision_page, "MDR / Mockup")
+        self.assertContains(revision_page, "Mockup")
         self.assertContains(revision_page, "Notes revisi:")
         self.assertContains(revision_page, "Perbaiki ukuran kerah dan posisi kancing.")
 
@@ -555,7 +555,7 @@ class RndWorkflowTests(TestCase):
         )
         self.assertContains(
             missing_revised_mockup,
-            "Upload MDR / Mockup baru sesuai permintaan revisi.",
+            "Upload Mockup baru sesuai permintaan revisi.",
         )
         product.refresh_from_db()
         self.assertEqual(product.document_revision, 0)
@@ -609,7 +609,7 @@ class RndWorkflowTests(TestCase):
             reverse("rnd:product_submit", args=[product.id]),
             follow=True,
         )
-        self.assertContains(response, "MDR dan Technical Drawing wajib tersedia")
+        self.assertContains(response, "Mockup dan Technical Drawing wajib tersedia")
         product.refresh_from_db()
         self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.DRAFT)
         self.assertFalse(product.submitted_document)

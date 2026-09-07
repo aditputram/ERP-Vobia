@@ -87,7 +87,7 @@ class DevelopmentProductForm(forms.ModelForm):
         labels = {
             "name": "Nama Product",
             "product_cover": "Upload Product Cover",
-            "mockup": "Upload MDR",
+            "mockup": "Upload Mockup",
             "technical_drawing": "Upload Technical Drawing",
         }
         help_texts = {

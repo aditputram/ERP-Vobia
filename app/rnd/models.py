@@ -160,9 +160,9 @@ class DevelopmentProductDocumentRevision(UUIDTimestampedModel):
         REVISION_REQUESTED = "REVISION_REQUESTED", "Revisi Diminta"
 
     class RevisionTarget(models.TextChoices):
-        MOCKUP = "MOCKUP", "MDR / Mockup"
+        MOCKUP = "MOCKUP", "Mockup"
         TECHNICAL_DRAWING = "TECHNICAL_DRAWING", "Technical Drawing"
-        BOTH = "BOTH", "MDR / Mockup dan Technical Drawing"
+        BOTH = "BOTH", "Mockup dan Technical Drawing"
 
     product = models.ForeignKey(
         DevelopmentProduct,

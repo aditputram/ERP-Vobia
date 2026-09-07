@@ -301,7 +301,7 @@ def product_detail(request, product_id):
                     DevelopmentProductDocumentRevision.RevisionTarget.MOCKUP,
                     DevelopmentProductDocumentRevision.RevisionTarget.BOTH,
                 } and "mockup" not in request.FILES:
-                    form.add_error("mockup", "Upload MDR / Mockup baru sesuai permintaan revisi.")
+                    form.add_error("mockup", "Upload Mockup baru sesuai permintaan revisi.")
                     form_is_valid = False
                 if target in {
                     DevelopmentProductDocumentRevision.RevisionTarget.TECHNICAL_DRAWING,
@@ -500,7 +500,7 @@ def product_submit_approval(request, product_id):
     except ValidationError as exc:
         messages.error(request, _validation_message(exc))
     else:
-        messages.success(request, "MDR dan Technical Drawing berhasil digabung dan diajukan.")
+        messages.success(request, "Mockup dan Technical Drawing berhasil digabung menjadi MDR dan diajukan.")
     return redirect("rnd:product_detail", product_id=product.id)
 
 
@@ -537,7 +537,7 @@ def product_request_revision(request, product_id):
     else:
         messages.success(
             request,
-            f"Revisi {product.document_revision:03d} diminta. Upload MDR dan Technical Drawing baru.",
+            f"Revisi {product.document_revision:03d} diminta. Upload file sesuai target revisi.",
         )
     return redirect("rnd:product_detail", product_id=product.id)
 

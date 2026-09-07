@@ -140,7 +140,7 @@ def _stamp_page(page, *, writer, submitted_at, revision, approved_at=None, appro
 
 def build_combined_document(*, product, submitted_at=None, approved_at=None, approved_by=""):
     if not product.mockup or not product.technical_drawing:
-        raise ValidationError("MDR dan Technical Drawing wajib tersedia sebelum Submit Approval.")
+        raise ValidationError("Mockup dan Technical Drawing wajib tersedia sebelum Submit Approval.")
 
     readers = [_source_reader(field) for field in (product.mockup, product.technical_drawing)]
     writer = PdfWriter()

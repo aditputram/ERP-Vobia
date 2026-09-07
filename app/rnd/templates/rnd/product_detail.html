@@ -13,7 +13,7 @@
     <div class="panel-header"><div><p class="eyebrow">DOCUMENT APPROVAL</p><h2>MDR + Technical Drawing</h2></div><nav class="rnd-revision-selector" aria-label="Pilih revisi dokumen">{% for revision in revision_options %}<a href="{% url 'rnd:product_detail' product.id %}?revision={{ revision.number }}" class="{% if revision.selected %}active{% endif %}"{% if revision.selected %} aria-current="page"{% endif %}>{{ revision.label }}</a>{% endfor %}</nav></div>
     {% if viewer_url %}
         <div class="rnd-document-preview">
-            <iframe src="{{ viewer_url }}" title="Preview MDR dan Technical Drawing {{ product.name }} revisi {{ selected_revision|stringformat:'03d' }}" loading="eager" scrolling="yes" tabindex="0"></iframe>
+            <iframe src="{{ viewer_url }}#zoom=67" title="Preview MDR dan Technical Drawing {{ product.name }} revisi {{ selected_revision|stringformat:'03d' }}" loading="eager" scrolling="yes" tabindex="0"></iframe>
         </div>
         <p class="rnd-document-link"><span>Klik area PDF untuk scroll dan mengatur zoom.</span><a class="secondary-button" href="{{ viewer_url }}" target="_blank">Buka PDF di tab penuh</a></p>
     {% endif %}

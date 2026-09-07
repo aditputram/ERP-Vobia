@@ -25,7 +25,10 @@ from .tiktok import (
     get_report as get_tiktok_report,
 )
 from .models import SocialDailyMetric
-from .social_sync import daily_series, manual_refresh_state, period_metric, run_manual_refresh, sync_status
+from .social_sync import (
+    daily_series, manual_refresh_state, period_metric, run_manual_refresh,
+    supported_period_ranges, sync_status,
+)
 
 
 ACCOUNT_METRICS = {
@@ -416,16 +419,34 @@ def dashboard(request):
     can_refresh = request.user.is_superuser or access_level in {"edit", "approve"}
     if request.method == "POST" and not can_refresh:
         return HttpResponseForbidden("Refresh data memerlukan akses Input / Edit atau Approve Marketing.")
+    data = request.POST if request.method == "POST" else request.GET
+    form = PeriodForm(data or {"period": "7"})
+    required_range = None
+    period_snapshot_missing = False
+    if form.is_valid():
+        start, end = form.cleaned_data["date_from"], form.cleaned_data["date_to"]
+        cutoff = timezone.localdate() - timedelta(days=1)
+        if (start, end) in supported_period_ranges(cutoff):
+            required_range = (start, end)
+            period_snapshot_missing = any(
+                period_metric(platform, start, end) is None
+                for platform in (SocialDailyMetric.Platform.INSTAGRAM, SocialDailyMetric.Platform.TIKTOK)
+            )
     refresh_run = manual_refresh_state()
     refresh_claimed = False
     if request.method == "POST":
-        refresh_run, _daily_runs, refresh_claimed = run_manual_refresh(request.user.get_username())
+        refresh_run, _daily_runs, refresh_claimed = run_manual_refresh(
+            request.user.get_username(), required_range=required_range,
+        )
         if not refresh_claimed:
             message = "Refresh sedang berjalan." if refresh_run.status == refresh_run.Status.RUNNING else "Data sudah di-refresh hari ini."
             return HttpResponse(message, status=409)
+        if required_range:
+            period_snapshot_missing = any(
+                period_metric(platform, *required_range) is None
+                for platform in (SocialDailyMetric.Platform.INSTAGRAM, SocialDailyMetric.Platform.TIKTOK)
+            )
     request.session["active_module"] = "marketing"
-    data = request.POST if request.method == "POST" else request.GET
-    form = PeriodForm(data or {"period": "7"})
     report, error = None, ""
     comparison = None
     tiktok_report = None
@@ -518,4 +539,5 @@ def dashboard(request):
         "instagram_sync": instagram_sync,
         "tiktok_sync": tiktok_sync, "can_refresh": can_refresh,
         "manual_refresh_run": manual_refresh_state(),
+        "period_snapshot_missing": period_snapshot_missing,
     })

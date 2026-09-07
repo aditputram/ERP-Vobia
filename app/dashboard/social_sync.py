@@ -217,12 +217,26 @@ def _claim(platform, cutoff, source, actor, key, *, account=ACCOUNT):
     return run, True
 
 
-def sync_platform(platform, cutoff, *, lookback_days=4, source="scheduler", actor="", idempotency_key=None):
+def sync_platform(
+    platform, cutoff, *, lookback_days=4, source="scheduler", actor="",
+    idempotency_key=None, required_range=None,
+):
     key = idempotency_key or f"daily:{platform.lower()}:{cutoff.isoformat()}"
     run, claimed = _claim(platform, cutoff, source, actor, key)
     if not claimed:
         return run
-    days = [cutoff - timedelta(days=offset) for offset in reversed(range(lookback_days))]
+    days = {cutoff - timedelta(days=offset) for offset in range(lookback_days)}
+    if required_range:
+        start, end = required_range
+        existing = set(SocialDailyMetric.objects.filter(
+            platform=platform, account=ACCOUNT, date__range=(start, end),
+        ).values_list("date", flat=True))
+        days.update(
+            start + timedelta(days=offset)
+            for offset in range((end - start).days + 1)
+            if start + timedelta(days=offset) not in existing
+        )
+    days = sorted(days)
     try:
         rows = fetch_instagram_days(days) if platform == SocialDailyMetric.Platform.INSTAGRAM else fetch_tiktok_days(days)
         synced_at = timezone.now()
@@ -250,12 +264,16 @@ def sync_platform(platform, cutoff, *, lookback_days=4, source="scheduler", acto
     return run
 
 
-def sync_daily(*, cutoff=None, lookback_days=4, source="scheduler", actor="", key_prefix="daily"):
+def sync_daily(
+    *, cutoff=None, lookback_days=4, source="scheduler", actor="",
+    key_prefix="daily", required_range=None,
+):
     cutoff = cutoff or timezone.localdate() - timedelta(days=1)
     return [
         sync_platform(
             platform, cutoff, lookback_days=lookback_days, source=source, actor=actor,
             idempotency_key=f"{key_prefix}:{platform.lower()}:{cutoff.isoformat()}",
+            required_range=required_range,
         )
         for platform in PLATFORMS
     ]
@@ -284,23 +302,33 @@ def manual_refresh_state(day=None):
     ).first()
 
 
-def run_manual_refresh(actor):
+def run_manual_refresh(actor, required_range=None):
     today = timezone.localdate()
     cutoff = today - timedelta(days=1)
+    primary = manual_refresh_state(today)
+    repair = bool(
+        required_range
+        and primary
+        and primary.status == SocialSyncRun.Status.COMPLETED
+        and any(period_metric(platform, *required_range) is None for platform in PLATFORMS)
+    )
+    key_stem = "manual-repair" if repair else "manual"
     coordinator, claimed = _claim(
         SocialDailyMetric.Platform.INSTAGRAM, cutoff, "manual", actor,
-        f"manual-global:{today.isoformat()}", account=MANUAL_LOCK_ACCOUNT,
+        f"{key_stem}-global:{today.isoformat()}", account=MANUAL_LOCK_ACCOUNT,
     )
     if not claimed:
         return coordinator, [], False
     runs = sync_daily(
         cutoff=cutoff, lookback_days=4, source="manual", actor=actor,
-        key_prefix=f"manual:{today.isoformat()}",
+        key_prefix=f"{key_stem}:{today.isoformat()}", required_range=required_range,
     )
     period_metrics_completed = True
     try:
         sync_period_metrics(cutoff)
     except Exception:
+        period_metrics_completed = False
+    if required_range and any(period_metric(platform, *required_range) is None for platform in PLATFORMS):
         period_metrics_completed = False
     completed = (
         all(run.status == SocialSyncRun.Status.COMPLETED for run in runs)

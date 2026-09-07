@@ -38,6 +38,30 @@ class SocialSyncTests(TestCase):
         self.assertIsNone(row.accounts_engaged)
 
     @patch("dashboard.social_sync.fetch_instagram_days")
+    def test_required_range_repairs_missing_day_outside_normal_lookback(self, fetch):
+        start = self.day - timedelta(days=6)
+        missing = self.day - timedelta(days=5)
+        for offset in range(7):
+            day = start + timedelta(days=offset)
+            if day != missing:
+                SocialDailyMetric.objects.create(
+                    platform="INSTAGRAM", account="vobia.id", date=day,
+                    synced_at=datetime(2026, 9, 1, tzinfo=dt_timezone.utc), **self.values,
+                )
+        fetch.side_effect = lambda days: [(day, self.values) for day in days]
+
+        sync_platform(
+            "INSTAGRAM", self.day, lookback_days=4,
+            idempotency_key="manual:repair-gap", required_range=(start, self.day),
+        )
+
+        fetched_days = fetch.call_args.args[0]
+        self.assertEqual(fetched_days, sorted({missing, *(self.day - timedelta(days=i) for i in range(4))}))
+        self.assertTrue(SocialDailyMetric.objects.filter(
+            platform="INSTAGRAM", account="vobia.id", date=missing,
+        ).exists())
+
+    @patch("dashboard.social_sync.fetch_instagram_days")
     def test_failed_sync_keeps_last_valid_snapshot(self, fetch):
         SocialDailyMetric.objects.create(
             platform="INSTAGRAM", account="vobia.id", date=self.day,
@@ -135,7 +159,7 @@ class SocialSyncTests(TestCase):
         self.assertEqual(previous.reach, 77)
 
     def test_dashboard_renders_matching_instagram_and_tiktok_charts(self):
-        chart_day = date(2026, 8, 30)
+        chart_day = timezone.localdate() - timedelta(days=1)
         for platform in ("INSTAGRAM", "TIKTOK"):
             SocialDailyMetric.objects.create(
                 platform=platform, account="vobia.id", date=chart_day,
@@ -202,7 +226,7 @@ class SocialSyncTests(TestCase):
 
         response = self.client.get(reverse("dashboard:instagram_dashboard"))
 
-        self.assertContains(response, "Refresh data")
+        self.assertContains(response, "Lengkapi data")
 
     @patch("dashboard.instagram_report.get_tiktok_report", return_value=(None, "Snapshot TikTok periode ini belum tersedia."))
     @patch("dashboard.instagram_report.get_report", return_value=(None, "Snapshot periode ini belum tersedia."))
@@ -256,6 +280,42 @@ class SocialSyncTests(TestCase):
         self.assertEqual(manual_refresh_state().actor, "marketing.user")
         period_sync.assert_called_once()
 
+    @patch("dashboard.social_sync.sync_period_metrics")
+    @patch("dashboard.social_sync.fetch_tiktok_days")
+    @patch("dashboard.social_sync.fetch_instagram_days")
+    def test_completed_refresh_can_repair_missing_required_period(
+        self, instagram_days, tiktok_days, period_sync,
+    ):
+        today = timezone.localdate()
+        cutoff = today - timedelta(days=1)
+        start = today.replace(day=1)
+        SocialSyncRun.objects.create(
+            idempotency_key=f"manual-global:{today.isoformat()}",
+            platform="INSTAGRAM", account="vobia.id:manual-refresh", source="manual",
+            status=SocialSyncRun.Status.COMPLETED, cutoff=cutoff,
+            started_at=timezone.now(), completed_at=timezone.now(), snapshot_at=timezone.now(),
+        )
+        instagram_days.side_effect = lambda days: [(day, self.values) for day in days]
+        tiktok_days.side_effect = lambda days: [(day, self.values) for day in days]
+
+        def create_period_metrics(_cutoff):
+            for platform in ("INSTAGRAM", "TIKTOK"):
+                SocialPeriodMetric.objects.create(
+                    platform=platform, account="vobia.id", date_from=start, date_to=cutoff,
+                    reach=10, synced_at=timezone.now(),
+                )
+
+        period_sync.side_effect = create_period_metrics
+
+        coordinator, runs, claimed = run_manual_refresh(
+            "aditya", required_range=(start, cutoff),
+        )
+
+        self.assertTrue(claimed)
+        self.assertEqual(coordinator.idempotency_key, f"manual-repair-global:{today.isoformat()}")
+        self.assertEqual(coordinator.status, SocialSyncRun.Status.COMPLETED)
+        self.assertTrue(all(run.status == SocialSyncRun.Status.COMPLETED for run in runs))
+
     @patch("dashboard.instagram_report.get_tiktok_report", return_value=(None, ""))
     @patch("dashboard.instagram_report.get_report", return_value=(None, ""))
     @patch("dashboard.instagram_report.run_manual_refresh")
@@ -270,7 +330,10 @@ class SocialSyncTests(TestCase):
         self.client.force_login(user)
         response = self.client.post(reverse("dashboard:instagram_dashboard"), {"period": "7"})
         self.assertEqual(response.status_code, 200)
-        manual_refresh.assert_called_once_with("marketing-editor")
+        today = timezone.localdate()
+        manual_refresh.assert_called_once_with(
+            "marketing-editor", required_range=(today - timedelta(days=7), today - timedelta(days=1)),
+        )
         self.assertEqual(_instagram.call_count, 2)
         self.assertTrue(all(call.kwargs == {"force": True, "fetch": True} for call in _instagram.call_args_list))
         _tiktok.assert_called_once()

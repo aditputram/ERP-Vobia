@@ -20,6 +20,7 @@ from .models import (
     DesignAsset,
     DevelopmentProduct,
     DevelopmentProductDocumentRevision,
+    DevelopmentProductMaterial,
     MarketingRecommendation,
 )
 
@@ -325,10 +326,11 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(preview["Cache-Control"], "private, no-store")
         combined = b"".join(preview.streaming_content)
         reader = PdfReader(BytesIO(combined))
-        self.assertEqual(len(reader.pages), 2)
+        self.assertEqual(len(reader.pages), 3)
         text = " ".join(page.extract_text() for page in reader.pages)
         self.assertIn("MDR PAGE", text)
         self.assertIn("TECHNICAL DRAWING PAGE", text)
+        self.assertIn("BILL OF MATERIAL", reader.pages[2].extract_text())
         self.assertNotIn("000", text)
         self.assertNotIn("DIGITAL APPROVED", text)
 
@@ -414,6 +416,12 @@ class RndWorkflowTests(TestCase):
         product.mockup = self._pdf("mockup.pdf", "MDR PAGE")
         product.technical_drawing = self._pdf("drawing.pdf", "TECHNICAL DRAWING PAGE")
         product.save(update_fields=("mockup", "technical_drawing", "updated_at"))
+        DevelopmentProductMaterial.objects.create(
+            product=product,
+            material="Katun Flannel",
+            requirement="1.5",
+            eom="Yard",
+        )
         product.mockup.open("rb")
         source_mockup = product.mockup.read()
         product.mockup.close()
@@ -428,11 +436,15 @@ class RndWorkflowTests(TestCase):
         self.assertIsNotNone(product.submitted_at)
         self.assertEqual(product.submitted_by, self.rnd_editor)
         submitted_pdf = PdfReader(product.submitted_document.path)
-        self.assertEqual(len(submitted_pdf.pages), 2)
+        self.assertEqual(len(submitted_pdf.pages), 3)
         submitted_page_texts = [page.extract_text() for page in submitted_pdf.pages]
         submitted_text = " ".join(submitted_page_texts)
         self.assertIn("MDR PAGE", submitted_text)
         self.assertIn("TECHNICAL DRAWING PAGE", submitted_text)
+        self.assertIn("BILL OF MATERIAL", submitted_page_texts[2])
+        self.assertIn("Katun Flannel", submitted_page_texts[2])
+        self.assertIn("1,5", submitted_page_texts[2])
+        self.assertIn("Yard", submitted_page_texts[2])
         self.assertTrue(all("000" in text for text in submitted_page_texts))
         self.assertNotIn("DIGITAL APPROVED", submitted_text)
         revision = product.document_revisions.get(revision=0)
@@ -461,13 +473,16 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(revision.status, DevelopmentProductDocumentRevision.Status.APPROVED)
         self.assertEqual(revision.approved_document.name, product.approved_document.name)
         final_pdf = PdfReader(product.approved_document.path)
-        self.assertEqual(len(final_pdf.pages), 2)
+        self.assertEqual(len(final_pdf.pages), 3)
         first_page_text = final_pdf.pages[0].extract_text()
         second_page_text = final_pdf.pages[1].extract_text()
+        third_page_text = final_pdf.pages[2].extract_text()
         self.assertNotIn("DIGITAL APPROVED", first_page_text)
         self.assertIn("Aditya Saputra", first_page_text)
         self.assertIn("Aditya Saputra", second_page_text)
         self.assertNotIn("DIGITAL APPROVED", second_page_text)
+        self.assertIn("Aditya Saputra", third_page_text)
+        self.assertNotIn("DIGITAL APPROVED", third_page_text)
         for page in final_pdf.pages:
             xobjects = page["/Resources"]["/XObject"].get_object()
             self.assertTrue(
@@ -492,7 +507,7 @@ class RndWorkflowTests(TestCase):
         product.refresh_from_db()
         submitted_pdf = PdfReader(product.submitted_document.path)
 
-        self.assertEqual(len(submitted_pdf.pages), 2)
+        self.assertEqual(len(submitted_pdf.pages), 3)
         self.assertIn("MDR PAGE", submitted_pdf.pages[0].extract_text())
         self.assertIn("TECH PACK ARRAY PAGE", submitted_pdf.pages[1].extract_text())
 
@@ -500,7 +515,7 @@ class RndWorkflowTests(TestCase):
             reverse("rnd:product_revision_file", args=[product.id, 0])
         )
         live_pdf = PdfReader(BytesIO(b"".join(live_preview.streaming_content)))
-        self.assertEqual(len(live_pdf.pages), 2)
+        self.assertEqual(len(live_pdf.pages), 3)
         self.assertIn("TECH PACK ARRAY PAGE", live_pdf.pages[1].extract_text())
 
     def test_document_revision_history_is_selectable_and_old_pdf_is_preserved(self):

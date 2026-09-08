@@ -604,7 +604,10 @@ def product_submit_approval(request, product_id):
     except ValidationError as exc:
         messages.error(request, _validation_message(exc))
     else:
-        messages.success(request, "Mockup dan Technical Drawing berhasil digabung menjadi MDR dan diajukan.")
+        messages.success(
+            request,
+            "Mockup, Technical Drawing, dan Bill of Material berhasil digabung menjadi MDR dan diajukan.",
+        )
     return redirect("rnd:product_detail", product_id=product.id)
 
 

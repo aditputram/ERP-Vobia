@@ -536,11 +536,13 @@ class RndWorkflowTests(TestCase):
         approved.document_status = DevelopmentProduct.DocumentStatus.APPROVED
         approved.approved_document = self._pdf("approved.pdf", "APPROVED MDR")
         approved.product_cover = self._image("approved.png")
+        approved.category = "Flannel Shirt"
         approved.save(
             update_fields=(
                 "document_status",
                 "approved_document",
                 "product_cover",
+                "category",
                 "updated_at",
             )
         )
@@ -559,6 +561,9 @@ class RndWorkflowTests(TestCase):
             reverse("dashboard:upcoming_collection_detail", args=[collection.id])
         )
         self.assertContains(detail, approved.name)
+        self.assertContains(detail, "Nama Product")
+        self.assertContains(detail, approved.category)
+        self.assertContains(detail, "Nama Article")
         self.assertNotContains(detail, draft.name)
         self.assertContains(detail, "rnd-preview-cover-card")
         self.assertNotIn(b"<table", detail.content)

@@ -616,7 +616,7 @@ def product_file(request, product_id, file_kind):
         )
         if not is_handed_over and not is_previewed:
             raise Http404
-        if not is_handed_over and file_kind not in {"product-cover", "approved-document"}:
+        if not is_handed_over and file_kind != "product-cover":
             raise Http404
     if file_kind == "combined-preview":
         try:

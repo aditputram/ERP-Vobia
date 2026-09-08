@@ -569,7 +569,14 @@ class RndWorkflowTests(TestCase):
             "dashboard:upcoming_collection_product_file",
             args=[approved.id, "approved-document"],
         )
-        self.assertEqual(self.client.get(approved_file).status_code, 200)
+        self.assertNotContains(detail, approved_file)
+        self.assertEqual(self.client.get(approved_file).status_code, 404)
+        cover_file = reverse(
+            "dashboard:upcoming_collection_product_file",
+            args=[approved.id, "product-cover"],
+        )
+        self.assertContains(detail, f'href="{cover_file}"')
+        self.assertEqual(self.client.get(cover_file).status_code, 200)
         raw_mockup = reverse(
             "dashboard:upcoming_collection_product_file",
             args=[approved.id, "mockup"],

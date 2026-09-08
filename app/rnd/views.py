@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Case, Count, IntegerField, Q, Value, When
+from django.db.models import Case, Count, IntegerField, Prefetch, Q, Value, When
 from django.http import FileResponse, Http404, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -90,7 +90,15 @@ def _purge_expired_designs():
 @login_required
 def dashboard(request):
     request.session["active_module"] = "rnd"
-    collections = Collection.objects.annotate(
+    collections = Collection.objects.prefetch_related(
+        Prefetch(
+            "products",
+            queryset=DevelopmentProduct.objects.exclude(product_cover="").only(
+                "id", "collection_id", "name", "product_cover"
+            ),
+            to_attr="cover_products",
+        )
+    ).annotate(
         product_count=Count("products"),
         final_count=Count(
             "products",

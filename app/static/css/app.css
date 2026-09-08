@@ -251,6 +251,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .rnd-product-card-footer strong { color: var(--lime-dark); font-size: 10px; }
 .rnd-product-card-footer strong span { display: inline-block; margin-left: 4px; transition: transform .18s ease; }
 .rnd-product-card:hover .rnd-product-card-footer strong span { transform: translateX(3px); }
+.rnd-collection-covers { aspect-ratio: 4 / 3; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 3px; margin-top: 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: #efeee9; }
+.rnd-collection-cover-item { min-width: 0; min-height: 0; overflow: hidden; background: #f1f1ed; }
+.rnd-collection-cover-item img { width: 100%; height: 100%; display: block; object-fit: contain; }
+.rnd-collection-cover-empty { grid-column: 1 / -1; grid-row: 1 / -1; display: grid; place-items: center; padding: 20px; color: var(--muted); text-align: center; font-size: 10px; }
+.rnd-collection-card .rnd-product-card-copy { padding-top: 20px; }
 .rnd-document-preview { overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: #efeee9; }
 .rnd-document-preview iframe { width: 100%; height: clamp(620px, 72vh, 820px); display: block; border: 0; }
 .rnd-document-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 22px; color: var(--muted); font-size: 10px; }

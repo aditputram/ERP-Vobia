@@ -154,6 +154,22 @@ class RndWorkflowTests(TestCase):
 
         self.assertEqual(list(response.context["products"]), [approved, waiting])
 
+    def test_collection_dashboard_uses_cards_with_four_product_covers(self):
+        collection = self._collection()
+        products = []
+        for number in range(5):
+            product = self._product(collection, code=f"P-{number}")
+            product.product_cover = self._image(f"cover-{number}.png")
+            product.save(update_fields=["product_cover"])
+            products.append(product)
+
+        self.client.force_login(self.rnd_editor)
+        response = self.client.get(reverse("rnd:dashboard"))
+
+        self.assertContains(response, 'class="rnd-product-card rnd-collection-card"')
+        self.assertContains(response, 'class="rnd-collection-cover-item"', count=4)
+        self.assertNotContains(response, reverse("rnd:product_file", args=[products[4].id, "product-cover"]))
+
     def test_designing_upload_and_approve_only_recommendation(self):
         self.client.force_login(self.rnd_editor)
         page = self.client.get(reverse("rnd:designing"))

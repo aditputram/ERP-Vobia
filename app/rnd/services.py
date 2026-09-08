@@ -30,10 +30,56 @@ def _actor_name(actor):
 
 
 @transaction.atomic
+def sync_collection_status(*, collection, actor=None):
+    collection = Collection.objects.select_for_update().get(pk=collection.pk)
+    products = collection.products.all()
+    if collection.commercial_approved_at:
+        status = Collection.Status.COMMERCIAL_APPROVED
+    elif collection.handed_over_at:
+        status = Collection.Status.MARKETING_REVIEW
+    elif collection.development_started_at:
+        status = (
+            Collection.Status.FINAL_DEVELOPMENT
+            if products.exists()
+            and not products.exclude(
+                development_stage=DevelopmentProduct.DevelopmentStage.FINAL
+            ).exists()
+            else Collection.Status.DEVELOPMENT
+        )
+    else:
+        document_statuses = list(products.values_list("document_status", flat=True))
+        if not document_statuses or set(document_statuses) == {DevelopmentProduct.DocumentStatus.DRAFT}:
+            status = Collection.Status.DRAFT
+        elif all(value == DevelopmentProduct.DocumentStatus.APPROVED for value in document_statuses):
+            status = Collection.Status.READY_FOR_DEVELOPMENT
+        else:
+            status = Collection.Status.DOCUMENT_APPROVAL
+
+    if collection.status != status:
+        previous_status = collection.status
+        collection.status = status
+        collection.save(update_fields=("status", "updated_at"))
+        if actor:
+            record_audit(
+                actor=actor,
+                action="rnd_collection_status_changed",
+                entity_type="rnd.collection",
+                entity_id=collection.id,
+                before_values={"status": previous_status},
+                after_values={"status": status},
+            )
+    return collection
+
+
+@transaction.atomic
 def submit_product_document(*, product, actor):
     product = DevelopmentProduct.objects.select_for_update().select_related("collection").get(pk=product.pk)
-    if product.collection.status not in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT}:
-        raise ValidationError("Product sudah dikunci setelah handover ke Marketing.")
+    if (
+        product.collection.development_started_at
+        or product.collection.handed_over_at
+        or product.collection.commercial_approved_at
+    ):
+        raise ValidationError("Product sudah dikunci setelah Development dimulai atau handover ke Marketing.")
     if product.document_status != DevelopmentProduct.DocumentStatus.DRAFT:
         raise ValidationError("Dokumen Product ini sudah diajukan.")
 
@@ -63,6 +109,7 @@ def submit_product_document(*, product, actor):
     )
     revision.submitted_document.name = product.submitted_document.name
     revision.save()
+    sync_collection_status(collection=product.collection, actor=actor)
     record_audit(
         actor=actor,
         action="rnd_product_document_submitted",
@@ -124,6 +171,7 @@ def approve_product_document(*, product, actor):
             "updated_at",
         )
     )
+    sync_collection_status(collection=product.collection, actor=actor)
     record_audit(
         actor=actor,
         action="rnd_product_document_approved",
@@ -205,6 +253,7 @@ def request_product_document_revision(*, product, actor, note, target):
     product.document_status = DevelopmentProduct.DocumentStatus.REVISION_REQUESTED
     product.status = DevelopmentProduct.Status.REVISION
     product.save(update_fields=("document_status", "status", "updated_at"))
+    sync_collection_status(collection=product.collection, actor=actor)
     record_audit(
         actor=actor,
         action="rnd_product_document_revision_requested",
@@ -228,7 +277,7 @@ def start_collection_development(*, collection, actor):
     collection = Collection.objects.select_for_update().get(pk=collection.pk)
     if collection.development_started_at:
         return collection
-    if collection.status not in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT}:
+    if collection.handed_over_at or collection.commercial_approved_at:
         raise ValidationError("Collection sudah dikunci setelah handover ke Marketing.")
     products = list(collection.products.select_for_update())
     if not products:
@@ -263,6 +312,7 @@ def start_collection_development(*, collection, actor):
         products,
         ("development_stage", "prototype_number", "updated_at"),
     )
+    collection = sync_collection_status(collection=collection, actor=actor)
     record_audit(
         actor=actor,
         action="rnd_collection_development_started",
@@ -340,6 +390,7 @@ def transition_product_development(*, product, actor, action):
         product.status = DevelopmentProduct.Status.FINAL_APPROVED
         update_fields.append("status")
     product.save(update_fields=update_fields)
+    sync_collection_status(collection=product.collection, actor=actor)
     record_audit(
         actor=actor,
         action=f"rnd_product_development_{action}",
@@ -359,7 +410,7 @@ def delete_collection(*, collection, actor):
     if not can_approve_module(actor, "rnd"):
         raise PermissionDenied("Delete Collection memerlukan akses Approve R&D.")
     collection = Collection.objects.select_for_update().get(pk=collection.pk)
-    if collection.status not in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT}:
+    if collection.handed_over_at or collection.commercial_approved_at:
         raise ValidationError("Collection yang sudah di-handover ke Marketing tidak dapat dihapus.")
 
     products = list(collection.products.prefetch_related("document_revisions"))
@@ -412,7 +463,7 @@ def handover_to_marketing(*, collection, actor):
         raise PermissionDenied("Handover Collection memerlukan akses Approve R&D.")
     collection = Collection.objects.select_for_update().get(pk=collection.pk)
     products = collection.products.all()
-    if collection.status not in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT}:
+    if collection.handed_over_at or collection.commercial_approved_at:
         raise ValidationError("Collection ini tidak dapat di-handover ulang.")
     if not products.exists():
         raise ValidationError("Collection wajib memiliki minimal satu Product.")

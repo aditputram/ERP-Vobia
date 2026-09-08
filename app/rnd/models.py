@@ -9,7 +9,10 @@ from master_data.models import UUIDTimestampedModel
 class Collection(UUIDTimestampedModel):
     class Status(models.TextChoices):
         DRAFT = "DRAFT", "Draft"
+        DOCUMENT_APPROVAL = "DOCUMENT_APPROVAL", "Approval Dokumen"
+        READY_FOR_DEVELOPMENT = "READY_FOR_DEVELOPMENT", "Siap Development"
         DEVELOPMENT = "DEVELOPMENT", "Development"
+        FINAL_DEVELOPMENT = "FINAL_DEVELOPMENT", "Final Development"
         MARKETING_REVIEW = "MARKETING_REVIEW", "Marketing Review"
         COMMERCIAL_APPROVED = "COMMERCIAL_APPROVED", "Commercial Approved"
 

@@ -127,7 +127,7 @@ class RndWorkflowTests(TestCase):
             )
             self.assertRedirects(response, reverse("rnd:collection_detail", args=[collection.id]))
         collection.refresh_from_db()
-        self.assertEqual(collection.status, Collection.Status.DEVELOPMENT)
+        self.assertEqual(collection.status, Collection.Status.DRAFT)
         self.assertEqual(collection.products.count(), 2)
         self.assertEqual(collection.products.values("working_code").distinct().count(), 2)
         self.assertTrue(all(product.working_code.startswith("RND-") for product in collection.products.all()))
@@ -406,7 +406,7 @@ class RndWorkflowTests(TestCase):
         handover = self.client.post(reverse("rnd:collection_handover", args=[collection.id]))
         self.assertEqual(handover.status_code, 403)
         collection.refresh_from_db()
-        self.assertEqual(collection.status, Collection.Status.DRAFT)
+        self.assertEqual(collection.status, Collection.Status.DOCUMENT_APPROVAL)
 
     def test_submit_and_superadmin_approval_generate_one_audited_pdf(self):
         collection = self._collection()
@@ -422,7 +422,9 @@ class RndWorkflowTests(TestCase):
         submitted = self.client.post(reverse("rnd:product_submit", args=[product.id]))
         self.assertRedirects(submitted, reverse("rnd:product_detail", args=[product.id]))
         product.refresh_from_db()
+        collection.refresh_from_db()
         self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.SUBMITTED)
+        self.assertEqual(collection.status, Collection.Status.DOCUMENT_APPROVAL)
         self.assertIsNotNone(product.submitted_at)
         self.assertEqual(product.submitted_by, self.rnd_editor)
         submitted_pdf = PdfReader(product.submitted_document.path)
@@ -450,7 +452,9 @@ class RndWorkflowTests(TestCase):
         approved = self.client.post(reverse("rnd:product_approve", args=[product.id]))
         self.assertRedirects(approved, reverse("rnd:product_detail", args=[product.id]))
         product.refresh_from_db()
+        collection.refresh_from_db()
         self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.APPROVED)
+        self.assertEqual(collection.status, Collection.Status.READY_FOR_DEVELOPMENT)
         self.assertEqual(product.status, DevelopmentProduct.Status.CONCEPT)
         self.assertEqual(product.rnd_approved_by, self.admin)
         revision.refresh_from_db()
@@ -726,6 +730,7 @@ class RndWorkflowTests(TestCase):
         collection.refresh_from_db()
         self.assertEqual(collection.development_started_by, self.rnd_editor)
         self.assertIsNotNone(collection.development_started_at)
+        self.assertEqual(collection.status, Collection.Status.DEVELOPMENT)
         self.assertFalse(
             collection.products.exclude(
                 development_stage=DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE
@@ -811,8 +816,10 @@ class RndWorkflowTests(TestCase):
             {"action": "prototype_final"},
         )
         product.refresh_from_db()
+        collection.refresh_from_db()
         self.assertEqual(product.development_stage, DevelopmentProduct.DevelopmentStage.FINAL)
         self.assertEqual(product.status, DevelopmentProduct.Status.FINAL_APPROVED)
+        self.assertEqual(collection.status, Collection.Status.FINAL_DEVELOPMENT)
 
     def test_marketing_cannot_start_or_update_development(self):
         collection = self._collection()

@@ -44,6 +44,7 @@ from .services import (
     request_product_document_revision,
     start_collection_development,
     submit_product_document,
+    sync_collection_status,
     transition_product_development,
 )
 
@@ -213,9 +214,10 @@ def collection_create(request):
 def collection_detail(request, collection_id):
     request.session["active_module"] = "rnd"
     collection = get_object_or_404(Collection.objects.select_related("handed_over_by"), id=collection_id)
-    editable = (
-        collection.status in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT}
-        and not collection.development_started_at
+    editable = not (
+        collection.development_started_at
+        or collection.handed_over_at
+        or collection.commercial_approved_at
     )
     product = DevelopmentProduct(collection=collection)
     product_form = DevelopmentProductForm(request.POST or None, request.FILES or None, instance=product)
@@ -236,9 +238,7 @@ def collection_detail(request, collection_id):
             product.save()
             material_formset.instance = product
             material_formset.save()
-            if collection.status == Collection.Status.DRAFT:
-                collection.status = Collection.Status.DEVELOPMENT
-                collection.save(update_fields=("status", "updated_at"))
+            sync_collection_status(collection=collection, actor=request.user)
             record_audit(
                 actor=request.user,
                 action="rnd_product_created",
@@ -269,7 +269,8 @@ def collection_detail(request, collection_id):
             "all_documents_approved": all_documents_approved,
             "can_start_development": _can_edit_rnd(request.user),
             "can_delete": can_approve_module(request.user, "rnd")
-            and collection.status in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT},
+            and not collection.handed_over_at
+            and not collection.commercial_approved_at,
             "all_final": product_count > 0
             and not products.exclude(
                 development_stage=DevelopmentProduct.DevelopmentStage.FINAL
@@ -366,7 +367,9 @@ def product_detail(request, product_id):
     request.session["active_module"] = "rnd"
     product = get_object_or_404(DevelopmentProduct.objects.select_related("collection"), id=product_id)
     editable = (
-        product.collection.status in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT}
+        not product.collection.development_started_at
+        and not product.collection.handed_over_at
+        and not product.collection.commercial_approved_at
         and product.document_status
         in {
             DevelopmentProduct.DocumentStatus.DRAFT,
@@ -426,6 +429,7 @@ def product_detail(request, product_id):
                 updated.submitted_by = None
             updated.save()
             material_formset.save()
+            sync_collection_status(collection=updated.collection, actor=request.user)
             record_audit(
                 actor=request.user,
                 action="rnd_product_updated",

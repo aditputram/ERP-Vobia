@@ -28,6 +28,18 @@ METRICS = (
 )
 
 
+def suspicious_tiktok_days(start, end):
+    return set(
+        SocialDailyMetric.objects.filter(
+            platform=SocialDailyMetric.Platform.TIKTOK,
+            account=ACCOUNT,
+            date__range=(start, end),
+            reach=0,
+            impressions=0,
+        ).values_list("date", flat=True)
+    )
+
+
 def supported_period_ranges(cutoff):
     ranges = set()
     for days in (7, 14, 30, 60, 90):
@@ -236,6 +248,8 @@ def sync_platform(
             for offset in range((end - start).days + 1)
             if start + timedelta(days=offset) not in existing
         )
+        if platform == SocialDailyMetric.Platform.TIKTOK:
+            days.update(suspicious_tiktok_days(start, end))
     days = sorted(days)
     try:
         rows = fetch_instagram_days(days) if platform == SocialDailyMetric.Platform.INSTAGRAM else fetch_tiktok_days(days)
@@ -310,7 +324,10 @@ def run_manual_refresh(actor, required_range=None):
         required_range
         and primary
         and primary.status == SocialSyncRun.Status.COMPLETED
-        and any(period_metric(platform, *required_range) is None for platform in PLATFORMS)
+        and (
+            any(period_metric(platform, *required_range) is None for platform in PLATFORMS)
+            or suspicious_tiktok_days(*required_range)
+        )
     )
     key_stem = "manual-repair" if repair else "manual"
     coordinator, claimed = _claim(

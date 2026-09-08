@@ -27,7 +27,7 @@ from .tiktok import (
 from .models import SocialDailyMetric
 from .social_sync import (
     daily_series, manual_refresh_state, period_metric, run_manual_refresh,
-    supported_period_ranges, sync_status,
+    suspicious_tiktok_days, supported_period_ranges, sync_status,
 )
 
 
@@ -431,7 +431,7 @@ def dashboard(request):
             period_snapshot_missing = any(
                 period_metric(platform, start, end) is None
                 for platform in (SocialDailyMetric.Platform.INSTAGRAM, SocialDailyMetric.Platform.TIKTOK)
-            )
+            ) or bool(suspicious_tiktok_days(start, end))
     refresh_run = manual_refresh_state()
     refresh_claimed = False
     if request.method == "POST":
@@ -445,7 +445,7 @@ def dashboard(request):
             period_snapshot_missing = any(
                 period_metric(platform, *required_range) is None
                 for platform in (SocialDailyMetric.Platform.INSTAGRAM, SocialDailyMetric.Platform.TIKTOK)
-            )
+            ) or bool(suspicious_tiktok_days(*required_range))
     request.session["active_module"] = "marketing"
     report, error = None, ""
     comparison = None

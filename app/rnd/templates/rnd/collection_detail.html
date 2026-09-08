@@ -4,7 +4,7 @@
 {% block content %}
 <header class="page-header">
     <div><p class="eyebrow">R&amp;D · {{ collection.code }}</p><h1>{{ collection.name }}</h1><p>{{ collection.objective|default:"Objective Collection belum diisi." }}</p></div>
-    <div class="header-actions"><span class="status-chip"><span></span>{{ collection.get_status_display }}</span>{% if editable and can_handover %}<form method="post" action="{% url 'rnd:collection_delete' collection.id %}" onsubmit="return confirm('Hapus Collection {{ collection.name|escapejs }} beserta seluruh Product, BOM, dokumen, dan revisinya? Tindakan ini tidak dapat dibatalkan.');">{% csrf_token %}<button class="secondary-button danger-button" type="submit">Delete Collection</button></form>{% endif %}<a class="secondary-button" href="{% url 'rnd:dashboard' %}">Daftar Collection</a></div>
+    <div class="header-actions"><span class="status-chip"><span></span>{{ collection.get_status_display }}</span>{% if editable %}<button class="secondary-button" type="button" data-product-form-toggle aria-controls="add-product-panel" aria-expanded="{% if product_form.is_bound %}true{% else %}false{% endif %}">Tambah Product</button>{% endif %}{% if editable and can_handover %}<form method="post" action="{% url 'rnd:collection_delete' collection.id %}" onsubmit="return confirm('Hapus Collection {{ collection.name|escapejs }} beserta seluruh Product, BOM, dokumen, dan revisinya? Tindakan ini tidak dapat dibatalkan.');">{% csrf_token %}<button class="secondary-button danger-button" type="submit">Delete Collection</button></form>{% endif %}<a class="secondary-button" href="{% url 'rnd:dashboard' %}">Daftar Collection</a></div>
 </header>
 <section class="metric-grid three">
     <article class="metric-card"><span>Status Collection</span><strong>{{ collection.get_status_display }}</strong></article>
@@ -22,11 +22,11 @@
         </a>{% endfor %}
     </div>{% else %}<div class="empty-state">Belum ada Product dalam Collection ini.</div>{% endif %}
 </section>
-{% if editable %}<section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">ADD PRODUCT</p><h2>Tambah Product</h2></div></div><form method="post" enctype="multipart/form-data" class="stack-form">{% csrf_token %}{{ product_form.as_p }}{% include "rnd/_material_formset.html" %}<button class="secondary-button" type="submit">Tambah Product</button></form></section>{% endif %}
+{% if editable %}<section class="panel section-gap" id="add-product-panel" data-product-form{% if not product_form.is_bound %} hidden{% endif %}><div class="panel-header"><div><p class="eyebrow">ADD PRODUCT</p><h2>Tambah Product</h2></div></div><form method="post" enctype="multipart/form-data" class="stack-form">{% csrf_token %}{{ product_form.as_p }}{% include "rnd/_material_formset.html" %}<button class="secondary-button" type="submit">Tambah Product</button></form></section>{% endif %}
 <section class="panel section-gap">
     <div class="panel-header"><div><p class="eyebrow">HARD GATE</p><h2>Handover ke Marketing</h2></div></div>
     {% if collection.status == 'MARKETING_REVIEW' or collection.status == 'COMMERCIAL_APPROVED' %}<p>Collection sudah masuk tab Upcoming Collection Marketing{% if collection.handed_over_at %} pada {{ collection.handed_over_at|date:"d M Y H:i" }}{% endif %}.</p>
     {% else %}<p>Handover hanya dapat dilakukan setelah seluruh Product berstatus Final R&amp;D. Hanya akun dengan akses Approve R&amp;D yang dapat menjalankannya.</p><form method="post" action="{% url 'rnd:collection_handover' collection.id %}">{% csrf_token %}<button class="primary-button" type="submit"{% if not all_final or not can_handover %} disabled{% endif %}>Handover ke Marketing</button></form>{% endif %}
 </section>
-<script src="{% static 'js/rnd-materials.js' %}?v=20260901-01" defer></script>
+<script src="{% static 'js/rnd-materials.js' %}?v=20260908-01" defer></script>
 {% endblock %}

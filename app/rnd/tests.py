@@ -187,6 +187,8 @@ class RndWorkflowTests(TestCase):
         self.client.force_login(self.rnd_editor)
 
         page = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
+        self.assertContains(page, 'data-product-form-toggle')
+        self.assertContains(page, 'id="add-product-panel" data-product-form hidden')
         self.assertContains(page, "Bill of Material (BOM)")
         self.assertContains(page, "Material")
         self.assertContains(page, "Kebutuhan")
@@ -336,6 +338,7 @@ class RndWorkflowTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "File harus berupa PDF, JPG, PNG, atau WebP yang valid.")
+        self.assertContains(response, 'id="add-product-panel" data-product-form>')
         self.assertFalse(collection.products.filter(name="Invalid File Product").exists())
 
     def test_product_cover_rejects_pdf(self):

@@ -1,4 +1,12 @@
 document.addEventListener("DOMContentLoaded", () => {
+  const productFormToggle = document.querySelector("[data-product-form-toggle]");
+  const productForm = document.querySelector("[data-product-form]");
+  productFormToggle?.addEventListener("click", () => {
+    productForm.hidden = !productForm.hidden;
+    productFormToggle.setAttribute("aria-expanded", String(!productForm.hidden));
+    if (!productForm.hidden) productForm.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
   document.querySelectorAll("[data-material-formset]").forEach((formset) => {
     const rows = formset.querySelector("[data-material-rows]");
     const template = formset.querySelector("[data-material-template]");

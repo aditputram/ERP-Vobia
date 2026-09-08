@@ -40,15 +40,15 @@ a { color: inherit; text-decoration: none; }
     background: var(--nav);
 }
 
-.brand { display: inline-flex; align-items: center; }
+.brand { display: inline-flex; flex-shrink: 0; align-items: center; }
 .brand-logo { display: block; width: 118px; height: auto; }
 .sidebar .brand-logo { filter: invert(1); }
 
-.module-switcher { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 30px; padding: 11px 12px; border: 1px solid #30322d; border-radius: 11px; background: #1a1b18; }
+.module-switcher { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 12px; margin-top: 30px; padding: 11px 12px; border: 1px solid #30322d; border-radius: 11px; background: #1a1b18; }
 .module-switcher span { color: white; font-size: 11px; font-weight: 800; }
 .module-switcher small { color: var(--lime); font-size: 8px; font-weight: 750; }
 .module-switcher:hover { border-color: #4b4e44; background: #20221e; }
-.navigation { display: flex; flex: 1; flex-direction: column; gap: 5px; margin-top: 10px; }
+.navigation { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 5px; margin-top: 10px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .nav-label { margin: 24px 12px 8px; color: #72756d; font-size: 9px; font-weight: 800; letter-spacing: .18em; }
 .nav-item { display: flex; width: 100%; min-height: 42px; align-items: center; justify-content: space-between; padding: 0 13px; border: 0; border-radius: 10px; color: #aeb0a8; background: transparent; font: inherit; font-size: 13px; font-weight: 650; text-align: left; cursor: pointer; }
 .nav-item:hover:not(.disabled) { color: white; background: #20221e; }
@@ -62,7 +62,7 @@ a { color: inherit; text-decoration: none; }
 .nav-subitem { padding: 7px 8px; border-radius: 7px; color: #81847b; font-size: 9px; font-weight: 650; }
 .nav-subitem:hover, .nav-subitem.active { color: var(--lime); background: #1c1e1a; }
 
-.sidebar-footer { display: grid; grid-template-columns: 34px 1fr auto; gap: 9px; align-items: center; padding: 14px 8px 0; border-top: 1px solid #2b2d28; }
+.sidebar-footer { display: grid; flex-shrink: 0; grid-template-columns: 34px 1fr auto; gap: 9px; align-items: center; padding: 14px 8px 0; border-top: 1px solid #2b2d28; }
 .user-avatar { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #3b3e37; border-radius: 50%; color: var(--lime); font-size: 12px; font-weight: 800; }
 .user-meta strong, .user-meta a { display: block; max-width: 112px; overflow: hidden; text-overflow: ellipsis; }
 .user-meta strong { font-size: 10px; }

@@ -1,10 +1,11 @@
 document.addEventListener("DOMContentLoaded", () => {
-  const productFormToggle = document.querySelector("[data-product-form-toggle]");
-  const productForm = document.querySelector("[data-product-form]");
-  productFormToggle?.addEventListener("click", () => {
-    productForm.hidden = !productForm.hidden;
-    productFormToggle.setAttribute("aria-expanded", String(!productForm.hidden));
-    if (!productForm.hidden) productForm.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelectorAll("[data-rnd-panel-toggle]").forEach((toggle) => {
+    const panel = document.getElementById(toggle.getAttribute("aria-controls"));
+    toggle.addEventListener("click", () => {
+      panel.hidden = !panel.hidden;
+      toggle.setAttribute("aria-expanded", String(!panel.hidden));
+      if (!panel.hidden) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   });
 
   document.querySelectorAll("[data-material-formset]").forEach((formset) => {

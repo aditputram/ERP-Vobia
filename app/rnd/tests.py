@@ -140,6 +140,20 @@ class RndWorkflowTests(TestCase):
         self.assertTrue(all(product.working_code.startswith("RND-") for product in collection.products.all()))
         self.assertEqual(Product.objects.count(), 0)
 
+    def test_collection_detail_orders_approved_products_first(self):
+        collection = self._collection()
+        waiting = self._product(collection, code="P-WAITING")
+        approved = self._product(
+            collection,
+            code="P-APPROVED",
+            status=DevelopmentProduct.Status.FINAL_APPROVED,
+        )
+
+        self.client.force_login(self.rnd_editor)
+        response = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
+
+        self.assertEqual(list(response.context["products"]), [approved, waiting])
+
     def test_designing_upload_and_approve_only_recommendation(self):
         self.client.force_login(self.rnd_editor)
         page = self.client.get(reverse("rnd:designing"))

@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Case, Count, IntegerField, Q, Value, When
 from django.http import FileResponse, Http404, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -314,8 +314,20 @@ def collection_detail(request, collection_id):
             )
             messages.success(request, "Product berhasil ditambahkan ke Collection.")
             return redirect("rnd:collection_detail", collection_id=collection.id)
-    products = collection.products.select_related("rnd_approved_by").annotate(
-        material_count=Count("materials")
+    products = (
+        collection.products.select_related("rnd_approved_by")
+        .annotate(
+            material_count=Count("materials"),
+            approval_order=Case(
+                When(
+                    document_status=DevelopmentProduct.DocumentStatus.APPROVED,
+                    then=Value(0),
+                ),
+                default=Value(1),
+                output_field=IntegerField(),
+            ),
+        )
+        .order_by("approval_order", "created_at")
     )
     product_count = products.count()
     approved_document_count = products.filter(

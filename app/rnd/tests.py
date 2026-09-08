@@ -163,6 +163,7 @@ class RndWorkflowTests(TestCase):
         self.assertContains(page, "Direkomendasikan untuk Collection Baru")
         self.assertContains(page, design.original_name)
         detail = self.client.get(reverse("rnd:design_detail", args=[design.id]))
+        self.assertContains(detail, "history.back()")
         self.assertNotContains(detail, "Rekomendasikan untuk Collection Baru</button>")
         denied = self.client.post(reverse("rnd:design_recommend", args=[design.id]))
         self.assertEqual(denied.status_code, 403)

@@ -36,6 +36,14 @@ class Collection(UUIDTimestampedModel):
         on_delete=models.SET_NULL,
         related_name="rnd_collections_handed_over",
     )
+    marketing_previewed_at = models.DateTimeField(null=True, blank=True)
+    marketing_previewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="rnd_collections_previewed_to_marketing",
+    )
     development_started_at = models.DateTimeField(null=True, blank=True)
     development_started_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

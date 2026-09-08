@@ -32,6 +32,11 @@ urlpatterns = [
         name="collection_start_development",
     ),
     path("collections/<uuid:collection_id>/handover/", views.collection_handover, name="collection_handover"),
+    path(
+        "collections/<uuid:collection_id>/marketing-preview/",
+        views.collection_marketing_preview,
+        name="collection_marketing_preview",
+    ),
     path("products/<uuid:product_id>/", views.product_detail, name="product_detail"),
     path(
         "products/<uuid:product_id>/development-transition/",

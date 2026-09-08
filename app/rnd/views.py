@@ -41,6 +41,7 @@ from .services import (
     can_edit_module,
     delete_collection,
     handover_to_marketing,
+    publish_marketing_preview,
     request_product_document_revision,
     start_collection_development,
     submit_product_document,
@@ -287,7 +288,10 @@ def collection_create(request):
 @transaction.atomic
 def collection_detail(request, collection_id):
     request.session["active_module"] = "rnd"
-    collection = get_object_or_404(Collection.objects.select_related("handed_over_by"), id=collection_id)
+    collection = get_object_or_404(
+        Collection.objects.select_related("handed_over_by", "marketing_previewed_by"),
+        id=collection_id,
+    )
     editable = not (
         collection.development_started_at
         or collection.handed_over_at
@@ -362,6 +366,7 @@ def collection_detail(request, collection_id):
                 development_stage=DevelopmentProduct.DevelopmentStage.FINAL
             ).exists(),
             "can_handover": can_approve_module(request.user, "rnd"),
+            "can_publish_marketing_preview": can_approve_module(request.user, "rnd"),
         },
     )
 
@@ -600,11 +605,19 @@ def product_detail(request, product_id):
 @xframe_options_sameorigin
 def product_file(request, product_id, file_kind):
     product = get_object_or_404(DevelopmentProduct.objects.select_related("collection"), id=product_id)
-    if request.path.startswith("/marketing/") and product.collection.status not in {
-        Collection.Status.MARKETING_REVIEW,
-        Collection.Status.COMMERCIAL_APPROVED,
-    }:
-        raise Http404
+    if request.path.startswith("/marketing/"):
+        is_handed_over = product.collection.status in {
+            Collection.Status.MARKETING_REVIEW,
+            Collection.Status.COMMERCIAL_APPROVED,
+        }
+        is_previewed = (
+            product.collection.marketing_previewed_at
+            and product.document_status == DevelopmentProduct.DocumentStatus.APPROVED
+        )
+        if not is_handed_over and not is_previewed:
+            raise Http404
+        if not is_handed_over and file_kind not in {"product-cover", "approved-document"}:
+            raise Http404
     if file_kind == "combined-preview":
         try:
             document = build_combined_document(product=product)
@@ -752,6 +765,21 @@ def collection_handover(request, collection_id):
 
 @login_required
 @require_POST
+def collection_marketing_preview(request, collection_id):
+    collection = get_object_or_404(Collection, id=collection_id)
+    try:
+        publish_marketing_preview(collection=collection, actor=request.user)
+    except ValidationError as exc:
+        messages.error(request, _validation_message(exc))
+    except PermissionDenied:
+        return HttpResponseForbidden("Tampilkan ke Marketing memerlukan akses Approve R&D.")
+    else:
+        messages.success(request, "Collection tersedia sebagai R&D Preview di Upcoming Collection Marketing.")
+    return redirect("rnd:collection_detail", collection_id=collection.id)
+
+
+@login_required
+@require_POST
 def collection_delete(request, collection_id):
     collection = get_object_or_404(Collection, id=collection_id)
     collection_name = collection.name
@@ -769,9 +797,22 @@ def collection_delete(request, collection_id):
 @login_required
 def upcoming_collection_list(request):
     request.session["active_module"] = "marketing"
-    collections = Collection.objects.filter(
-        status__in=(Collection.Status.MARKETING_REVIEW, Collection.Status.COMMERCIAL_APPROVED)
-    ).annotate(product_count=Count("products"))
+    collections = list(
+        Collection.objects.filter(
+            Q(marketing_previewed_at__isnull=False)
+            | Q(status__in=(Collection.Status.MARKETING_REVIEW, Collection.Status.COMMERCIAL_APPROVED))
+        ).annotate(
+            product_count=Count(
+                "products",
+                filter=Q(products__document_status=DevelopmentProduct.DocumentStatus.APPROVED),
+            )
+        )
+    )
+    for collection in collections:
+        collection.is_preview = collection.status not in {
+            Collection.Status.MARKETING_REVIEW,
+            Collection.Status.COMMERCIAL_APPROVED,
+        }
     return render(request, "rnd/upcoming_list.html", {"collections": collections})
 
 
@@ -780,11 +821,20 @@ def upcoming_collection_detail(request, collection_id):
     request.session["active_module"] = "marketing"
     collection = get_object_or_404(
         Collection.objects.filter(
-            status__in=(Collection.Status.MARKETING_REVIEW, Collection.Status.COMMERCIAL_APPROVED)
-        ).select_related("handed_over_by", "commercial_approved_by"),
+            Q(marketing_previewed_at__isnull=False)
+            | Q(status__in=(Collection.Status.MARKETING_REVIEW, Collection.Status.COMMERCIAL_APPROVED))
+        ).select_related(
+            "handed_over_by", "marketing_previewed_by", "commercial_approved_by"
+        ),
         id=collection_id,
     )
-    products = collection.products.select_related("marketing_recommendation").all()
+    is_preview = collection.status not in {
+        Collection.Status.MARKETING_REVIEW,
+        Collection.Status.COMMERCIAL_APPROVED,
+    }
+    products = collection.products.select_related("marketing_recommendation").filter(
+        document_status=DevelopmentProduct.DocumentStatus.APPROVED
+    )
     rows = []
     for product in products:
         try:
@@ -795,7 +845,7 @@ def upcoming_collection_detail(request, collection_id):
     return render(
         request,
         "rnd/upcoming_detail.html",
-        {"collection": collection, "rows": rows},
+        {"collection": collection, "rows": rows, "is_preview": is_preview},
     )
 
 

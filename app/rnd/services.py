@@ -490,6 +490,36 @@ def handover_to_marketing(*, collection, actor):
 
 
 @transaction.atomic
+def publish_marketing_preview(*, collection, actor):
+    if not can_approve_module(actor, "rnd"):
+        raise PermissionDenied("Tampilkan ke Marketing memerlukan akses Approve R&D.")
+    collection = Collection.objects.select_for_update().get(pk=collection.pk)
+    if collection.marketing_previewed_at:
+        return collection
+    approved_products = collection.products.filter(
+        document_status=DevelopmentProduct.DocumentStatus.APPROVED
+    )
+    if not approved_products.exists():
+        raise ValidationError("Minimal satu dokumen Product wajib Approved sebelum ditampilkan ke Marketing.")
+    collection.marketing_previewed_at = timezone.now()
+    collection.marketing_previewed_by = actor
+    collection.save(
+        update_fields=("marketing_previewed_at", "marketing_previewed_by", "updated_at")
+    )
+    record_audit(
+        actor=actor,
+        action="rnd_collection_marketing_preview_published",
+        entity_type="rnd.collection",
+        entity_id=collection.id,
+        after_values={
+            "approved_product_count": approved_products.count(),
+            "marketing_previewed_at": collection.marketing_previewed_at.isoformat(),
+        },
+    )
+    return collection
+
+
+@transaction.atomic
 def approve_collection_commercially(*, collection, actor):
     if not actor.is_superuser:
         raise PermissionDenied("Official Commercial Approval hanya dapat dilakukan Super Admin.")

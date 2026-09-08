@@ -504,6 +504,80 @@ class RndWorkflowTests(TestCase):
         collection.refresh_from_db()
         self.assertEqual(collection.status, Collection.Status.DOCUMENT_APPROVAL)
 
+    def test_approver_can_publish_idempotent_marketing_preview_without_workflow_change(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.document_status = DevelopmentProduct.DocumentStatus.APPROVED
+        product.approved_document = self._pdf("approved.pdf", "APPROVED MDR")
+        product.save(update_fields=("document_status", "approved_document", "updated_at"))
+        self.client.force_login(self.rnd_approver)
+
+        endpoint = reverse("rnd:collection_marketing_preview", args=[collection.id])
+        first = self.client.post(endpoint)
+        self.assertRedirects(first, reverse("rnd:collection_detail", args=[collection.id]))
+        collection.refresh_from_db()
+        self.assertIsNotNone(collection.marketing_previewed_at)
+        self.assertEqual(collection.marketing_previewed_by, self.rnd_approver)
+        self.assertEqual(collection.status, Collection.Status.DRAFT)
+        self.assertIsNone(collection.handed_over_at)
+
+        self.client.post(endpoint)
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                action="rnd_collection_marketing_preview_published",
+                entity_id=str(collection.id),
+            ).count(),
+            1,
+        )
+
+    def test_marketing_preview_is_read_only_and_shows_only_approved_products(self):
+        collection = self._collection()
+        approved = self._product(collection, code="P-APPROVED")
+        approved.document_status = DevelopmentProduct.DocumentStatus.APPROVED
+        approved.approved_document = self._pdf("approved.pdf", "APPROVED MDR")
+        approved.save(update_fields=("document_status", "approved_document", "updated_at"))
+        draft = self._product(collection, code="P-DRAFT")
+        collection.marketing_previewed_at = timezone.now()
+        collection.marketing_previewed_by = self.rnd_approver
+        collection.save(update_fields=("marketing_previewed_at", "marketing_previewed_by", "updated_at"))
+        self.client.force_login(self.marketing)
+
+        listing = self.client.get(reverse("dashboard:upcoming_collection_list"))
+        self.assertContains(listing, collection.name)
+        self.assertContains(listing, "R&amp;D Preview", html=False)
+        detail = self.client.get(
+            reverse("dashboard:upcoming_collection_detail", args=[collection.id])
+        )
+        self.assertContains(detail, approved.name)
+        self.assertNotContains(detail, draft.name)
+        self.assertNotContains(detail, "Beri rekomendasi")
+        self.assertNotContains(detail, "Official Decision")
+        self.assertFalse(MarketingRecommendation.objects.exists())
+        approved_file = reverse(
+            "dashboard:upcoming_collection_product_file",
+            args=[approved.id, "approved-document"],
+        )
+        self.assertEqual(self.client.get(approved_file).status_code, 200)
+        raw_mockup = reverse(
+            "dashboard:upcoming_collection_product_file",
+            args=[approved.id, "mockup"],
+        )
+        self.assertEqual(self.client.get(raw_mockup).status_code, 404)
+
+    def test_editor_cannot_publish_marketing_preview(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.document_status = DevelopmentProduct.DocumentStatus.APPROVED
+        product.save(update_fields=("document_status", "updated_at"))
+        self.client.force_login(self.rnd_editor)
+
+        response = self.client.post(
+            reverse("rnd:collection_marketing_preview", args=[collection.id])
+        )
+        self.assertEqual(response.status_code, 403)
+        collection.refresh_from_db()
+        self.assertIsNone(collection.marketing_previewed_at)
+
     def test_submit_and_superadmin_approval_generate_one_audited_pdf(self):
         collection = self._collection()
         product = self._product(collection)

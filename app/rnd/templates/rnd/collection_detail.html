@@ -13,6 +13,15 @@
     <article class="metric-card rnd-development-gate"><span>Gate Development</span>{% if collection.development_started_at %}<strong class="metric-text">Sudah dimulai</strong><a class="secondary-button" href="{% url 'rnd:development_detail' collection.id %}">Buka Development</a>{% else %}<strong class="metric-text">{% if all_documents_approved %}Siap{% else %}{{ approved_document_count }} / {{ products|length }} Approved{% endif %}</strong><form method="post" action="{% url 'rnd:collection_start_development' collection.id %}">{% csrf_token %}<button class="primary-button" type="submit"{% if not all_documents_approved or not can_start_development %} disabled{% endif %}>Lanjut Development</button></form>{% endif %}</article>
 </section>
 <section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">EARLY VISIBILITY</p><h2>R&amp;D Preview untuk Marketing</h2></div></div>
+    {% if collection.marketing_previewed_at %}
+    <p>Collection sudah dapat dilihat Marketing sebagai preview sejak {{ collection.marketing_previewed_at|date:"d M Y H:i" }}. Hanya Product dengan dokumen Approved yang terlihat; ini bukan handover dan tidak mengubah status Collection.</p>
+    {% else %}
+    <p>Tampilkan Product yang dokumennya sudah Approved agar Marketing dapat mengintip Upcoming Collection. Preview bersifat read-only dan belum meminta riset, feedback, atau rekomendasi.</p>
+    <form method="post" action="{% url 'rnd:collection_marketing_preview' collection.id %}">{% csrf_token %}<button class="secondary-button" type="submit"{% if not approved_document_count or not can_publish_marketing_preview %} disabled{% endif %}>Tampilkan ke Marketing</button></form>
+    {% endif %}
+</section>
+<section class="panel section-gap">
     <div class="panel-header"><div><p class="eyebrow">PRODUCT DEVELOPMENT</p><h2>Product dalam Collection</h2></div></div>
     {% if products %}<div class="rnd-product-grid">
         {% for product in products %}<a class="rnd-product-card" href="{% url 'rnd:product_detail' product.id %}">

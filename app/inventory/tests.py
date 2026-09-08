@@ -10,6 +10,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from accounts.models import User
 from audit.models import AuditEvent
@@ -329,6 +330,33 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(parent["balance"], Decimal("14"))
         self.assertEqual(parent["fifo_value"], Decimal("1400000"))
         self.assertContains(response, "2 SKU")
+
+    def test_inventory_summary_exports_current_negative_filter_to_excel(self):
+        post_opening(sku=self.sku, quantity=-3, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("inventory:overview"), {
+            "as_of_date": "2026-07-31",
+            "warehouse": str(self.warehouse.id),
+            "sku_type": "sku",
+            "stock_status": "NEGATIVE",
+            "export": "xlsx",
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn("VOBIA-Inventory-negative-2026-07-31.xlsx", response["Content-Disposition"])
+        workbook = load_workbook(io.BytesIO(response.content), data_only=True)
+        sheet = workbook["Inventory Summary"]
+        self.assertEqual(sheet.max_row, 2)
+        self.assertEqual(sheet["C2"].value, "SKU-1")
+        self.assertEqual(sheet["H2"].value, -3)
+        self.assertEqual(sheet["O2"].value, "NEGATIVE")
+        self.assertEqual(sheet["P1"].value, "Warehouse Actual Qty")
+        workbook.close()
 
     def test_inventory_turnover_filters_product_and_size(self):
         self.sku.size = "M"

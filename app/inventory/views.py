@@ -1,4 +1,5 @@
 from decimal import Decimal
+from io import BytesIO
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -6,12 +7,15 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.http import HttpResponseNotAllowed
+from django.http import HttpResponse, HttpResponseNotAllowed
 from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 from master_data.models import Category, Product, ProductStatus, SKU, Warehouse
 from purchasing.models import PurchaseOrder, PurchaseOrderLine
@@ -35,6 +39,71 @@ from .services.fifo import CUTOVER_DATE, create_expected_return, inventory_balan
 from .services.opening_import import approve_opening_import, create_opening_import
 from .services.reporting import filtered_skus, inventory_parent_summary_rows, inventory_summary_rows, movement_ledger_rows, parent_movement_ledger_rows
 from production.models import ProductionActivity
+
+
+def _excel_text(value):
+    value = str(value or "")
+    return f"'{value}" if value.startswith(("=", "+", "-", "@")) else value
+
+
+def _export_inventory(balances, *, as_of_date, warehouse, sku_type, stock_status):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Inventory Summary"
+    common = (
+        "As Of Date", "Warehouse", "Opening 31 Jul", "Movement In", "Movement Out",
+        "Ending Stock", "FIFO Remaining", "FIFO Value", "Active Exceptions", "Stock Status",
+        "Warehouse Actual Qty", "Evidence Reference", "Warehouse Notes",
+    )
+    identity = (
+        ("Parent SKU", "Product", "Category", "SKU Count")
+        if sku_type == "parent"
+        else ("SKU", "Parent SKU", "Product", "Variant", "Category")
+    )
+    headers = common[:2] + identity + common[2:]
+    sheet.append(headers)
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    sheet.freeze_panes = "A2"
+
+    for row in balances:
+        product = row["product"] if sku_type == "parent" else row["sku"].product_variant.product
+        identity_values = (
+            (
+                _excel_text(row["parent_sku"]), _excel_text(product.name),
+                _excel_text(product.category.name), row["sku_count"],
+            )
+            if sku_type == "parent"
+            else (
+                _excel_text(row["sku"].sku), _excel_text(product.parent_sku),
+                _excel_text(product.name), _excel_text(row["sku"].product_variant.name),
+                _excel_text(product.category.name),
+            )
+        )
+        sheet.append((
+            as_of_date, _excel_text(warehouse.name if warehouse else "All Warehouse"),
+            *identity_values,
+            row["opening_qty"], row["incoming_qty"], row["outgoing_qty"], row["balance"],
+            row["fifo_qty"], row["fifo_value"], row["exception_count"], row["stock_status"],
+            "", "", "",
+        ))
+
+    sheet.auto_filter.ref = sheet.dimensions
+    for index, width in enumerate((14, 20, 20, 20, 30, 22, 20, 16, 16, 16, 16, 18, 18, 18, 16, 22, 28, 28), start=1):
+        if index <= sheet.max_column:
+            sheet.column_dimensions[get_column_letter(index)].width = width
+    output = BytesIO()
+    workbook.save(output)
+    workbook.close()
+    status_label = (stock_status or "all").lower()
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="VOBIA-Inventory-{status_label}-{as_of_date:%Y-%m-%d}.xlsx"'
+    )
+    return response
 
 
 @login_required
@@ -110,6 +179,14 @@ def overview(request):
         balances = inventory_parent_summary_rows(balances)
     if stock_status:
         balances = [row for row in balances if row["stock_status"] == stock_status]
+    if request.method == "GET" and request.GET.get("export") == "xlsx":
+        return _export_inventory(
+            balances,
+            as_of_date=as_of_date,
+            warehouse=selected_warehouse,
+            sku_type=sku_type,
+            stock_status=stock_status,
+        )
     total_balance = sum((row["balance"] for row in balances), 0)
     total_fifo_value = sum((row["fifo_value"] for row in balances), 0)
     total_exceptions = sum((row["exception_count"] for row in balances), 0)

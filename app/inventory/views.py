@@ -51,7 +51,7 @@ def _export_inventory(balances, *, as_of_date, warehouse, sku_type, stock_status
     sheet = workbook.active
     sheet.title = "Inventory Summary"
     common = (
-        "As Of Date", "Warehouse", "Opening 31 Jul", "Movement In", "Movement Out",
+        "As Of Date", "Warehouse", "Ending 31 Juli", "Movement In", "Movement Out",
         "Ending Stock", "FIFO Remaining", "FIFO Value", "Active Exceptions", "Stock Status",
         "Warehouse Actual Qty", "Evidence Reference", "Warehouse Notes",
     )

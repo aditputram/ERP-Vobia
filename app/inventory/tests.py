@@ -352,6 +352,7 @@ class InventoryWorkflowTests(TestCase):
         workbook = load_workbook(io.BytesIO(response.content), data_only=True)
         sheet = workbook["Inventory Summary"]
         self.assertEqual(sheet.max_row, 2)
+        self.assertEqual(sheet["H1"].value, "Ending 31 Juli")
         self.assertEqual(sheet["C2"].value, "SKU-1")
         self.assertEqual(sheet["H2"].value, -3)
         self.assertEqual(sheet["O2"].value, "NEGATIVE")

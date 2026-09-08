@@ -535,7 +535,15 @@ class RndWorkflowTests(TestCase):
         approved = self._product(collection, code="P-APPROVED")
         approved.document_status = DevelopmentProduct.DocumentStatus.APPROVED
         approved.approved_document = self._pdf("approved.pdf", "APPROVED MDR")
-        approved.save(update_fields=("document_status", "approved_document", "updated_at"))
+        approved.product_cover = self._image("approved.png")
+        approved.save(
+            update_fields=(
+                "document_status",
+                "approved_document",
+                "product_cover",
+                "updated_at",
+            )
+        )
         draft = self._product(collection, code="P-DRAFT")
         collection.marketing_previewed_at = timezone.now()
         collection.marketing_previewed_by = self.rnd_approver
@@ -545,11 +553,15 @@ class RndWorkflowTests(TestCase):
         listing = self.client.get(reverse("dashboard:upcoming_collection_list"))
         self.assertContains(listing, collection.name)
         self.assertContains(listing, "R&amp;D Preview", html=False)
+        self.assertContains(listing, "rnd-collection-card")
+        self.assertNotIn(b"<table", listing.content)
         detail = self.client.get(
             reverse("dashboard:upcoming_collection_detail", args=[collection.id])
         )
         self.assertContains(detail, approved.name)
         self.assertNotContains(detail, draft.name)
+        self.assertContains(detail, "rnd-preview-cover-card")
+        self.assertNotIn(b"<table", detail.content)
         self.assertNotContains(detail, "Beri rekomendasi")
         self.assertNotContains(detail, "Official Decision")
         self.assertFalse(MarketingRecommendation.objects.exists())

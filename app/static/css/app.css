@@ -244,6 +244,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .rnd-product-card-top, .rnd-product-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .rnd-product-card-cover { aspect-ratio: 4 / 3; margin-top: 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: #f1f1ed; }
 .rnd-product-card-cover img { width: 100%; height: 100%; display: block; object-fit: contain; }
+.rnd-preview-cover-card { min-height: 0; padding: 0; overflow: hidden; }
+.rnd-preview-cover-card .rnd-product-card-cover { margin: 0; border: 0; border-radius: 0; }
 .rnd-product-card-copy { flex: 1; padding: 28px 2px 22px; }
 .rnd-product-card-copy h3 { margin: 0 0 8px; font-size: 22px; letter-spacing: -.035em; }
 .rnd-product-card-copy p, .rnd-product-card-footer { margin: 0; color: var(--muted); font-size: 10px; }

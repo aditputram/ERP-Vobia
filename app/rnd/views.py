@@ -801,6 +801,16 @@ def upcoming_collection_list(request):
         Collection.objects.filter(
             Q(marketing_previewed_at__isnull=False)
             | Q(status__in=(Collection.Status.MARKETING_REVIEW, Collection.Status.COMMERCIAL_APPROVED))
+        ).prefetch_related(
+            Prefetch(
+                "products",
+                queryset=DevelopmentProduct.objects.filter(
+                    document_status=DevelopmentProduct.DocumentStatus.APPROVED
+                ).exclude(product_cover="").only(
+                    "id", "collection_id", "name", "product_cover"
+                ),
+                to_attr="cover_products",
+            )
         ).annotate(
             product_count=Count(
                 "products",

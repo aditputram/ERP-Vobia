@@ -2,7 +2,12 @@
 {% block title %}Upcoming Collection · Marketing{% endblock %}
 {% block content %}
 <header class="page-header"><div><p class="eyebrow">MARKETING · UPCOMING COLLECTION</p><h1>Upcoming Collection</h1><p>Intip Product Approved melalui R&amp;D Preview. Market validation dan rekomendasi baru dimulai setelah handover resmi.</p></div></header>
-<section class="panel"><div class="table-wrap"><table><thead><tr><th>Collection</th><th>Product Approved</th><th>Tahap</th><th>Ditampilkan</th><th></th></tr></thead><tbody>
-{% for collection in collections %}<tr><td><strong>{{ collection.code }}</strong><br>{{ collection.name }}</td><td>{{ collection.product_count }}</td><td>{% if collection.is_preview %}R&amp;D Preview{% else %}{{ collection.get_status_display }}{% endif %}</td><td>{% if collection.is_preview %}{{ collection.marketing_previewed_at|date:"d M Y H:i" }}{% else %}{{ collection.handed_over_at|date:"d M Y H:i"|default:"—" }}{% endif %}</td><td><a class="row-link" href="{% url 'dashboard:upcoming_collection_detail' collection.id %}">{% if collection.is_preview %}Intip Product{% else %}Review{% endif %} →</a></td></tr>{% empty %}<tr><td colspan="5">Belum ada Collection yang ditampilkan R&amp;D.</td></tr>{% endfor %}
-</tbody></table></div></section>
+<section class="panel"><div class="rnd-product-grid">
+{% for collection in collections %}<a class="rnd-product-card rnd-collection-card" href="{% url 'dashboard:upcoming_collection_detail' collection.id %}">
+    <div class="rnd-product-card-top"><span class="pill">{{ collection.code }}</span><span class="status-chip"><span></span>{% if collection.is_preview %}R&amp;D Preview{% else %}{{ collection.get_status_display }}{% endif %}</span></div>
+    <div class="rnd-collection-covers">{% for product in collection.cover_products|slice:":4" %}<div class="rnd-collection-cover-item"><img src="{% url 'dashboard:upcoming_collection_product_file' product.id 'product-cover' %}" alt="Product cover {{ product.name }}" loading="lazy"></div>{% empty %}<div class="rnd-collection-cover-empty">Cover Product belum tersedia</div>{% endfor %}</div>
+    <div class="rnd-product-card-copy"><h3>{{ collection.name }}</h3><p>{{ collection.product_count }} Product Approved</p></div>
+    <div class="rnd-product-card-footer"><span>{% if collection.is_preview %}R&amp;D Preview{% else %}{{ collection.get_status_display }}{% endif %}</span><strong>{% if collection.is_preview %}Intip Product{% else %}Review{% endif %} <span aria-hidden="true">→</span></strong></div>
+</a>{% empty %}<p class="empty-state rnd-design-empty">Belum ada Collection yang ditampilkan R&amp;D.</p>{% endfor %}
+</div></section>
 {% endblock %}

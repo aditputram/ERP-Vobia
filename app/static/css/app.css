@@ -289,8 +289,14 @@ tbody tr:last-child td { border-bottom: 0; }
 .rnd-design-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .rnd-design-copy small { color: var(--muted); font-size: 9px; }
 .rnd-design-empty { grid-column: 1 / -1; margin: 0; }
-.rnd-design-detail { display: grid; place-items: center; min-height: 420px; background: #efeee9; }
+.rnd-design-detail { position: relative; display: grid; place-items: center; min-height: 420px; background: #efeee9; }
 .rnd-design-detail img { display: block; max-width: 100%; max-height: 78vh; object-fit: contain; }
+.rnd-design-arrow { position: absolute; z-index: 1; top: 50%; width: 46px; height: 46px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.65); border-radius: 50%; color: white; background: rgba(23,23,20,.7); box-shadow: 0 8px 24px rgba(0,0,0,.18); font-size: 34px; line-height: 1; transform: translateY(-50%); }
+.rnd-design-arrow:hover { color: white; background: rgba(23,23,20,.9); }
+.rnd-design-arrow.previous { left: 18px; }
+.rnd-design-arrow.next { right: 18px; }
+.rnd-design-arrow.disabled { opacity: .25; }
+.rnd-design-navigation-help { margin: 8px 0 0; color: var(--muted); text-align: center; font-size: 9px; }
 .rnd-development-gate { display: flex; flex-direction: column; align-items: flex-start; }
 .rnd-development-gate form { margin-top: auto; }
 .rnd-development-gate .primary-button, .rnd-development-gate .secondary-button { min-height: 38px; margin-top: auto; }

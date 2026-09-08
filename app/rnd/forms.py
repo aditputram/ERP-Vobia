@@ -1,7 +1,11 @@
 from decimal import Decimal
+from io import BytesIO
+from pathlib import Path
 
 from django import forms
+from django.core.files.base import ContentFile
 from django.forms import inlineformset_factory
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .models import (
     Collection,
@@ -14,6 +18,8 @@ from .models import (
 
 class DesignAssetForm(forms.ModelForm):
     FILE_MAX_BYTES = 10 * 1024 * 1024
+    IMAGE_MAX_EDGE = 2400
+    IMAGE_MAX_PIXELS = 40_000_000
     FILE_TYPES = {
         "image/jpeg": (b"\xff\xd8\xff",),
         "image/png": (b"\x89PNG\r\n\x1a\n",),
@@ -38,7 +44,19 @@ class DesignAssetForm(forms.ModelForm):
             raise forms.ValidationError("Foto harus berupa JPG, PNG, atau WebP yang valid.")
         if uploaded.content_type == "image/webp" and header[8:12] != b"WEBP":
             raise forms.ValidationError("File WebP tidak valid.")
-        return uploaded
+        try:
+            with Image.open(uploaded) as source:
+                if source.width * source.height > self.IMAGE_MAX_PIXELS:
+                    raise forms.ValidationError("Resolusi foto terlalu besar untuk diproses.")
+                image = ImageOps.exif_transpose(source)
+                image.thumbnail((self.IMAGE_MAX_EDGE, self.IMAGE_MAX_EDGE), Image.Resampling.LANCZOS)
+                has_alpha = image.mode in {"RGBA", "LA"} or "transparency" in image.info
+                image = image.convert("RGBA" if has_alpha else "RGB")
+                output = BytesIO()
+                image.save(output, "WEBP", quality=82, method=6)
+        except (OSError, UnidentifiedImageError, Image.DecompressionBombError):
+            raise forms.ValidationError("Foto tidak dapat diproses sebagai gambar yang valid.")
+        return ContentFile(output.getvalue(), name=f"{Path(uploaded.name).stem[:220]}.webp")
 
 
 class CollectionForm(forms.ModelForm):

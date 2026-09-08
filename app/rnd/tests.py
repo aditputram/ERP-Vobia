@@ -8,6 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from PIL import Image
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, NameObject
 from reportlab.pdfgen import canvas
@@ -90,6 +91,11 @@ class RndWorkflowTests(TestCase):
         writer.write(output)
         return SimpleUploadedFile(name, output.getvalue(), content_type="application/pdf")
 
+    def _image(self, name="design.png", size=(40, 40)):
+        output = BytesIO()
+        Image.new("RGB", size, "#536b2e").save(output, format="PNG")
+        return SimpleUploadedFile(name, output.getvalue(), content_type="image/png")
+
     def _product_payload(self, product, status):
         return {
             "name": product.name,
@@ -149,16 +155,17 @@ class RndWorkflowTests(TestCase):
 
         uploaded = self.client.post(
             reverse("rnd:designing"),
-            {
-                "image": SimpleUploadedFile(
-                    "draft-flannel.png",
-                    b"\x89PNG\r\n\x1a\nlocal design",
-                    content_type="image/png",
-                )
-            },
+            {"image": self._image("draft-flannel.png", size=(2600, 20))},
         )
         self.assertRedirects(uploaded, reverse("rnd:designing"))
         design = DesignAsset.objects.get()
+        self.assertEqual(design.original_name, "draft-flannel.webp")
+        self.assertTrue(design.image.name.endswith(".webp"))
+        design.image.open("rb")
+        stored_image = Image.open(design.image)
+        self.assertEqual(stored_image.format, "WEBP")
+        self.assertLessEqual(max(stored_image.size), 2400)
+        design.image.close()
         page = self.client.get(reverse("rnd:designing"))
         self.assertContains(page, "Desain Terbaru")
         self.assertContains(page, "Direkomendasikan untuk Collection Baru")
@@ -194,6 +201,63 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(file_response["Cache-Control"], "private, no-store")
         self.client.logout()
         self.assertEqual(self.client.get(reverse("rnd:design_file", args=[design.id])).status_code, 302)
+
+    def test_design_gallery_navigation_expiry_and_delete(self):
+        self.client.force_login(self.rnd_editor)
+        for number in range(3):
+            self.client.post(
+                reverse("rnd:designing"),
+                {"image": self._image(f"design-{number}.png")},
+            )
+        newest, middle, oldest = DesignAsset.objects.order_by("-created_at", "-id")
+
+        detail = self.client.get(reverse("rnd:design_detail", args=[middle.id]))
+        self.assertContains(detail, reverse("rnd:design_detail", args=[newest.id]))
+        self.assertContains(detail, reverse("rnd:design_detail", args=[oldest.id]))
+        self.assertContains(detail, 'id="previous-design"')
+        self.assertContains(detail, 'id="next-design"')
+        self.assertContains(detail, 'event.key === "ArrowLeft"')
+        self.assertContains(detail, "Tersedia sampai")
+
+        denied = self.client.post(reverse("rnd:design_delete", args=[middle.id]))
+        self.assertEqual(denied.status_code, 403)
+        self.assertTrue(DesignAsset.objects.filter(pk=middle.pk).exists())
+
+        self.client.force_login(self.rnd_approver)
+        image_storage = middle.image.storage
+        image_name = middle.image.name
+        with self.captureOnCommitCallbacks(execute=True):
+            deleted = self.client.post(reverse("rnd:design_delete", args=[middle.id]))
+        self.assertRedirects(deleted, reverse("rnd:designing"))
+        self.assertFalse(DesignAsset.objects.filter(pk=middle.pk).exists())
+        self.assertFalse(image_storage.exists(image_name))
+        self.assertTrue(
+            AuditEvent.objects.filter(action="rnd_design_deleted", entity_id=str(middle.id)).exists()
+        )
+
+    def test_designing_purges_files_older_than_180_days(self):
+        expired = DesignAsset.objects.create(
+            image=self._image("expired.png"),
+            original_name="expired.png",
+            uploaded_by=self.rnd_editor,
+        )
+        DesignAsset.objects.filter(pk=expired.pk).update(
+            created_at=timezone.now() - timedelta(days=181)
+        )
+        expired.refresh_from_db()
+        image_storage = expired.image.storage
+        image_name = expired.image.name
+
+        self.client.force_login(self.rnd_editor)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.get(reverse("rnd:designing"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(DesignAsset.objects.filter(pk=expired.pk).exists())
+        self.assertFalse(image_storage.exists(image_name))
+        audit = AuditEvent.objects.get(action="rnd_design_expired", entity_id=str(expired.id))
+        self.assertIsNone(audit.actor)
+        self.assertEqual(audit.before_values["original_name"], "expired.png")
 
     def test_product_form_is_minimal_and_accepts_private_design_files(self):
         collection = self._collection()

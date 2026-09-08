@@ -57,6 +57,36 @@ def _can_edit_rnd(user):
     return can_edit_module(user, "rnd")
 
 
+DESIGN_RETENTION = timedelta(days=180)
+
+
+def _delete_design_asset(design, *, actor, action):
+    image_storage = design.image.storage
+    image_name = design.image.name
+    record_audit(
+        actor=actor,
+        action=action,
+        entity_type="rnd.design_asset",
+        entity_id=design.id,
+        before_values={
+            "original_name": design.original_name,
+            "uploaded_by_id": str(design.uploaded_by_id) if design.uploaded_by_id else None,
+            "created_at": design.created_at.isoformat(),
+        },
+    )
+    design.delete()
+    transaction.on_commit(
+        lambda storage=image_storage, name=image_name: storage.delete(name),
+        robust=True,
+    )
+
+
+def _purge_expired_designs():
+    cutoff = timezone.now() - DESIGN_RETENTION
+    for design in DesignAsset.objects.select_for_update().filter(created_at__lt=cutoff):
+        _delete_design_asset(design, actor=None, action="rnd_design_expired")
+
+
 @login_required
 def dashboard(request):
     request.session["active_module"] = "rnd"
@@ -83,6 +113,7 @@ def dashboard(request):
 @transaction.atomic
 def designing(request):
     request.session["active_module"] = "rnd"
+    _purge_expired_designs()
     can_upload = _can_edit_rnd(request.user)
     form = DesignAssetForm(request.POST or None, request.FILES or None)
     if request.method == "POST":
@@ -125,10 +156,32 @@ def design_detail(request, design_id):
         DesignAsset.objects.select_related("uploaded_by", "recommended_by"),
         id=design_id,
     )
+    previous_design = (
+        DesignAsset.objects.filter(
+            Q(created_at__gt=design.created_at)
+            | Q(created_at=design.created_at, id__gt=design.id)
+        )
+        .order_by("created_at", "id")
+        .first()
+    )
+    next_design = (
+        DesignAsset.objects.filter(
+            Q(created_at__lt=design.created_at)
+            | Q(created_at=design.created_at, id__lt=design.id)
+        )
+        .order_by("-created_at", "-id")
+        .first()
+    )
     return render(
         request,
         "rnd/design_detail.html",
-        {"design": design, "can_recommend": can_approve_module(request.user, "rnd")},
+        {
+            "design": design,
+            "previous_design": previous_design,
+            "next_design": next_design,
+            "expires_at": design.created_at + DESIGN_RETENTION,
+            "can_recommend": can_approve_module(request.user, "rnd"),
+        },
     )
 
 
@@ -187,6 +240,19 @@ def design_unrecommend(request, design_id):
         )
     messages.success(request, "Rekomendasi Design dibatalkan.")
     return redirect("rnd:design_detail", design_id=design.id)
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def design_delete(request, design_id):
+    if not can_approve_module(request.user, "rnd"):
+        return HttpResponseForbidden("Hapus Design memerlukan akses Approve R&D.")
+    design = get_object_or_404(DesignAsset.objects.select_for_update(), id=design_id)
+    original_name = design.original_name
+    _delete_design_asset(design, actor=request.user, action="rnd_design_deleted")
+    messages.success(request, f"Design {original_name} berhasil dihapus.")
+    return redirect("rnd:designing")
 
 
 @login_required

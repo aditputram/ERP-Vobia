@@ -5,7 +5,7 @@
     <div>
         <p class="eyebrow">R&amp;D · DESIGNING</p>
         <h1>{{ design.original_name }}</h1>
-        <p>Di-upload {{ design.created_at|date:"d M Y · H:i" }}{% if design.uploaded_by %} oleh {{ design.uploaded_by.get_full_name|default:design.uploaded_by.username }}{% endif %}.</p>
+        <p>Di-upload {{ design.created_at|date:"d M Y · H:i" }}{% if design.uploaded_by %} oleh {{ design.uploaded_by.get_full_name|default:design.uploaded_by.username }}{% endif %}. Tersedia sampai {{ expires_at|date:"d M Y" }}.</p>
     </div>
     <div class="header-actions">
         <a class="secondary-button" href="{% url 'rnd:designing' %}" onclick="if (document.referrer.startsWith(this.href)) { history.back(); return false; }">Kembali</a>
@@ -15,6 +15,7 @@
             {% else %}
             <form method="post" action="{% url 'rnd:design_recommend' design.id %}">{% csrf_token %}<button class="primary-button" type="submit">Rekomendasikan untuk Collection Baru</button></form>
             {% endif %}
+            <form method="post" action="{% url 'rnd:design_delete' design.id %}" onsubmit="return confirm('Hapus Design {{ design.original_name|escapejs }}? File akan dihapus permanen dari Vobia Space.');">{% csrf_token %}<button class="secondary-button danger-button" type="submit">Hapus Design</button></form>
         {% endif %}
     </div>
 </header>
@@ -27,6 +28,19 @@
 {% endif %}
 
 <section class="panel section-gap rnd-design-detail">
+    {% if previous_design %}<a id="previous-design" class="rnd-design-arrow previous" href="{% url 'rnd:design_detail' previous_design.id %}" aria-label="Buka Design sebelumnya" onclick="location.replace(this.href); return false;">&#8249;</a>{% else %}<span class="rnd-design-arrow previous disabled" aria-hidden="true">&#8249;</span>{% endif %}
     <img src="{% url 'rnd:design_file' design.id %}" alt="{{ design.original_name }}">
+    {% if next_design %}<a id="next-design" class="rnd-design-arrow next" href="{% url 'rnd:design_detail' next_design.id %}" aria-label="Buka Design berikutnya" onclick="location.replace(this.href); return false;">&#8250;</a>{% else %}<span class="rnd-design-arrow next disabled" aria-hidden="true">&#8250;</span>{% endif %}
 </section>
+<p class="rnd-design-navigation-help">Gunakan tombol panah atau keyboard ← → untuk melihat Design lainnya.</p>
+<script>
+document.addEventListener("keydown", (event) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const link = document.getElementById(event.key === "ArrowLeft" ? "previous-design" : event.key === "ArrowRight" ? "next-design" : "");
+    if (link) {
+        event.preventDefault();
+        location.replace(link.href);
+    }
+});
+</script>
 {% endblock %}

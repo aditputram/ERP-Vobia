@@ -38,12 +38,13 @@ from .services import (
     approve_collection_commercially,
     approve_product_document,
     can_approve_module,
+    can_edit_module,
     delete_collection,
-    finalize_product,
     handover_to_marketing,
-    move_product_to_costing,
     request_product_document_revision,
+    start_collection_development,
     submit_product_document,
+    transition_product_development,
 )
 
 
@@ -52,7 +53,7 @@ def _validation_message(exc):
 
 
 def _can_edit_rnd(user):
-    return user.is_superuser or (user.module_access or {}).get("rnd", "none") in {"edit", "approve"}
+    return can_edit_module(user, "rnd")
 
 
 @login_required
@@ -60,7 +61,10 @@ def dashboard(request):
     request.session["active_module"] = "rnd"
     collections = Collection.objects.annotate(
         product_count=Count("products"),
-        final_count=Count("products", filter=Q(products__status=DevelopmentProduct.Status.FINAL_APPROVED)),
+        final_count=Count(
+            "products",
+            filter=Q(products__development_stage=DevelopmentProduct.DevelopmentStage.FINAL),
+        ),
     )
     return render(
         request,
@@ -68,9 +72,7 @@ def dashboard(request):
         {
             "collections": collections,
             "collection_count": collections.count(),
-            "development_count": collections.filter(
-                status__in=(Collection.Status.DRAFT, Collection.Status.DEVELOPMENT)
-            ).count(),
+            "development_count": collections.filter(development_started_at__isnull=False).count(),
             "marketing_review_count": collections.filter(status=Collection.Status.MARKETING_REVIEW).count(),
         },
     )
@@ -211,7 +213,10 @@ def collection_create(request):
 def collection_detail(request, collection_id):
     request.session["active_module"] = "rnd"
     collection = get_object_or_404(Collection.objects.select_related("handed_over_by"), id=collection_id)
-    editable = collection.status in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT}
+    editable = (
+        collection.status in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT}
+        and not collection.development_started_at
+    )
     product = DevelopmentProduct(collection=collection)
     product_form = DevelopmentProductForm(request.POST or None, request.FILES or None, instance=product)
     material_formset = DevelopmentProductMaterialFormSet(
@@ -221,7 +226,9 @@ def collection_detail(request, collection_id):
     )
     if request.method == "POST":
         if not editable:
-            return HttpResponseForbidden("Collection sudah dikunci setelah handover ke Marketing.")
+            return HttpResponseForbidden(
+                "Product baru tidak dapat ditambahkan setelah Development dimulai atau handover ke Marketing."
+            )
         if product_form.is_valid() and material_formset.is_valid():
             product = product_form.save(commit=False)
             product.collection = collection
@@ -244,6 +251,11 @@ def collection_detail(request, collection_id):
     products = collection.products.select_related("rnd_approved_by").annotate(
         material_count=Count("materials")
     )
+    product_count = products.count()
+    approved_document_count = products.filter(
+        document_status=DevelopmentProduct.DocumentStatus.APPROVED
+    ).count()
+    all_documents_approved = product_count > 0 and approved_document_count == product_count
     return render(
         request,
         "rnd/collection_detail.html",
@@ -253,11 +265,99 @@ def collection_detail(request, collection_id):
             "product_form": product_form,
             "material_formset": material_formset,
             "editable": editable,
-            "all_final": products.exists()
-            and not products.exclude(status=DevelopmentProduct.Status.FINAL_APPROVED).exists(),
+            "approved_document_count": approved_document_count,
+            "all_documents_approved": all_documents_approved,
+            "can_start_development": _can_edit_rnd(request.user),
+            "can_delete": can_approve_module(request.user, "rnd")
+            and collection.status in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT},
+            "all_final": product_count > 0
+            and not products.exclude(
+                development_stage=DevelopmentProduct.DevelopmentStage.FINAL
+            ).exists(),
             "can_handover": can_approve_module(request.user, "rnd"),
         },
     )
+
+
+@login_required
+def development_list(request):
+    request.session["active_module"] = "rnd"
+    collections = (
+        Collection.objects.filter(development_started_at__isnull=False)
+        .select_related("development_started_by")
+        .annotate(
+            product_count=Count("products"),
+            final_count=Count(
+                "products",
+                filter=Q(products__development_stage=DevelopmentProduct.DevelopmentStage.FINAL),
+            ),
+        )
+    )
+    return render(
+        request,
+        "rnd/development_list.html",
+        {"collections": collections},
+    )
+
+
+@login_required
+def development_detail(request, collection_id):
+    request.session["active_module"] = "rnd"
+    collection = get_object_or_404(
+        Collection.objects.filter(development_started_at__isnull=False).select_related(
+            "development_started_by"
+        ),
+        id=collection_id,
+    )
+    products = list(collection.products.select_related("rnd_approved_by"))
+    return render(
+        request,
+        "rnd/development_detail.html",
+        {
+            "collection": collection,
+            "products": products,
+            "final_count": sum(
+                product.development_stage == DevelopmentProduct.DevelopmentStage.FINAL
+                for product in products
+            ),
+            "can_progress": can_edit_module(request.user, "rnd"),
+            "can_decide": can_approve_module(request.user, "rnd"),
+        },
+    )
+
+
+@login_required
+@require_POST
+def collection_start_development(request, collection_id):
+    collection = get_object_or_404(Collection, id=collection_id)
+    try:
+        start_collection_development(collection=collection, actor=request.user)
+    except ValidationError as exc:
+        messages.error(request, _validation_message(exc))
+        return redirect("rnd:collection_detail", collection_id=collection.id)
+    except PermissionDenied:
+        return HttpResponseForbidden("Lanjut Development memerlukan akses Edit atau Approve R&D.")
+    messages.success(request, "Collection berhasil masuk ke tab Development.")
+    return redirect("rnd:development_detail", collection_id=collection.id)
+
+
+@login_required
+@require_POST
+def product_development_transition(request, product_id):
+    product = get_object_or_404(DevelopmentProduct.objects.select_related("collection"), id=product_id)
+    try:
+        transition_product_development(
+            product=product,
+            actor=request.user,
+            action=request.POST.get("action", ""),
+        )
+    except ValidationError as exc:
+        messages.error(request, _validation_message(exc))
+    except PermissionDenied:
+        return HttpResponseForbidden("Aksi ini tidak tersedia untuk permission akun Anda.")
+    else:
+        messages.success(request, "Tahap Development Product berhasil diperbarui.")
+    return redirect("rnd:development_detail", collection_id=product.collection_id)
 
 
 @login_required
@@ -515,7 +615,7 @@ def product_approve(request, product_id):
     except PermissionDenied:
         return HttpResponseForbidden("Approval dokumen R&D hanya dapat dilakukan Super Admin.")
     else:
-        messages.success(request, "Dokumen Product sudah di-approve. Status Product masuk ke Sampling.")
+        messages.success(request, "Dokumen Product sudah di-approve dan memenuhi gate Development.")
     return redirect("rnd:product_detail", product_id=product.id)
 
 
@@ -539,34 +639,6 @@ def product_request_revision(request, product_id):
             request,
             f"Revisi {product.document_revision:03d} diminta. Upload file sesuai target revisi.",
         )
-    return redirect("rnd:product_detail", product_id=product.id)
-
-
-@login_required
-@require_POST
-def product_move_to_costing(request, product_id):
-    product = get_object_or_404(DevelopmentProduct, id=product_id)
-    try:
-        move_product_to_costing(product=product, actor=request.user)
-    except ValidationError as exc:
-        messages.error(request, _validation_message(exc))
-    else:
-        messages.success(request, "Status Product berhasil dilanjutkan ke Costing.")
-    return redirect("rnd:product_detail", product_id=product.id)
-
-
-@login_required
-@require_POST
-def product_finalize(request, product_id):
-    product = get_object_or_404(DevelopmentProduct, id=product_id)
-    try:
-        finalize_product(product=product, actor=request.user)
-    except ValidationError as exc:
-        messages.error(request, _validation_message(exc))
-    except PermissionDenied:
-        return HttpResponseForbidden("Final R&D memerlukan akses Approve R&D.")
-    else:
-        messages.success(request, "Product sudah ditetapkan Final R&D.")
     return redirect("rnd:product_detail", product_id=product.id)
 
 

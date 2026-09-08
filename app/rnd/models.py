@@ -33,6 +33,14 @@ class Collection(UUIDTimestampedModel):
         on_delete=models.SET_NULL,
         related_name="rnd_collections_handed_over",
     )
+    development_started_at = models.DateTimeField(null=True, blank=True)
+    development_started_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="rnd_collections_development_started",
+    )
     commercial_approved_at = models.DateTimeField(null=True, blank=True)
     commercial_approved_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -89,6 +97,14 @@ class DevelopmentProduct(UUIDTimestampedModel):
         COSTING = "COSTING", "Costing"
         FINAL_APPROVED = "FINAL_APPROVED", "Final R&D"
 
+    class DevelopmentStage(models.TextChoices):
+        NOT_STARTED = "NOT_STARTED", "Belum Dimulai"
+        MATERIAL_PURCHASE = "MATERIAL_PURCHASE", "Pembelian Material Development"
+        SAMPLING = "SAMPLING", "Sampling"
+        PROTOTYPE = "PROTOTYPE", "Prototype"
+        RESAMPLING = "RESAMPLING", "Resampling"
+        FINAL = "FINAL", "Final Development"
+
     collection = models.ForeignKey(Collection, on_delete=models.PROTECT, related_name="products")
     working_code = models.CharField(max_length=100)
     name = models.CharField(max_length=180)
@@ -111,6 +127,12 @@ class DevelopmentProduct(UUIDTimestampedModel):
     )
     final_sample_url = models.URLField(blank=True)
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.CONCEPT)
+    development_stage = models.CharField(
+        max_length=30,
+        choices=DevelopmentStage.choices,
+        default=DevelopmentStage.NOT_STARTED,
+    )
+    prototype_number = models.PositiveSmallIntegerField(default=0)
     notes = models.TextField(blank=True)
     product_cover = models.FileField(upload_to="rnd/product_covers/", blank=True)
     mockup = models.FileField(upload_to="rnd/mockups/", blank=True)
@@ -146,11 +168,36 @@ class DevelopmentProduct(UUIDTimestampedModel):
             models.UniqueConstraint(
                 fields=("collection", "working_code"),
                 name="rnd_unique_working_code_per_collection",
-            )
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        development_stage__in=(
+                            "NOT_STARTED",
+                            "MATERIAL_PURCHASE",
+                            "SAMPLING",
+                        ),
+                        prototype_number=0,
+                    )
+                    | Q(
+                        development_stage__in=("PROTOTYPE", "RESAMPLING", "FINAL"),
+                        prototype_number__gte=1,
+                    )
+                ),
+                name="rnd_development_stage_prototype_number_rule",
+            ),
         ]
 
     def __str__(self):
         return self.name
+
+    @property
+    def development_stage_label(self):
+        if self.development_stage == self.DevelopmentStage.PROTOTYPE and self.prototype_number:
+            return f"Prototype {self.prototype_number}"
+        if self.development_stage == self.DevelopmentStage.RESAMPLING:
+            return f"Resampling menuju Prototype {self.prototype_number + 1}"
+        return self.get_development_stage_display()
 
 
 class DevelopmentProductDocumentRevision(UUIDTimestampedModel):

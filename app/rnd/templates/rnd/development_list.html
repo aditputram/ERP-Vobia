@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Development · R&amp;D{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div><p class="eyebrow">R&amp;D · DEVELOPMENT</p><h1>Development</h1><p>Collection masuk ke sini setelah seluruh dokumen Product Approved dan tombol Lanjut Development dijalankan.</p></div>
+</header>
+<section class="panel">
+    <div class="panel-header"><div><p class="eyebrow">COLLECTION DEVELOPMENT</p><h2>Collection Aktif</h2></div></div>
+    <div class="rnd-product-grid">
+        {% for collection in collections %}<a class="rnd-product-card" href="{% url 'rnd:development_detail' collection.id %}">
+            <div class="rnd-product-card-top"><span class="pill">{{ collection.code }}</span><span class="status-chip"><span></span>{{ collection.final_count }} / {{ collection.product_count }} Final</span></div>
+            <div class="rnd-product-card-copy"><h3>{{ collection.name }}</h3><p>Development dimulai {{ collection.development_started_at|date:"d M Y H:i" }}{% if collection.development_started_by %} oleh {{ collection.development_started_by.get_full_name|default:collection.development_started_by.username }}{% endif %}</p></div>
+            <div class="rnd-product-card-footer"><span>{{ collection.get_status_display }}</span><strong>Buka Development <span aria-hidden="true">→</span></strong></div>
+        </a>{% empty %}<p class="empty-state rnd-design-empty">Belum ada Collection yang dilanjutkan ke Development.</p>{% endfor %}
+    </div>
+</section>
+{% endblock %}

@@ -451,7 +451,7 @@ class RndWorkflowTests(TestCase):
         self.assertRedirects(approved, reverse("rnd:product_detail", args=[product.id]))
         product.refresh_from_db()
         self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.APPROVED)
-        self.assertEqual(product.status, DevelopmentProduct.Status.SAMPLING)
+        self.assertEqual(product.status, DevelopmentProduct.Status.CONCEPT)
         self.assertEqual(product.rnd_approved_by, self.admin)
         revision.refresh_from_db()
         self.assertEqual(revision.status, DevelopmentProductDocumentRevision.Status.APPROVED)
@@ -667,7 +667,7 @@ class RndWorkflowTests(TestCase):
         self.client.force_login(self.rnd_approver)
 
         blocked = self.client.post(reverse("rnd:collection_handover", args=[collection.id]), follow=True)
-        self.assertContains(blocked, "Seluruh Product wajib Final R&amp;D")
+        self.assertContains(blocked, "Collection wajib menyelesaikan alur Development")
         collection.refresh_from_db()
         self.assertEqual(collection.status, Collection.Status.DRAFT)
 
@@ -684,6 +684,8 @@ class RndWorkflowTests(TestCase):
                 "updated_at",
             )
         )
+        started = self.client.post(reverse("rnd:collection_start_development", args=[collection.id]))
+        self.assertRedirects(started, reverse("rnd:development_detail", args=[collection.id]))
         handed = self.client.post(reverse("rnd:collection_handover", args=[collection.id]))
         self.assertRedirects(handed, reverse("rnd:collection_detail", args=[collection.id]))
         collection.refresh_from_db()
@@ -695,6 +697,134 @@ class RndWorkflowTests(TestCase):
             self._product_payload(first, DevelopmentProduct.Status.REVISION),
         )
         self.assertEqual(locked.status_code, 403)
+
+    def test_collection_enters_development_only_after_all_documents_are_approved(self):
+        collection = self._collection()
+        first = self._product(collection, "P-001")
+        second = self._product(collection, "P-002")
+        first.document_status = DevelopmentProduct.DocumentStatus.APPROVED
+        first.status = DevelopmentProduct.Status.SAMPLING
+        first.save(update_fields=("document_status", "status", "updated_at"))
+        self.client.force_login(self.rnd_editor)
+
+        page = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
+        self.assertContains(page, "1 / 2 Approved")
+        self.assertContains(page, "Lanjut Development")
+        blocked = self.client.post(
+            reverse("rnd:collection_start_development", args=[collection.id]),
+            follow=True,
+        )
+        self.assertContains(blocked, "Seluruh dokumen Product wajib Approved")
+        collection.refresh_from_db()
+        self.assertIsNone(collection.development_started_at)
+
+        second.document_status = DevelopmentProduct.DocumentStatus.APPROVED
+        second.status = DevelopmentProduct.Status.SAMPLING
+        second.save(update_fields=("document_status", "status", "updated_at"))
+        started = self.client.post(reverse("rnd:collection_start_development", args=[collection.id]))
+        self.assertRedirects(started, reverse("rnd:development_detail", args=[collection.id]))
+        collection.refresh_from_db()
+        self.assertEqual(collection.development_started_by, self.rnd_editor)
+        self.assertIsNotNone(collection.development_started_at)
+        self.assertFalse(
+            collection.products.exclude(
+                development_stage=DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE
+            ).exists()
+        )
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="rnd_collection_development_started",
+                entity_id=str(collection.id),
+            ).exists()
+        )
+        development_page = self.client.get(reverse("rnd:development_list"))
+        self.assertContains(development_page, collection.name)
+        collection_page = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
+        self.assertNotContains(collection_page, ">Tambah Product</button>")
+        blocked_product = self.client.post(
+            reverse("rnd:collection_detail", args=[collection.id]),
+            {"name": "Late Product", **self._empty_material_formset()},
+        )
+        self.assertEqual(blocked_product.status_code, 403)
+        self.assertFalse(collection.products.filter(name="Late Product").exists())
+
+        self.client.post(reverse("rnd:collection_start_development", args=[collection.id]))
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                action="rnd_collection_development_started",
+                entity_id=str(collection.id),
+            ).count(),
+            1,
+        )
+
+    def test_development_product_loops_through_numbered_prototypes(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.document_status = DevelopmentProduct.DocumentStatus.APPROVED
+        product.status = DevelopmentProduct.Status.SAMPLING
+        product.save(update_fields=("document_status", "status", "updated_at"))
+        self.client.force_login(self.rnd_editor)
+        self.client.post(reverse("rnd:collection_start_development", args=[collection.id]))
+
+        for action, expected_stage in (
+            ("material_completed", DevelopmentProduct.DevelopmentStage.SAMPLING),
+            ("sampling_completed", DevelopmentProduct.DevelopmentStage.PROTOTYPE),
+        ):
+            response = self.client.post(
+                reverse("rnd:product_development_transition", args=[product.id]),
+                {"action": action},
+            )
+            self.assertRedirects(response, reverse("rnd:development_detail", args=[collection.id]))
+            product.refresh_from_db()
+            self.assertEqual(product.development_stage, expected_stage)
+        self.assertEqual(product.prototype_number, 1)
+        self.assertEqual(product.development_stage_label, "Prototype 1")
+
+        denied = self.client.post(
+            reverse("rnd:product_development_transition", args=[product.id]),
+            {"action": "prototype_resampling"},
+        )
+        self.assertEqual(denied.status_code, 403)
+        product.refresh_from_db()
+        self.assertEqual(product.development_stage, DevelopmentProduct.DevelopmentStage.PROTOTYPE)
+
+        self.client.force_login(self.rnd_approver)
+        self.client.post(
+            reverse("rnd:product_development_transition", args=[product.id]),
+            {"action": "prototype_resampling"},
+        )
+        product.refresh_from_db()
+        self.assertEqual(product.development_stage, DevelopmentProduct.DevelopmentStage.RESAMPLING)
+        self.assertEqual(product.development_stage_label, "Resampling menuju Prototype 2")
+
+        self.client.force_login(self.rnd_editor)
+        self.client.post(
+            reverse("rnd:product_development_transition", args=[product.id]),
+            {"action": "resampling_completed"},
+        )
+        product.refresh_from_db()
+        self.assertEqual(product.development_stage_label, "Prototype 2")
+
+        self.client.force_login(self.rnd_approver)
+        self.client.post(
+            reverse("rnd:product_development_transition", args=[product.id]),
+            {"action": "prototype_final"},
+        )
+        product.refresh_from_db()
+        self.assertEqual(product.development_stage, DevelopmentProduct.DevelopmentStage.FINAL)
+        self.assertEqual(product.status, DevelopmentProduct.Status.FINAL_APPROVED)
+
+    def test_marketing_cannot_start_or_update_development(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.document_status = DevelopmentProduct.DocumentStatus.APPROVED
+        product.save(update_fields=("document_status", "updated_at"))
+        self.client.force_login(self.marketing)
+
+        denied = self.client.post(reverse("rnd:collection_start_development", args=[collection.id]))
+        self.assertEqual(denied.status_code, 403)
+        collection.refresh_from_db()
+        self.assertIsNone(collection.development_started_at)
 
     def test_collection_delete_requires_rnd_approve_and_removes_private_files(self):
         collection = self._collection()
@@ -742,40 +872,6 @@ class RndWorkflowTests(TestCase):
         )
         self.assertContains(blocked, "sudah di-handover ke Marketing tidak dapat dihapus")
         self.assertTrue(Collection.objects.filter(pk=collection.id).exists())
-
-    def test_approved_product_moves_through_costing_before_approver_sets_final(self):
-        collection = self._collection()
-        product = self._product(collection)
-        product.document_status = DevelopmentProduct.DocumentStatus.APPROVED
-        product.status = DevelopmentProduct.Status.SAMPLING
-        product.save(update_fields=("document_status", "status", "updated_at"))
-
-        self.client.force_login(self.rnd_editor)
-        costing = self.client.post(reverse("rnd:product_move_to_costing", args=[product.id]))
-        self.assertRedirects(costing, reverse("rnd:product_detail", args=[product.id]))
-        product.refresh_from_db()
-        self.assertEqual(product.status, DevelopmentProduct.Status.COSTING)
-
-        denied = self.client.post(reverse("rnd:product_finalize", args=[product.id]))
-        self.assertEqual(denied.status_code, 403)
-        product.refresh_from_db()
-        self.assertEqual(product.status, DevelopmentProduct.Status.COSTING)
-
-        self.client.force_login(self.rnd_approver)
-        finalized = self.client.post(reverse("rnd:product_finalize", args=[product.id]))
-        self.assertRedirects(finalized, reverse("rnd:product_detail", args=[product.id]))
-        product.refresh_from_db()
-        self.assertEqual(product.status, DevelopmentProduct.Status.FINAL_APPROVED)
-
-    def test_product_cannot_skip_costing_or_finalize_without_approved_document(self):
-        collection = self._collection()
-        product = self._product(collection)
-        self.client.force_login(self.rnd_approver)
-
-        skipped = self.client.post(reverse("rnd:product_finalize", args=[product.id]), follow=True)
-        self.assertContains(skipped, "Dokumen Product wajib Approved")
-        product.refresh_from_db()
-        self.assertEqual(product.status, DevelopmentProduct.Status.CONCEPT)
 
     def test_marketing_recommends_and_only_superadmin_makes_official_decision(self):
         collection = self._collection()

@@ -291,6 +291,12 @@ tbody tr:last-child td { border-bottom: 0; }
 .rnd-design-empty { grid-column: 1 / -1; margin: 0; }
 .rnd-design-detail { display: grid; place-items: center; min-height: 420px; background: #efeee9; }
 .rnd-design-detail img { display: block; max-width: 100%; max-height: 78vh; object-fit: contain; }
+.rnd-development-gate { display: flex; flex-direction: column; align-items: flex-start; }
+.rnd-development-gate form { margin-top: auto; }
+.rnd-development-gate .primary-button, .rnd-development-gate .secondary-button { min-height: 38px; margin-top: auto; }
+.rnd-development-actions { display: grid; gap: 7px; margin-bottom: 14px; }
+.rnd-development-actions form { margin: 0; }
+.rnd-development-actions .primary-button, .rnd-development-actions .secondary-button { width: 100%; margin-top: 0; }
 .inline-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .inline-form input { width: 110px; min-height: 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; }
 .primary-button.compact, .secondary-button.compact { min-height: 34px; margin-top: 0; padding: 0 10px; font-size: 9px; }

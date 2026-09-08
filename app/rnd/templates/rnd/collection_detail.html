@@ -4,12 +4,13 @@
 {% block content %}
 <header class="page-header">
     <div><p class="eyebrow">R&amp;D · {{ collection.code }}</p><h1>{{ collection.name }}</h1><p>{{ collection.objective|default:"Objective Collection belum diisi." }}</p></div>
-    <div class="header-actions"><span class="status-chip"><span></span>{{ collection.get_status_display }}</span>{% if editable %}<button class="secondary-button" type="button" data-rnd-panel-toggle aria-controls="add-product-panel" aria-expanded="{% if product_form.is_bound %}true{% else %}false{% endif %}">Tambah Product</button>{% endif %}{% if editable and can_handover %}<form method="post" action="{% url 'rnd:collection_delete' collection.id %}" onsubmit="return confirm('Hapus Collection {{ collection.name|escapejs }} beserta seluruh Product, BOM, dokumen, dan revisinya? Tindakan ini tidak dapat dibatalkan.');">{% csrf_token %}<button class="secondary-button danger-button" type="submit">Delete Collection</button></form>{% endif %}<a class="secondary-button" href="{% url 'rnd:dashboard' %}">Daftar Collection</a></div>
+    <div class="header-actions"><span class="status-chip"><span></span>{{ collection.get_status_display }}</span>{% if editable %}<button class="secondary-button" type="button" data-rnd-panel-toggle aria-controls="add-product-panel" aria-expanded="{% if product_form.is_bound %}true{% else %}false{% endif %}">Tambah Product</button>{% endif %}{% if can_delete %}<form method="post" action="{% url 'rnd:collection_delete' collection.id %}" onsubmit="return confirm('Hapus Collection {{ collection.name|escapejs }} beserta seluruh Product, BOM, dokumen, dan revisinya? Tindakan ini tidak dapat dibatalkan.');">{% csrf_token %}<button class="secondary-button danger-button" type="submit">Delete Collection</button></form>{% endif %}<a class="secondary-button" href="{% url 'rnd:dashboard' %}">Daftar Collection</a></div>
 </header>
-<section class="metric-grid three">
+<section class="metric-grid">
     <article class="metric-card"><span>Status Collection</span><strong>{{ collection.get_status_display }}</strong></article>
     <article class="metric-card"><span>Total Product</span><strong>{{ products|length }}</strong></article>
-    <article class="metric-card"><span>Gate Final R&amp;D</span><strong>{% if all_final %}Siap{% else %}Belum siap{% endif %}</strong></article>
+    <article class="metric-card"><span>Gate Final Development</span><strong>{% if all_final %}Siap{% else %}Belum siap{% endif %}</strong></article>
+    <article class="metric-card rnd-development-gate"><span>Gate Development</span>{% if collection.development_started_at %}<strong class="metric-text">Sudah dimulai</strong><a class="secondary-button" href="{% url 'rnd:development_detail' collection.id %}">Buka Development</a>{% else %}<strong class="metric-text">{% if all_documents_approved %}Siap{% else %}{{ approved_document_count }} / {{ products|length }} Approved{% endif %}</strong><form method="post" action="{% url 'rnd:collection_start_development' collection.id %}">{% csrf_token %}<button class="primary-button" type="submit"{% if not all_documents_approved or not can_start_development %} disabled{% endif %}>Lanjut Development</button></form>{% endif %}</article>
 </section>
 <section class="panel section-gap">
     <div class="panel-header"><div><p class="eyebrow">PRODUCT DEVELOPMENT</p><h2>Product dalam Collection</h2></div></div>
@@ -18,7 +19,7 @@
             <div class="rnd-product-card-top"><span class="pill">{{ product.category|default:"Belum berkategori" }}</span><span class="status-chip"><span></span>{{ product.get_document_status_display }}</span></div>
             {% if product.product_cover %}<div class="rnd-product-card-cover"><img src="{% url 'rnd:product_file' product.id 'product-cover' %}" alt="Product cover {{ product.name }}" loading="lazy"></div>{% endif %}
             <div class="rnd-product-card-copy"><h3>{{ product.name }}</h3><p>{% if product.material_count %}{{ product.material_count }} material{% else %}BOM belum diisi{% endif %} · Rev {{ product.document_revision|stringformat:"03d" }}</p></div>
-            <div class="rnd-product-card-footer"><span>{{ product.get_status_display }}</span><strong>Buka dokumen <span aria-hidden="true">→</span></strong></div>
+            <div class="rnd-product-card-footer"><span>{% if collection.development_started_at %}{{ product.development_stage_label }}{% elif product.document_status == 'APPROVED' %}Menunggu Development{% else %}{{ product.get_status_display }}{% endif %}</span><strong>Buka dokumen <span aria-hidden="true">→</span></strong></div>
         </a>{% endfor %}
     </div>{% else %}<div class="empty-state">Belum ada Product dalam Collection ini.</div>{% endif %}
 </section>
@@ -26,7 +27,7 @@
 <section class="panel section-gap">
     <div class="panel-header"><div><p class="eyebrow">HARD GATE</p><h2>Handover ke Marketing</h2></div></div>
     {% if collection.status == 'MARKETING_REVIEW' or collection.status == 'COMMERCIAL_APPROVED' %}<p>Collection sudah masuk tab Upcoming Collection Marketing{% if collection.handed_over_at %} pada {{ collection.handed_over_at|date:"d M Y H:i" }}{% endif %}.</p>
-    {% else %}<p>Handover hanya dapat dilakukan setelah seluruh Product berstatus Final R&amp;D. Hanya akun dengan akses Approve R&amp;D yang dapat menjalankannya.</p><form method="post" action="{% url 'rnd:collection_handover' collection.id %}">{% csrf_token %}<button class="primary-button" type="submit"{% if not all_final or not can_handover %} disabled{% endif %}>Handover ke Marketing</button></form>{% endif %}
+    {% else %}<p>Handover hanya dapat dilakukan setelah Collection masuk Development dan seluruh Product berstatus Final Development. Hanya akun dengan akses Approve R&amp;D yang dapat menjalankannya.</p><form method="post" action="{% url 'rnd:collection_handover' collection.id %}">{% csrf_token %}<button class="primary-button" type="submit"{% if not collection.development_started_at or not all_final or not can_handover %} disabled{% endif %}>Handover ke Marketing</button></form>{% endif %}
 </section>
 <script src="{% static 'js/rnd-materials.js' %}?v=20260908-01" defer></script>
 {% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ collection.name }} · Development{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div><p class="eyebrow">R&amp;D · DEVELOPMENT · {{ collection.code }}</p><h1>{{ collection.name }}</h1><p>Progress Development dijalankan per Product, sementara Collection tetap menjadi project induk.</p></div>
+    <div class="header-actions"><a class="secondary-button" href="{% url 'rnd:collection_detail' collection.id %}">Buka Collection</a><a class="secondary-button" href="{% url 'rnd:development_list' %}">Daftar Development</a></div>
+</header>
+<section class="metric-grid three">
+    <article class="metric-card"><span>Total Product</span><strong>{{ products|length }}</strong></article>
+    <article class="metric-card"><span>Final Development</span><strong>{{ final_count }} / {{ products|length }}</strong></article>
+    <article class="metric-card"><span>Mulai Development</span><strong class="metric-text">{{ collection.development_started_at|date:"d M Y H:i" }}</strong></article>
+</section>
+<section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">PRODUCT PROGRESS</p><h2>Tahapan per Product</h2></div></div>
+    <div class="rnd-product-grid">
+        {% for product in products %}<article class="rnd-product-card">
+            <div class="rnd-product-card-top"><span class="pill">{{ product.category|default:"Belum berkategori" }}</span><span class="status-chip"><span></span>{{ product.development_stage_label }}</span></div>
+            {% if product.product_cover %}<a class="rnd-product-card-cover" href="{% url 'rnd:product_detail' product.id %}"><img src="{% url 'rnd:product_file' product.id 'product-cover' %}" alt="Product cover {{ product.name }}" loading="lazy"></a>{% endif %}
+            <div class="rnd-product-card-copy"><h3>{{ product.name }}</h3><p>Dokumen {{ product.get_document_status_display }} · Rev {{ product.document_revision|stringformat:"03d" }}</p></div>
+            <div class="rnd-development-actions">
+                {% if product.development_stage == 'MATERIAL_PURCHASE' and can_progress %}<form method="post" action="{% url 'rnd:product_development_transition' product.id %}">{% csrf_token %}<input type="hidden" name="action" value="material_completed"><button class="primary-button" type="submit">Material Terbeli · Lanjut Sampling</button></form>
+                {% elif product.development_stage == 'SAMPLING' and can_progress %}<form method="post" action="{% url 'rnd:product_development_transition' product.id %}">{% csrf_token %}<input type="hidden" name="action" value="sampling_completed"><button class="primary-button" type="submit">Sampling Selesai · Buat Prototype</button></form>
+                {% elif product.development_stage == 'PROTOTYPE' and can_decide %}<form method="post" action="{% url 'rnd:product_development_transition' product.id %}">{% csrf_token %}<input type="hidden" name="action" value="prototype_final"><button class="primary-button" type="submit">Setujui Final Development</button></form><form method="post" action="{% url 'rnd:product_development_transition' product.id %}">{% csrf_token %}<input type="hidden" name="action" value="prototype_resampling"><button class="secondary-button" type="submit">Minta Resampling</button></form>
+                {% elif product.development_stage == 'PROTOTYPE' %}<p class="muted">Menunggu keputusan akun Approve R&amp;D.</p>
+                {% elif product.development_stage == 'RESAMPLING' and can_progress %}<form method="post" action="{% url 'rnd:product_development_transition' product.id %}">{% csrf_token %}<input type="hidden" name="action" value="resampling_completed"><button class="primary-button" type="submit">Resampling Selesai · Buat Prototype Berikutnya</button></form>
+                {% elif product.development_stage == 'FINAL' %}<p class="message success">Product sudah Final Development.</p>{% endif %}
+            </div>
+            <div class="rnd-product-card-footer"><span>{{ product.development_stage_label }}</span><a href="{% url 'rnd:product_detail' product.id %}"><strong>Buka Dokumen <span aria-hidden="true">→</span></strong></a></div>
+        </article>{% endfor %}
+    </div>
+</section>
+{% endblock %}

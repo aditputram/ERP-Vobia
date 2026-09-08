@@ -20,6 +20,11 @@ def can_approve_module(user, module):
     return user.is_superuser or (user.module_access or {}).get(module, default_level) == "approve"
 
 
+def can_edit_module(user, module):
+    default_level = "none" if module == "rnd" else "approve"
+    return user.is_superuser or (user.module_access or {}).get(module, default_level) in {"edit", "approve"}
+
+
 def _actor_name(actor):
     return actor.get_full_name().strip() or actor.get_username()
 
@@ -91,14 +96,12 @@ def approve_product_document(*, product, actor):
     filename = f"{document_stem}-rev-{product.document_revision:03d}-approved.pdf"
     product.approved_document.save(filename, ContentFile(document), save=False)
     product.document_status = DevelopmentProduct.DocumentStatus.APPROVED
-    product.status = DevelopmentProduct.Status.SAMPLING
     product.rnd_approved_at = approved_at
     product.rnd_approved_by = actor
     product.save(
         update_fields=(
             "approved_document",
             "document_status",
-            "status",
             "rnd_approved_at",
             "rnd_approved_by",
             "updated_at",
@@ -148,6 +151,8 @@ def request_product_document_revision(*, product, actor, note, target):
     if target not in DevelopmentProductDocumentRevision.RevisionTarget.values:
         raise ValidationError("Pilih bagian dokumen yang harus direvisi.")
     product = DevelopmentProduct.objects.select_for_update().select_related("collection").get(pk=product.pk)
+    if product.collection.development_started_at:
+        raise ValidationError("Revisi dokumen ditutup setelah Collection masuk ke Development.")
     if product.document_status not in {
         DevelopmentProduct.DocumentStatus.SUBMITTED,
         DevelopmentProduct.DocumentStatus.APPROVED,
@@ -217,45 +222,134 @@ def request_product_document_revision(*, product, actor, note, target):
 
 
 @transaction.atomic
-def move_product_to_costing(*, product, actor):
-    product = DevelopmentProduct.objects.select_for_update().select_related("collection").get(pk=product.pk)
-    if product.collection.status not in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT}:
-        raise ValidationError("Product sudah dikunci setelah handover ke Marketing.")
-    if product.document_status != DevelopmentProduct.DocumentStatus.APPROVED:
-        raise ValidationError("Dokumen Product wajib Approved sebelum masuk ke Costing.")
-    if product.status != DevelopmentProduct.Status.SAMPLING:
-        raise ValidationError("Hanya Product berstatus Sampling yang dapat dilanjutkan ke Costing.")
-    product.status = DevelopmentProduct.Status.COSTING
-    product.save(update_fields=("status", "updated_at"))
+def start_collection_development(*, collection, actor):
+    if not can_edit_module(actor, "rnd"):
+        raise PermissionDenied("Lanjut Development memerlukan akses Edit atau Approve R&D.")
+    collection = Collection.objects.select_for_update().get(pk=collection.pk)
+    if collection.development_started_at:
+        return collection
+    if collection.status not in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT}:
+        raise ValidationError("Collection sudah dikunci setelah handover ke Marketing.")
+    products = list(collection.products.select_for_update())
+    if not products:
+        raise ValidationError("Collection wajib memiliki minimal satu Product.")
+    if any(
+        product.document_status != DevelopmentProduct.DocumentStatus.APPROVED
+        for product in products
+    ):
+        raise ValidationError("Seluruh dokumen Product wajib Approved sebelum lanjut Development.")
+
+    started_at = timezone.now()
+    collection.development_started_at = started_at
+    collection.development_started_by = actor
+    collection.status = Collection.Status.DEVELOPMENT
+    collection.save(
+        update_fields=(
+            "development_started_at",
+            "development_started_by",
+            "status",
+            "updated_at",
+        )
+    )
+    for product in products:
+        if product.status == DevelopmentProduct.Status.FINAL_APPROVED:
+            product.development_stage = DevelopmentProduct.DevelopmentStage.FINAL
+            product.prototype_number = max(product.prototype_number, 1)
+        else:
+            product.development_stage = DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE
+            product.prototype_number = 0
+        product.updated_at = started_at
+    DevelopmentProduct.objects.bulk_update(
+        products,
+        ("development_stage", "prototype_number", "updated_at"),
+    )
     record_audit(
         actor=actor,
-        action="rnd_product_moved_to_costing",
-        entity_type="rnd.development_product",
-        entity_id=product.id,
-        after_values={"status": product.status},
+        action="rnd_collection_development_started",
+        entity_type="rnd.collection",
+        entity_id=collection.id,
+        after_values={
+            "development_started_at": started_at.isoformat(),
+            "product_count": len(products),
+        },
     )
-    return product
+    return collection
 
 
 @transaction.atomic
-def finalize_product(*, product, actor):
-    if not can_approve_module(actor, "rnd"):
-        raise PermissionDenied("Final R&D memerlukan akses Approve R&D.")
+def transition_product_development(*, product, actor, action):
     product = DevelopmentProduct.objects.select_for_update().select_related("collection").get(pk=product.pk)
-    if product.collection.status not in {Collection.Status.DRAFT, Collection.Status.DEVELOPMENT}:
-        raise ValidationError("Product sudah dikunci setelah handover ke Marketing.")
+    if not product.collection.development_started_at:
+        raise ValidationError("Collection belum masuk ke tab Development.")
+    if product.collection.status != Collection.Status.DEVELOPMENT:
+        raise ValidationError("Collection sudah dikunci setelah handover ke Marketing.")
     if product.document_status != DevelopmentProduct.DocumentStatus.APPROVED:
-        raise ValidationError("Dokumen Product wajib Approved sebelum ditetapkan Final R&D.")
-    if product.status != DevelopmentProduct.Status.COSTING:
-        raise ValidationError("Product wajib menyelesaikan tahap Costing sebelum Final R&D.")
-    product.status = DevelopmentProduct.Status.FINAL_APPROVED
-    product.save(update_fields=("status", "updated_at"))
+        raise ValidationError("Dokumen Product wajib tetap Approved selama Development.")
+
+    approval_actions = {"prototype_final", "prototype_resampling"}
+    if action in approval_actions:
+        if not can_approve_module(actor, "rnd"):
+            raise PermissionDenied("Keputusan Prototype memerlukan akses Approve R&D.")
+    elif not can_edit_module(actor, "rnd"):
+        raise PermissionDenied("Update Development memerlukan akses Edit atau Approve R&D.")
+
+    transitions = {
+        "material_completed": (
+            DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE,
+            DevelopmentProduct.DevelopmentStage.SAMPLING,
+        ),
+        "sampling_completed": (
+            DevelopmentProduct.DevelopmentStage.SAMPLING,
+            DevelopmentProduct.DevelopmentStage.PROTOTYPE,
+        ),
+        "prototype_resampling": (
+            DevelopmentProduct.DevelopmentStage.PROTOTYPE,
+            DevelopmentProduct.DevelopmentStage.RESAMPLING,
+        ),
+        "resampling_completed": (
+            DevelopmentProduct.DevelopmentStage.RESAMPLING,
+            DevelopmentProduct.DevelopmentStage.PROTOTYPE,
+        ),
+        "prototype_final": (
+            DevelopmentProduct.DevelopmentStage.PROTOTYPE,
+            DevelopmentProduct.DevelopmentStage.FINAL,
+        ),
+    }
+    transition = transitions.get(action)
+    if not transition:
+        raise ValidationError("Aksi Development tidak dikenali.")
+    expected_stage, next_stage = transition
+    if product.development_stage != expected_stage:
+        raise ValidationError("Tahap Product sudah berubah. Muat ulang halaman sebelum melanjutkan.")
+
+    before_stage = product.development_stage
+    if action in {"sampling_completed", "resampling_completed"}:
+        product.prototype_number += 1
+    product.development_stage = next_stage
+    update_fields = ["development_stage", "prototype_number", "updated_at"]
+    if action == "material_completed":
+        product.status = DevelopmentProduct.Status.SAMPLING
+        update_fields.append("status")
+    elif action == "prototype_resampling":
+        product.status = DevelopmentProduct.Status.REVISION
+        update_fields.append("status")
+    elif action == "resampling_completed":
+        product.status = DevelopmentProduct.Status.SAMPLING
+        update_fields.append("status")
+    elif action == "prototype_final":
+        product.status = DevelopmentProduct.Status.FINAL_APPROVED
+        update_fields.append("status")
+    product.save(update_fields=update_fields)
     record_audit(
         actor=actor,
-        action="rnd_product_finalized",
+        action=f"rnd_product_development_{action}",
         entity_type="rnd.development_product",
         entity_id=product.id,
-        after_values={"status": product.status},
+        before_values={"development_stage": before_stage},
+        after_values={
+            "development_stage": product.development_stage,
+            "prototype_number": product.prototype_number,
+        },
     )
     return product
 
@@ -322,11 +416,14 @@ def handover_to_marketing(*, collection, actor):
         raise ValidationError("Collection ini tidak dapat di-handover ulang.")
     if not products.exists():
         raise ValidationError("Collection wajib memiliki minimal satu Product.")
+    if not collection.development_started_at:
+        raise ValidationError("Collection wajib menyelesaikan alur Development sebelum handover ke Marketing.")
     if products.exclude(
         status=DevelopmentProduct.Status.FINAL_APPROVED,
         document_status=DevelopmentProduct.DocumentStatus.APPROVED,
+        development_stage=DevelopmentProduct.DevelopmentStage.FINAL,
     ).exists():
-        raise ValidationError("Seluruh Product wajib Final R&D sebelum handover ke Marketing.")
+        raise ValidationError("Seluruh Product wajib Final Development sebelum handover ke Marketing.")
     collection.status = Collection.Status.MARKETING_REVIEW
     collection.handed_over_at = timezone.now()
     collection.handed_over_by = actor

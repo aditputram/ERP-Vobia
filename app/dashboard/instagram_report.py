@@ -26,7 +26,7 @@ from .tiktok import (
 )
 from .models import SocialDailyMetric
 from .social_sync import (
-    daily_series, manual_refresh_state, period_metric, run_manual_refresh,
+    daily_series, manual_refresh_state, manual_repair_state, period_metric, run_manual_refresh,
     suspicious_tiktok_days, supported_period_ranges, sync_status,
 )
 
@@ -540,4 +540,5 @@ def dashboard(request):
         "tiktok_sync": tiktok_sync, "can_refresh": can_refresh,
         "manual_refresh_run": manual_refresh_state(),
         "period_snapshot_missing": period_snapshot_missing,
+        "manual_repair_run": manual_repair_state(),
     })

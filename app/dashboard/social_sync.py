@@ -316,6 +316,13 @@ def manual_refresh_state(day=None):
     ).first()
 
 
+def manual_repair_state(day=None):
+    day = day or timezone.localdate()
+    return SocialSyncRun.objects.filter(
+        idempotency_key=f"manual-repair-global:{day.isoformat()}", account=MANUAL_LOCK_ACCOUNT,
+    ).first()
+
+
 def run_manual_refresh(actor, required_range=None):
     today = timezone.localdate()
     cutoff = today - timedelta(days=1)

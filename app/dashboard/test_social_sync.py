@@ -250,11 +250,12 @@ class SocialSyncTests(TestCase):
         self.assertContains(response, "Lengkapi data")
 
     @patch("dashboard.instagram_report.suspicious_tiktok_days", return_value={date(2026, 9, 1)})
+    @patch("dashboard.instagram_report.manual_repair_state", return_value=None)
     @patch("dashboard.instagram_report.manual_refresh_state", return_value=SocialSyncRun(status="COMPLETED"))
     @patch("dashboard.instagram_report.get_tiktok_report", return_value=(None, ""))
     @patch("dashboard.instagram_report.get_report", return_value=(None, ""))
     def test_completed_refresh_exposes_repair_for_suspicious_tiktok_zero(
-        self, _instagram, _tiktok, _refresh_state, _suspicious,
+        self, _instagram, _tiktok, _refresh_state, repair_state, _suspicious,
     ):
         user = get_user_model().objects.create_user(
             "marketing-zero-repair", password="Strong-Test-2026!",
@@ -273,6 +274,11 @@ class SocialSyncTests(TestCase):
 
         self.assertContains(response, "Lengkapi data")
         self.assertNotContains(response, "Sudah di-refresh hari ini")
+
+        repair_state.return_value = SocialSyncRun(status="COMPLETED")
+        response = self.client.get(reverse("dashboard:instagram_dashboard"))
+        self.assertContains(response, "Sudah dicoba ulang hari ini")
+        self.assertNotContains(response, "Lengkapi data")
 
     @patch("dashboard.instagram_report.get_tiktok_report", return_value=(None, "Snapshot TikTok periode ini belum tersedia."))
     @patch("dashboard.instagram_report.get_report", return_value=(None, "Snapshot periode ini belum tersedia."))

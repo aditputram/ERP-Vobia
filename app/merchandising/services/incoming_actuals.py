@@ -9,7 +9,7 @@ from django.db.models import DecimalField, ExpressionWrapper, F, Q, Sum
 from django.utils import timezone
 
 from audit.services import record_audit
-from inventory.models import InboundReceipt
+from inventory.models import FIFOOpeningSnapshot, InboundReceipt
 from inventory.services.reporting import inventory_summary_rows
 from master_data.models import SKU
 from merchandising.models import (
@@ -108,11 +108,11 @@ def incoming_comparison(batch, month, sku_ids=None):
 
 
 def closed_cost_actuals(year, sku_ids=None):
-    """Frozen actual incoming and ending values used after a month is closed."""
+    """Frozen actual values from month close or the FIFO cutover snapshot."""
     rows = IncomingMonthlyActual.objects.filter(month_close__month__year=year)
     if sku_ids is not None:
         rows = rows.filter(sku_id__in=list(sku_ids))
-    return {
+    values = {
         (row.sku_id, row.month_close.month.month): {
             "incoming_qty": row.actual_qty,
             "incoming_cogs": row.actual_cogs,
@@ -122,6 +122,18 @@ def closed_cost_actuals(year, sku_ids=None):
         }
         for row in rows.select_related("month_close")
     }
+    openings = FIFOOpeningSnapshot.objects.filter(cutover_date__year=year)
+    if sku_ids is not None:
+        openings = openings.filter(sku_id__in=list(sku_ids))
+    for opening in openings:
+        values.setdefault(
+            (opening.sku_id, opening.cutover_date.month),
+            {
+                "ending_qty": opening.opening_qty,
+                "ending_cogs": max(opening.opening_qty, ZERO) * opening.frozen_unit_cogs,
+            },
+        )
+    return values
 
 
 @transaction.atomic

@@ -943,6 +943,28 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(dashboard_rows["Incoming COGS"]["values"][7], Decimal("300000"))
         self.assertEqual(dashboard_rows["Ending Stock COGS"]["values"][7], Decimal("300000"))
 
+    def test_cutover_ending_uses_fifo_opening_in_dashboard_and_projection(self):
+        post_opening(sku=self.sku, quantity=7, unit_cost=110000, actor=self.user)
+
+        dashboard = self.client.get("/merchandising/dashboard/")
+        dashboard_rows = {row["label"]: row for row in dashboard.context["table_rows"]}
+        self.assertEqual(dashboard_rows["Ending Stock COGS"]["values"][6], Decimal("770000"))
+        self.assertEqual(dashboard_rows["Incoming COGS"]["values"][6], Decimal("500000"))
+
+        projection = self.client.get(
+            "/merchandising/projection/",
+            {"month": ["7"], "metric": ["ending"], "submetric": ["qty", "cogs"]},
+        )
+        cells = {
+            (header["year"], header["month_number"], header["metric"]): cell["value"]
+            for header, cell in zip(
+                projection.context["dynamic_headers"],
+                projection.context["table_rows"][0]["cells"],
+            )
+        }
+        self.assertEqual(cells[(2026, 7, "ending_qty")], Decimal("7"))
+        self.assertEqual(cells[(2026, 7, "ending_cogs")], Decimal("770000"))
+
     def test_future_cost_uses_sales_projection_snapshot_and_ignores_po_cost(self):
         scenario = ProjectionScenario.objects.create(
             name="September Cost Snapshot",

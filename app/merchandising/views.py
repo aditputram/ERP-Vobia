@@ -360,15 +360,10 @@ def dashboard(request):
                 for (sku_id, month_number), values in closed_values.items()
                 if month_number == closed_month
             ]
-            month_values[closed_month]["incoming_cogs"] = sum(
-                (row["incoming_cogs"] for row in closed_rows), Decimal("0")
-            )
-            month_values[closed_month]["incoming_gross"] = sum(
-                (row["incoming_gross"] for row in closed_rows), Decimal("0")
-            )
-            month_values[closed_month]["ending_cogs"] = sum(
-                (row["ending_cogs"] for row in closed_rows), Decimal("0")
-            )
+            for field in ("incoming_cogs", "incoming_gross", "ending_cogs"):
+                actuals = [row[field] for row in closed_rows if field in row]
+                if actuals:
+                    month_values[closed_month][field] = sum(actuals, Decimal("0"))
         for future_month in range(current_month + 1, 13):
             month_values[future_month] = {
                 **month_values[future_month],

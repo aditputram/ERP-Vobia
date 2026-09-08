@@ -98,6 +98,7 @@ class DevelopmentProduct(UUIDTimestampedModel):
     class DocumentStatus(models.TextChoices):
         DRAFT = "DRAFT", "Draft"
         SUBMITTED = "SUBMITTED", "Menunggu Approval"
+        REJECTED = "REJECTED", "Rejected"
         APPROVED = "APPROVED", "Approved"
         REVISION_REQUESTED = "REVISION_REQUESTED", "Revisi Diminta"
 
@@ -214,6 +215,7 @@ class DevelopmentProduct(UUIDTimestampedModel):
 class DevelopmentProductDocumentRevision(UUIDTimestampedModel):
     class Status(models.TextChoices):
         SUBMITTED = "SUBMITTED", "Menunggu Approval"
+        REJECTED = "REJECTED", "Rejected"
         APPROVED = "APPROVED", "Approved"
         REVISION_REQUESTED = "REVISION_REQUESTED", "Revisi Diminta"
 

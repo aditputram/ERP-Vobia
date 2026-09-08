@@ -40,8 +40,10 @@ from .services import (
     can_approve_module,
     can_edit_module,
     delete_collection,
+    delete_rejected_product,
     handover_to_marketing,
     publish_marketing_preview,
+    reject_product_document,
     request_product_document_revision,
     start_collection_development,
     submit_product_document,
@@ -464,6 +466,7 @@ def product_detail(request, product_id):
         and product.document_status
         in {
             DevelopmentProduct.DocumentStatus.DRAFT,
+            DevelopmentProduct.DocumentStatus.REJECTED,
             DevelopmentProduct.DocumentStatus.REVISION_REQUESTED,
         }
     )
@@ -583,6 +586,10 @@ def product_detail(request, product_id):
             "show_edit": request.method == "POST" or request.GET.get("edit") == "1",
             "can_approve": can_approve_module(request.user, "rnd"),
             "can_officially_approve": request.user.is_superuser,
+            "can_delete_product": (
+                product.document_status == DevelopmentProduct.DocumentStatus.REJECTED
+                and can_edit_module(request.user, "rnd")
+            ),
             "revision_requested": revision_requested,
             "revision_request": revision_request,
             "revision_options": [
@@ -723,6 +730,41 @@ def product_approve(request, product_id):
     else:
         messages.success(request, "Dokumen Product sudah di-approve dan memenuhi gate Development.")
     return redirect("rnd:product_detail", product_id=product.id)
+
+
+@login_required
+@require_POST
+def product_reject(request, product_id):
+    product = get_object_or_404(DevelopmentProduct, id=product_id)
+    try:
+        reject_product_document(product=product, actor=request.user)
+    except ValidationError as exc:
+        messages.error(request, _validation_message(exc))
+    except PermissionDenied:
+        return HttpResponseForbidden("Reject dokumen R&D hanya dapat dilakukan Super Admin.")
+    else:
+        messages.success(
+            request,
+            f"Dokumen Product ditolak. Rev {product.document_revision:03d} tetap dan Product dapat diedit atau dihapus.",
+        )
+    return redirect("rnd:product_detail", product_id=product.id)
+
+
+@login_required
+@require_POST
+def product_delete(request, product_id):
+    product = get_object_or_404(DevelopmentProduct, id=product_id)
+    collection_id = product.collection_id
+    product_name = product.name
+    try:
+        delete_rejected_product(product=product, actor=request.user)
+    except ValidationError as exc:
+        messages.error(request, _validation_message(exc))
+        return redirect("rnd:product_detail", product_id=product.id)
+    except PermissionDenied:
+        return HttpResponseForbidden("Delete Product memerlukan akses Edit atau Approve R&D.")
+    messages.success(request, f"Product {product_name} yang ditolak berhasil dihapus.")
+    return redirect("rnd:collection_detail", collection_id=collection_id)
 
 
 @login_required

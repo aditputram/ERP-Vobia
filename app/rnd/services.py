@@ -80,9 +80,14 @@ def submit_product_document(*, product, actor):
         or product.collection.commercial_approved_at
     ):
         raise ValidationError("Product sudah dikunci setelah Development dimulai atau handover ke Marketing.")
-    if product.document_status != DevelopmentProduct.DocumentStatus.DRAFT:
+    if product.document_status not in {
+        DevelopmentProduct.DocumentStatus.DRAFT,
+        DevelopmentProduct.DocumentStatus.REJECTED,
+    }:
         raise ValidationError("Dokumen Product ini sudah diajukan.")
 
+    previous_document_name = product.submitted_document.name
+    previous_document_storage = product.submitted_document.storage
     submitted_at = timezone.now()
     document = build_combined_document(product=product, submitted_at=submitted_at)
     document_stem = slugify(f"{product.collection.code}-{product.name}") or str(product.id)
@@ -91,24 +96,63 @@ def submit_product_document(*, product, actor):
     product.document_status = DevelopmentProduct.DocumentStatus.SUBMITTED
     product.submitted_at = submitted_at
     product.submitted_by = actor
+    product.approved_document = ""
+    product.rnd_approved_at = None
+    product.rnd_approved_by = None
     product.save(
         update_fields=(
             "submitted_document",
             "document_status",
             "submitted_at",
             "submitted_by",
+            "approved_document",
+            "rnd_approved_at",
+            "rnd_approved_by",
             "updated_at",
         )
     )
-    revision = DevelopmentProductDocumentRevision(
+    revision, _ = DevelopmentProductDocumentRevision.objects.select_for_update().get_or_create(
         product=product,
         revision=product.document_revision,
-        status=DevelopmentProductDocumentRevision.Status.SUBMITTED,
-        submitted_at=submitted_at,
-        submitted_by=actor,
+        defaults={
+            "status": DevelopmentProductDocumentRevision.Status.SUBMITTED,
+            "submitted_document": product.submitted_document.name,
+            "submitted_at": submitted_at,
+            "submitted_by": actor,
+        },
     )
+    revision.status = DevelopmentProductDocumentRevision.Status.SUBMITTED
     revision.submitted_document.name = product.submitted_document.name
-    revision.save()
+    revision.submitted_at = submitted_at
+    revision.submitted_by = actor
+    revision.approved_document = ""
+    revision.approved_at = None
+    revision.approved_by = None
+    revision.revision_requested_at = None
+    revision.revision_note = ""
+    revision.revision_target = ""
+    revision.revision_requested_by = None
+    revision.save(
+        update_fields=(
+            "status",
+            "submitted_document",
+            "submitted_at",
+            "submitted_by",
+            "approved_document",
+            "approved_at",
+            "approved_by",
+            "revision_requested_at",
+            "revision_note",
+            "revision_target",
+            "revision_requested_by",
+            "updated_at",
+        )
+    )
+    if previous_document_name and previous_document_name != product.submitted_document.name:
+        transaction.on_commit(
+            lambda: previous_document_storage.delete(previous_document_name),
+            robust=True,
+        )
     sync_collection_status(collection=product.collection, actor=actor)
     record_audit(
         actor=actor,
@@ -182,6 +226,37 @@ def approve_product_document(*, product, actor):
             "revision": f"{product.document_revision:03d}",
             "approved_at": approved_at.isoformat(),
             "approved_by": _actor_name(actor),
+        },
+    )
+    return product
+
+
+@transaction.atomic
+def reject_product_document(*, product, actor):
+    if not actor.is_superuser:
+        raise PermissionDenied("Reject dokumen R&D hanya dapat dilakukan Super Admin.")
+    product = DevelopmentProduct.objects.select_for_update().select_related("collection").get(pk=product.pk)
+    if product.document_status != DevelopmentProduct.DocumentStatus.SUBMITTED:
+        raise ValidationError("Dokumen Product belum diajukan atau statusnya sudah berubah.")
+
+    revision = DevelopmentProductDocumentRevision.objects.select_for_update().get(
+        product=product,
+        revision=product.document_revision,
+    )
+    revision.status = DevelopmentProductDocumentRevision.Status.REJECTED
+    revision.save(update_fields=("status", "updated_at"))
+    product.document_status = DevelopmentProduct.DocumentStatus.REJECTED
+    product.save(update_fields=("document_status", "updated_at"))
+    sync_collection_status(collection=product.collection, actor=actor)
+    record_audit(
+        actor=actor,
+        action="rnd_product_document_rejected",
+        entity_type="rnd.development_product",
+        entity_id=product.id,
+        before_values={"document_status": DevelopmentProduct.DocumentStatus.SUBMITTED},
+        after_values={
+            "document_status": product.document_status,
+            "revision": f"{product.document_revision:03d}",
         },
     )
     return product
@@ -403,6 +478,68 @@ def transition_product_development(*, product, actor, action):
         },
     )
     return product
+
+
+@transaction.atomic
+def delete_rejected_product(*, product, actor):
+    if not can_edit_module(actor, "rnd"):
+        raise PermissionDenied("Delete Product memerlukan akses Edit atau Approve R&D.")
+    product = (
+        DevelopmentProduct.objects.select_for_update()
+        .select_related("collection")
+        .prefetch_related("document_revisions")
+        .get(pk=product.pk)
+    )
+    if product.document_status != DevelopmentProduct.DocumentStatus.REJECTED:
+        raise ValidationError("Product hanya dapat dihapus setelah dokumennya di-reject.")
+    if (
+        product.collection.development_started_at
+        or product.collection.handed_over_at
+        or product.collection.commercial_approved_at
+    ):
+        raise ValidationError("Product sudah dikunci setelah Development dimulai atau handover ke Marketing.")
+    if MarketingRecommendation.objects.filter(product=product).exists():
+        raise ValidationError("Product yang sudah memiliki rekomendasi Marketing tidak dapat dihapus.")
+
+    files = {}
+    for field_name in (
+        "product_cover",
+        "mockup",
+        "technical_drawing",
+        "submitted_document",
+        "approved_document",
+    ):
+        file = getattr(product, field_name)
+        if file.name:
+            files[(id(file.storage), file.name)] = (file.storage, file.name)
+    for revision in product.document_revisions.all():
+        for field_name in ("submitted_document", "approved_document"):
+            file = getattr(revision, field_name)
+            if file.name:
+                files[(id(file.storage), file.name)] = (file.storage, file.name)
+
+    collection = product.collection
+    product_id = product.id
+    snapshot = {
+        "collection_id": str(collection.id),
+        "working_code": product.working_code,
+        "name": product.name,
+        "document_status": product.document_status,
+        "revision": f"{product.document_revision:03d}",
+    }
+    product.delete()
+    sync_collection_status(collection=collection, actor=actor)
+    record_audit(
+        actor=actor,
+        action="rnd_rejected_product_deleted",
+        entity_type="rnd.development_product",
+        entity_id=product_id,
+        before_values=snapshot,
+        after_values={"deleted": True},
+    )
+    for storage, name in files.values():
+        transaction.on_commit(lambda storage=storage, name=name: storage.delete(name), robust=True)
+    return snapshot
 
 
 @transaction.atomic

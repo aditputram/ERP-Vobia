@@ -710,6 +710,92 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(len(live_pdf.pages), 3)
         self.assertIn("TECH PACK ARRAY PAGE", live_pdf.pages[1].extract_text())
 
+    def test_superadmin_can_reject_and_editor_can_edit_then_resubmit_same_revision(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.mockup = self._pdf("mockup.pdf", "MDR REJECT TEST")
+        product.technical_drawing = self._pdf("drawing.pdf", "DRAWING REJECT TEST")
+        product.save(update_fields=("mockup", "technical_drawing", "updated_at"))
+
+        self.client.force_login(self.rnd_editor)
+        self.client.post(reverse("rnd:product_submit", args=[product.id]))
+        denied = self.client.post(reverse("rnd:product_reject", args=[product.id]))
+        self.assertEqual(denied.status_code, 403)
+
+        self.client.force_login(self.admin)
+        rejected = self.client.post(reverse("rnd:product_reject", args=[product.id]))
+        self.assertRedirects(rejected, reverse("rnd:product_detail", args=[product.id]))
+        product.refresh_from_db()
+        self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.REJECTED)
+        self.assertEqual(product.document_revision, 0)
+        revision = product.document_revisions.get(revision=0)
+        self.assertEqual(revision.status, DevelopmentProductDocumentRevision.Status.REJECTED)
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="rnd_product_document_rejected",
+                entity_id=str(product.id),
+            ).exists()
+        )
+
+        self.client.force_login(self.rnd_editor)
+        page = self.client.get(reverse("rnd:product_detail", args=[product.id]))
+        self.assertContains(page, "Edit Product")
+        self.assertContains(page, "Delete Product")
+        self.assertContains(page, "Submit Ulang Approval")
+        edited = self.client.post(
+            reverse("rnd:product_detail", args=[product.id]),
+            self._product_payload(product, DevelopmentProduct.Status.CONCEPT),
+        )
+        self.assertRedirects(edited, reverse("rnd:product_detail", args=[product.id]))
+        product.refresh_from_db()
+        self.assertEqual(product.category, "Bag")
+        self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.REJECTED)
+        self.assertEqual(product.document_revision, 0)
+
+        resubmitted = self.client.post(reverse("rnd:product_submit", args=[product.id]))
+        self.assertRedirects(resubmitted, reverse("rnd:product_detail", args=[product.id]))
+        product.refresh_from_db()
+        revision.refresh_from_db()
+        self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.SUBMITTED)
+        self.assertEqual(product.document_revision, 0)
+        self.assertEqual(product.document_revisions.count(), 1)
+        self.assertEqual(revision.status, DevelopmentProductDocumentRevision.Status.SUBMITTED)
+
+    def test_editor_can_delete_only_a_rejected_product(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.mockup = self._pdf("delete-rejected.pdf", "DELETE REJECTED")
+        product.technical_drawing = self._pdf("delete-drawing.pdf", "DELETE DRAWING")
+        product.save(update_fields=("mockup", "technical_drawing", "updated_at"))
+        mockup_name = product.mockup.name
+        storage = product.mockup.storage
+
+        self.client.force_login(self.rnd_editor)
+        blocked = self.client.post(
+            reverse("rnd:product_delete", args=[product.id]),
+            follow=True,
+        )
+        self.assertContains(blocked, "Product hanya dapat dihapus setelah dokumennya di-reject.")
+        self.assertTrue(DevelopmentProduct.objects.filter(pk=product.id).exists())
+        self.client.post(reverse("rnd:product_submit", args=[product.id]))
+
+        self.client.force_login(self.admin)
+        self.client.post(reverse("rnd:product_reject", args=[product.id]))
+        self.client.force_login(self.rnd_editor)
+        with self.captureOnCommitCallbacks(execute=True):
+            deleted = self.client.post(reverse("rnd:product_delete", args=[product.id]))
+        self.assertRedirects(deleted, reverse("rnd:collection_detail", args=[collection.id]))
+        self.assertFalse(DevelopmentProduct.objects.filter(pk=product.id).exists())
+        collection.refresh_from_db()
+        self.assertEqual(collection.status, Collection.Status.DRAFT)
+        self.assertFalse(storage.exists(mockup_name))
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="rnd_rejected_product_deleted",
+                entity_id=str(product.id),
+            ).exists()
+        )
+
     def test_document_revision_history_is_selectable_and_old_pdf_is_preserved(self):
         collection = self._collection()
         product = self._product(collection)

@@ -53,7 +53,7 @@ from .services.builder import (
 )
 from inventory.services.fifo import post_opening
 from inventory.services.fifo import record_inbound
-from inventory.models import InventoryMovement
+from inventory.models import InventoryMovement, PhysicalReturnReceipt
 from .services.incoming_actuals import close_incoming_month
 from .services.planning_reporting import future_planning_values
 from .services.planning_activity import (
@@ -61,7 +61,8 @@ from .services.planning_activity import (
     planning_activity_snapshot,
 )
 from sales.services.manual import create_manual_sale
-from sales.models import SalesPlan, SalesPlanningScenario, SalesPlanSKU
+from sales.models import SalesOrder, SalesOrderLine, SalesPlan, SalesPlanningScenario, SalesPlanSKU
+from .services.official_projection import official_current_month_values
 
 
 class MerchandisingCalculationTests(TestCase):
@@ -122,6 +123,8 @@ class MerchandisingCalculationTests(TestCase):
         self.assertEqual(values["beginning_qty"], Decimal("300"))
         self.assertEqual(values["sales_qty"], Decimal("270"))
         self.assertEqual(values["sales_gross"], Decimal("54000000"))
+        self.assertEqual(values["sales_discount"], Decimal("5400000"))
+        self.assertEqual(values["sales_return"], Decimal("0"))
         self.assertEqual(values["sales_net"], Decimal("48600000"))
         self.assertEqual(values["ending_qty"], Decimal("30"))
         self.assertEqual(values["mos"], Decimal("30") / Decimal("270"))
@@ -884,6 +887,67 @@ class MerchandisingReportViewTests(TestCase):
         ])
         self.client.force_login(self.user)
 
+    def test_current_month_keeps_returned_order_in_gross_and_deducts_received_return(self):
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.OTHER,
+            source_label="Offline",
+            order_number="RETURN-GROSS-001",
+            order_datetime=timezone.make_aware(datetime(2026, 8, 5, 10, 0)),
+            shipped_datetime=timezone.make_aware(datetime(2026, 8, 5, 10, 0)),
+            order_date=date(2026, 8, 5),
+            current_status="Retur",
+            source_status="Retur",
+            is_final=True,
+            import_origin=SalesOrder.ImportOrigin.MANUAL,
+            affects_inventory=True,
+            first_seen_batch_id="00000000-0000-0000-0000-000000000000",
+            latest_batch_id="00000000-0000-0000-0000-000000000000",
+        )
+        line = SalesOrderLine.objects.create(
+            order=order,
+            sku=self.sku,
+            sku_code_snapshot=self.sku.sku,
+            quantity=2,
+            net_unit_price=Decimal("180000"),
+            retail_price_snapshot=Decimal("200000"),
+            sales_cogs_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("400000"),
+            total_net_sales=Decimal("360000"),
+            total_cogs=Decimal("200000"),
+            gpm=Decimal("160000"),
+            is_counted=True,
+        )
+        warehouse = Warehouse.objects.create(code="WH-RETURN-GROSS", name="Return Warehouse")
+        PhysicalReturnReceipt.objects.create(
+            sales_line=line,
+            received_date=date(2026, 8, 10),
+            quantity=1,
+            warehouse=warehouse,
+            condition=PhysicalReturnReceipt.Condition.DAMAGED,
+            recorded_by=self.user,
+        )
+
+        values = official_current_month_values(
+            self.batch,
+            [self.sku.id],
+            {
+                "year": 2026,
+                "current_month_number": 8,
+                "cutoff_date": date(2026, 8, 10),
+                "run_date": date(2026, 8, 20),
+            },
+        )[self.sku.id]
+
+        self.assertEqual(values["sales_qty"], Decimal("5"))
+        self.assertEqual(values["sales_gross"], Decimal("1000000"))
+        self.assertEqual(values["sales_discount"], Decimal("100000"))
+        self.assertEqual(values["sales_return"], Decimal("180000"))
+        self.assertEqual(values["sales_net"], Decimal("720000"))
+        self.assertEqual(
+            values["sales_net"],
+            values["sales_gross"] - values["sales_discount"] - values["sales_return"],
+        )
+
     def test_incoming_month_close_freezes_actual_and_po_backed_carryover(self):
         supplier = Supplier.objects.create(code="SUP-CLOSE", name="Supplier Close")
         warehouse = Warehouse.objects.create(code="WH-CLOSE", name="Warehouse Close")
@@ -1001,6 +1065,8 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Monthly Merchandising Indicators")
         self.assertContains(response, "Stock Value Ratio")
+        self.assertContains(response, "Discount")
+        self.assertContains(response, "Return")
         self.assertContains(response, "GPM Rate")
         self.assertContains(response, "Margin Ratio")
         self.assertContains(response, "Incoming Capital Turnover")
@@ -1012,6 +1078,14 @@ class MerchandisingReportViewTests(TestCase):
         self.assertContains(response, "ERP memakai seluruh 1 SKU yang sesuai filter")
         self.assertContains(response, "SUMMARY ↔ PROJECTION CONNECTED")
         rows = {row["label"]: row for row in response.context["table_rows"]}
+        self.assertEqual(rows["Discount"]["values"][0], Decimal("40000"))
+        self.assertEqual(rows["Return"]["values"][0], Decimal("0"))
+        self.assertEqual(
+            rows["Sales Net"]["values"][0],
+            rows["Sales Gross"]["values"][0]
+            - rows["Discount"]["values"][0]
+            - rows["Return"]["values"][0],
+        )
         self.assertEqual(rows["Beginning Gross"]["values"][7], Decimal("3600000"))
         self.assertEqual(rows["Sales Gross"]["values"][7], Decimal("0"))
         self.assertEqual(rows["Ending Stock Gross"]["values"][7], Decimal("3600000"))
@@ -1054,6 +1128,8 @@ class MerchandisingReportViewTests(TestCase):
             for index in range(10, sheet.max_row + 1)
         }
         self.assertEqual(exported["Sales Gross"], rows["Sales Gross"]["values"][0])
+        self.assertEqual(exported["Discount"], rows["Discount"]["values"][0])
+        self.assertEqual(exported["Return"], rows["Return"]["values"][0])
         self.assertEqual(sheet["B5"].value, "Active")
         workbook.close()
 

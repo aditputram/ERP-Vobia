@@ -1,10 +1,11 @@
 from datetime import date
 from decimal import Decimal
 
-from django.db.models import Max, Sum
+from django.db.models import DecimalField, ExpressionWrapper, F, Max, Sum
 from django.utils import timezone
 
 from sales.models import SalesOrderLine
+from inventory.models import PhysicalReturnReceipt
 
 from merchandising.models import MerchandisingMonthlySnapshot
 
@@ -28,7 +29,7 @@ def official_planning_state(batch, run_date=None):
     eligible_lines = SalesOrderLine.objects.filter(
         is_counted=True,
         order__order_date__year=planning_year,
-    ).exclude(order__current_status="Retur")
+    )
     latest_actual_date = eligible_lines.aggregate(latest=Max("order__order_date"))["latest"]
 
     if run_date.year == planning_year:
@@ -91,9 +92,31 @@ def official_current_month_values(batch, sku_ids, state):
             order__order_date__year=year,
             order__order_date__month=month_number,
         )
-        .exclude(order__current_status="Retur")
         .values("sku_id")
-        .annotate(actual_qty=Sum("quantity"), actual_net=Sum("total_net_sales"))
+        .annotate(
+            actual_qty=Sum("quantity"),
+            actual_gross=Sum("total_gross_sales"),
+            actual_net=Sum("total_net_sales"),
+        )
+    }
+    returns = {
+        row["sales_line__sku_id"]: row["actual_return"]
+        for row in PhysicalReturnReceipt.objects.filter(
+            sales_line__is_counted=True,
+            sales_line__sku_id__in=sku_ids,
+            received_date__year=year,
+            received_date__month=month_number,
+            received_date__lte=state["run_date"],
+        )
+        .values("sales_line__sku_id")
+        .annotate(
+            actual_return=Sum(
+                ExpressionWrapper(
+                    F("quantity") * F("sales_line__net_unit_price"),
+                    output_field=DecimalField(max_digits=24, decimal_places=4),
+                )
+            )
+        )
     }
 
     values = {}
@@ -103,7 +126,9 @@ def official_current_month_values(batch, sku_ids, state):
             prior_ending_qty=prior_ending.get(sku_id, ZERO),
             incoming_qty=snapshot.incoming_qty,
             actual_qty=actual.get("actual_qty", ZERO),
+            actual_gross=actual.get("actual_gross"),
             actual_net=actual.get("actual_net", ZERO),
+            actual_return=returns.get(sku_id, ZERO),
             cutoff_date=state["cutoff_date"],
             cogs=snapshot.cogs_snapshot,
             retail_price=snapshot.retail_price_snapshot,

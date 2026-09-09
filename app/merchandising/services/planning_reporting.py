@@ -181,6 +181,8 @@ def future_planning_values(
                 "sales_qty": sales_qty,
                 "sales_cogs": sales_qty * cogs,
                 "sales_gross": sales_gross,
+                "sales_discount": sales_gross - sales_net,
+                "sales_return": ZERO,
                 "sales_net": sales_net,
                 "ending_qty": ending_qty,
                 "ending_cogs": ending_qty * cogs,

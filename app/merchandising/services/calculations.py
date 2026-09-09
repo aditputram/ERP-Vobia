@@ -50,6 +50,8 @@ def current_month_metric_values(
     incoming_qty,
     actual_qty,
     actual_net,
+    actual_gross=None,
+    actual_return=ZERO,
     cutoff_date,
     cogs,
     retail_price,
@@ -60,6 +62,12 @@ def current_month_metric_values(
     incoming_qty = Decimal(incoming_qty or ZERO)
     actual_qty = Decimal(actual_qty or ZERO)
     actual_net = Decimal(actual_net or ZERO)
+    actual_gross = (
+        Decimal(actual_gross)
+        if actual_gross is not None
+        else actual_qty * Decimal(retail_price or ZERO)
+    )
+    actual_return = Decimal(actual_return or ZERO)
     cogs = Decimal(cogs or ZERO)
     retail_price = Decimal(retail_price or ZERO)
 
@@ -69,12 +77,18 @@ def current_month_metric_values(
         if cutoff_date
         else ZERO
     )
+    average_gross_price = actual_gross / actual_qty if actual_qty else ZERO
     average_net_price = actual_net / actual_qty if actual_qty else ZERO
     sales_cogs = sales_qty * cogs
-    sales_gross = sales_qty * retail_price
-    sales_net = (sales_qty * average_net_price).quantize(
+    sales_gross = (sales_qty * average_gross_price).quantize(
         Decimal("1"), rounding=ROUND_HALF_UP
     )
+    sales_before_return = (sales_qty * average_net_price).quantize(
+        Decimal("1"), rounding=ROUND_HALF_UP
+    )
+    sales_discount = sales_gross - sales_before_return
+    sales_return = actual_return.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    sales_net = sales_before_return - sales_return
     ending_qty = beginning_qty - sales_qty
 
     return {
@@ -85,6 +99,8 @@ def current_month_metric_values(
         "sales_qty": sales_qty,
         "sales_cogs": sales_cogs,
         "sales_gross": sales_gross,
+        "sales_discount": sales_discount,
+        "sales_return": sales_return,
         "sales_net": sales_net,
         "ratio": beginning_qty / sales_qty if sales_qty else None,
         "ending_qty": ending_qty,

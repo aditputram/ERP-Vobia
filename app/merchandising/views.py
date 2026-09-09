@@ -71,7 +71,7 @@ from .services.workflows import (
 )
 
 
-SUMMARY_METRICS = (
+SNAPSHOT_SUMMARY_METRICS = (
     ("incoming_cogs", "Incoming COGS", "money"),
     ("incoming_gross", "Incoming Gross", "money"),
     ("beginning_gross", "Beginning Gross", "money"),
@@ -80,6 +80,13 @@ SUMMARY_METRICS = (
     ("sales_cogs", "Sales COGS", "money"),
     ("ending_gross", "Ending Stock Gross", "money"),
     ("ending_cogs", "Ending Stock COGS", "money"),
+)
+
+SUMMARY_METRICS = (
+    *SNAPSHOT_SUMMARY_METRICS[:4],
+    ("sales_discount", "Discount", "money"),
+    ("sales_return", "Return", "money"),
+    *SNAPSHOT_SUMMARY_METRICS[4:],
 )
 
 PROJECTION_METRIC_GROUPS = (
@@ -460,15 +467,21 @@ def dashboard(request):
         aggregates = {
             row["month"].month: row
             for row in snapshots.values("month").annotate(
-                **{field: Sum(field) for field, _, _ in SUMMARY_METRICS},
+                **{field: Sum(field) for field, _, _ in SNAPSHOT_SUMMARY_METRICS},
                 prior_year_ending_cogs=Sum("prior_year_ending_cogs"),
             )
         }
         month_values = {month: aggregates.get(month, {}) for month in range(1, 13)}
+        for values in month_values.values():
+            gross = values.get("sales_gross")
+            net = values.get("sales_net")
+            values["sales_discount"] = gross - net if gross is not None and net is not None else None
+            values["sales_return"] = Decimal("0") if gross is not None and net is not None else None
         current_month = planning_state["current_month_number"]
         current_aggregate = month_values[current_month]
         for field in (
-            "beginning_gross", "sales_gross", "sales_net", "sales_cogs",
+            "beginning_gross", "sales_gross", "sales_discount", "sales_return",
+            "sales_net", "sales_cogs",
             "ending_gross", "ending_cogs",
         ):
             current_aggregate[field] = sum(

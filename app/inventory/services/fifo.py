@@ -452,10 +452,10 @@ def record_inbound(
 def receive_rejected_goods_delivery(*, delivery_activity, inbound_date, received_qty, warehouse, actor, notes=""):
     from production.models import ProductionActivity
 
-    delivery_activity = ProductionActivity.objects.select_for_update().select_related(
-        "delivery_order",
-        "po_line__sku",
-    ).get(pk=delivery_activity.pk)
+    # Lock only the delivery row. ``delivery_order`` and ``po_line`` are nullable
+    # model relations, so joining them in the same PostgreSQL ``FOR UPDATE``
+    # query raises "cannot be applied to the nullable side of an outer join".
+    delivery_activity = ProductionActivity.objects.select_for_update().get(pk=delivery_activity.pk)
     if delivery_activity.activity_type != ProductionActivity.ActivityType.REJECTED_WAREHOUSE_DELIVERY:
         raise ValidationError("Pengiriman ini bukan Rejected Goods.")
     if warehouse.code != "REJECT":

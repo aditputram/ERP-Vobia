@@ -3,7 +3,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from django.db import migrations
+from django.db import migrations, transaction
 from django.db.models import Q, Sum
 
 
@@ -92,7 +92,7 @@ def _delete_activity_tree(ProductionActivity, activity_ids, database):
         remaining -= leaves
 
 
-def cleanup_operation_uat(apps, schema_editor):
+def _cleanup_operation_uat(apps, schema_editor):
     database = schema_editor.connection.alias
     if schema_editor.connection.vendor != "postgresql":
         return
@@ -334,6 +334,26 @@ def cleanup_operation_uat(apps, schema_editor):
         **event.after_values,
         "after_inventory_fingerprint": _inventory_fingerprint(InventoryMovement, database),
     })
+
+
+def cleanup_operation_uat(apps, schema_editor):
+    database = schema_editor.connection.alias
+    if schema_editor.connection.vendor != "postgresql":
+        return
+
+    AuditEvent = apps.get_model("audit", "AuditEvent")
+    try:
+        with transaction.atomic(using=database):
+            _cleanup_operation_uat(apps, schema_editor)
+    except Exception as exc:
+        AuditEvent.objects.using(database).create(
+            actor=None,
+            action="operation_uat_cleanup_blocked",
+            entity_type="purchasing.purchaseorder",
+            entity_id=ARCHIVE_KEY,
+            reason=str(exc),
+            metadata={"exception_type": type(exc).__name__},
+        )
 
 
 def restore_operation_uat(apps, schema_editor):

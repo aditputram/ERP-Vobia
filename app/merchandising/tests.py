@@ -1075,9 +1075,9 @@ class MerchandisingReportViewTests(TestCase):
             "January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November", "December",
         ])
-        self.assertContains(response, "1 SOURCE-RANGE EXCEPTION")
-        self.assertContains(response, "ERP memakai seluruh 1 SKU yang sesuai filter")
-        self.assertContains(response, "SUMMARY ↔ PROJECTION CONNECTED")
+        self.assertNotContains(response, "COGS VALUATION POLICY")
+        self.assertNotContains(response, "SOURCE-RANGE EXCEPTION")
+        self.assertNotContains(response, "SUMMARY ↔ PROJECTION CONNECTED")
         rows = {row["label"]: row for row in response.context["table_rows"]}
         self.assertEqual(rows["Discount"]["values"][0], Decimal("40000"))
         self.assertEqual(rows["Return"]["values"][0], Decimal("0"))
@@ -1154,6 +1154,9 @@ class MerchandisingReportViewTests(TestCase):
         with patch("merchandising.views.official_planning_state", return_value=state):
             response = self.client.get("/merchandising/dashboard/")
 
+        self.assertNotContains(response, "COGS VALUATION POLICY")
+        self.assertNotContains(response, "SOURCE-RANGE EXCEPTION")
+        self.assertNotContains(response, "SUMMARY ↔ PROJECTION CONNECTED")
         rows = {row["label"]: row for row in response.context["table_rows"]}
         self.assertEqual(rows["Return"]["values"][7], Decimal("180000"))
         self.assertEqual(rows["Sales Net"]["values"][7], Decimal("180000"))

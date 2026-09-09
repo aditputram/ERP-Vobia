@@ -1336,6 +1336,63 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(comparison.context["partial_selling_rows"][0]["article"], "Sembara")
         self.assertContains(comparison, "Produk dengan Periode Jual Parsial")
 
+    def test_seasonal_new_sold_before_current_month_uses_regular_treatment(self):
+        seasonal = ProductStatus.objects.create(code="SEASONAL-NEW-EXISTING", name="Seasonal New")
+        self.product.status = seasonal
+        self.product.save(update_fields=["status"])
+        MerchandisingMonthlySnapshot.objects.filter(
+            batch=self.batch,
+            sku=self.sku,
+            month=date(2026, 7, 1),
+        ).update(ending_qty=100)
+
+        for order_number, order_date, quantity in (
+            ("SEASONAL-PRIOR-001", date(2026, 7, 31), 1),
+            ("SEASONAL-CURRENT-001", date(2026, 8, 10), 7),
+        ):
+            order = SalesOrder.objects.create(
+                source=SalesOrder.Source.OTHER,
+                source_label="Offline",
+                order_number=order_number,
+                order_datetime=timezone.make_aware(datetime.combine(order_date, datetime.min.time())),
+                order_date=order_date,
+                current_status="Selesai",
+                source_status="Selesai",
+                is_final=True,
+                import_origin=SalesOrder.ImportOrigin.MANUAL,
+                affects_inventory=False,
+                first_seen_batch_id="00000000-0000-0000-0000-000000000000",
+                latest_batch_id="00000000-0000-0000-0000-000000000000",
+            )
+            SalesOrderLine.objects.create(
+                order=order,
+                sku=self.sku,
+                sku_code_snapshot=self.sku.sku,
+                quantity=quantity,
+                net_unit_price=Decimal("180000"),
+                retail_price_snapshot=Decimal("200000"),
+                sales_cogs_snapshot=Decimal("100000"),
+                total_gross_sales=Decimal(quantity * 200000),
+                total_net_sales=Decimal(quantity * 180000),
+                total_cogs=Decimal(quantity * 100000),
+                gpm=Decimal(quantity * 80000),
+                is_counted=True,
+            )
+
+        state = {
+            "year": 2026,
+            "current_month_number": 8,
+            "cutoff_date": date(2026, 8, 14),
+            "run_date": date(2026, 8, 15),
+            "day_factor": 26,
+        }
+        values = official_current_month_values(self.batch, [self.sku.id], state)[self.sku.id]
+
+        self.assertEqual(values["selling_start_date"], date(2026, 8, 1))
+        self.assertEqual(values["selling_days"], 14)
+        self.assertFalse(values["launch_date_missing"])
+        self.assertEqual(values["sales_qty"], Decimal("13"))
+
     def test_dashboard_exports_the_filtered_indicator_matrix_as_xlsx(self):
         params = {"status": ["Active"], "incoming_mode": "projection"}
         page = self.client.get("/merchandising/dashboard/", params)

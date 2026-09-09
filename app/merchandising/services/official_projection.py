@@ -105,11 +105,23 @@ def _selling_contexts(skus, year, month_number, cutoff_date, first_sales=None):
     launches = _seasonal_launch_dates(
         {sku.product_variant.product_id for sku in skus}
     )
+    previously_sold_product_ids = set(
+        SalesOrderLine.objects.filter(
+            is_counted=True,
+            sku__product_variant__product_id__in={
+                sku.product_variant.product_id for sku in skus
+            },
+            order__order_date__lt=month_start,
+        ).values_list("sku__product_variant__product_id", flat=True)
+    )
     contexts = {}
     first_sales = first_sales or {}
     for sku in skus:
         product = sku.product_variant.product
-        is_seasonal_new = product.status.name.strip().casefold() == "seasonal new"
+        is_seasonal_new = (
+            product.status.name.strip().casefold() == "seasonal new"
+            and product.id not in previously_sold_product_ids
+        )
         if is_seasonal_new:
             launch_date = launches.get(product.id)
             start_date = max(month_start, launch_date) if launch_date else None

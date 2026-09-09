@@ -317,6 +317,8 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(after_sale.context["balances"][0]["fifo_value"], Decimal("960000"))
         self.assertContains(after_sale, 'name="as_of_date"')
         self.assertContains(after_sale, 'value="2026-08-10"')
+        self.assertContains(after_sale, 'href="?as_of_date=2026-08-10&export=xlsx"')
+        self.assertNotContains(after_sale, 'form="inventory-filter"')
         self.assertEqual(future.context["as_of_date"], date(2030, 12, 31))
         self.assertNotContains(future, 'max="')
 

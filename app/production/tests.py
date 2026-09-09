@@ -20,6 +20,7 @@ from .forms import ProductionStageUpdateForm
 from .services import (
     append_trial_note,
     approve_production_cogs_finalization,
+    correct_production_activity,
     decide_trial,
     ensure_production_order,
     production_snapshot,
@@ -171,6 +172,51 @@ class ProductionWorkflowTests(TestCase):
             activate=True,
             actor=self.user,
         )
+
+    def test_submitted_trial_date_can_be_corrected_after_trial_is_approved(self):
+        self._activate_plan()
+        submit_production_activity(
+            production_order=self.production_order,
+            activity_type=ProductionActivity.ActivityType.MATERIAL_PURCHASE,
+            activity_date=date(2026, 8, 23),
+            actor=self.user,
+        )
+        submit_production_activity(
+            production_order=self.production_order,
+            activity_type=ProductionActivity.ActivityType.MATERIAL_ARRIVAL,
+            activity_date=date(2026, 8, 24),
+            actor=self.user,
+        )
+        submit_production_activity(
+            production_order=self.production_order,
+            activity_type=ProductionActivity.ActivityType.TRIAL_SUBMIT,
+            activity_date=date(2026, 8, 25),
+            actor=self.user,
+        )
+        submit_production_activity(
+            production_order=self.production_order,
+            activity_type=ProductionActivity.ActivityType.TRIAL_APPROVE,
+            activity_date=date(2026, 8, 26),
+            actor=self.user,
+        )
+        original = ProductionActivity.objects.get(
+            production_order=self.production_order,
+            entry_kind=ProductionActivity.EntryKind.ACTIVITY,
+            activity_type=ProductionActivity.ActivityType.TRIAL_SUBMIT,
+        )
+
+        correction = correct_production_activity(
+            activity=original,
+            activity_date=date(2026, 8, 24),
+            reason="Tanggal submit salah input.",
+            actor=self.user,
+        )
+
+        trial = ProductionTrial.objects.get(production_order=self.production_order)
+        self.assertEqual(trial.status, ProductionTrial.Status.APPROVED)
+        self.assertEqual(trial.trial_date, date(2026, 8, 24))
+        self.assertEqual(correction.source_activity, original)
+        self.assertEqual(correction.entry_kind, ProductionActivity.EntryKind.CORRECTION)
 
     def test_legacy_plan_activation_removes_unreceived_migration_qc_shortcut(self):
         PurchaseOrder.objects.filter(pk=self.po.pk).update(source=PurchaseOrder.Source.LEGACY_WIP)

@@ -1300,7 +1300,6 @@ def correct_production_activity(
 ):
     activity = ProductionActivity.objects.select_for_update().select_related(
         "production_order__po",
-        "production_order__plan",
         "po_line__sku",
     ).get(pk=activity.pk)
     if activity.entry_kind != ProductionActivity.EntryKind.ACTIVITY:

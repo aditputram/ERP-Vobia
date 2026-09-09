@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -1102,6 +1103,66 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(rows["Margin Ratio"]["kind"], "ratio2")
         self.assertEqual(rows["Incoming Capital Turnover"]["kind"], "ratio2")
         self.assertEqual(rows["Sales Gross"]["total"], Decimal("2800000"))
+
+    def test_dashboard_reads_august_return_log_without_waiting_for_month_close(self):
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.OTHER,
+            source_label="Offline",
+            order_number="AUGUST-RETURN-001",
+            order_datetime=timezone.make_aware(datetime(2026, 7, 20, 10, 0)),
+            shipped_datetime=timezone.make_aware(datetime(2026, 7, 20, 10, 0)),
+            order_date=date(2026, 7, 20),
+            current_status="Retur",
+            source_status="Retur",
+            is_final=True,
+            import_origin=SalesOrder.ImportOrigin.MANUAL,
+            affects_inventory=False,
+            first_seen_batch_id="00000000-0000-0000-0000-000000000000",
+            latest_batch_id="00000000-0000-0000-0000-000000000000",
+        )
+        line = SalesOrderLine.objects.create(
+            order=order,
+            sku=self.sku,
+            sku_code_snapshot=self.sku.sku,
+            quantity=1,
+            net_unit_price=Decimal("180000"),
+            retail_price_snapshot=Decimal("200000"),
+            sales_cogs_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("200000"),
+            total_net_sales=Decimal("180000"),
+            total_cogs=Decimal("100000"),
+            gpm=Decimal("80000"),
+            is_counted=True,
+        )
+        warehouse = Warehouse.objects.create(code="WH-AUG-RETURN", name="August Return")
+        PhysicalReturnReceipt.objects.create(
+            sales_line=line,
+            received_date=date(2026, 8, 1),
+            quantity=1,
+            warehouse=warehouse,
+            condition=PhysicalReturnReceipt.Condition.SELLABLE,
+            recorded_by=self.user,
+        )
+        state = {
+            "year": 2026,
+            "current_month_number": 9,
+            "cutoff_date": None,
+            "run_date": date(2026, 9, 9),
+            "day_factor": 25,
+        }
+
+        with patch("merchandising.views.official_planning_state", return_value=state):
+            response = self.client.get("/merchandising/dashboard/")
+
+        rows = {row["label"]: row for row in response.context["table_rows"]}
+        self.assertEqual(rows["Return"]["values"][7], Decimal("180000"))
+        self.assertEqual(rows["Sales Net"]["values"][7], Decimal("180000"))
+        self.assertEqual(
+            rows["Sales Net"]["values"][7],
+            rows["Sales Gross"]["values"][7]
+            - rows["Discount"]["values"][7]
+            - rows["Return"]["values"][7],
+        )
 
     def test_dashboard_exports_the_filtered_indicator_matrix_as_xlsx(self):
         params = {"status": ["Active"], "incoming_mode": "projection"}

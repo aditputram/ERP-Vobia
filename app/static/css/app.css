@@ -691,7 +691,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .source-exception-banner strong { display: block; margin: 5px 0; font-size: 13px; }
 .source-exception-banner p:not(.eyebrow) { max-width: 900px; margin: 0; font-size: 10px; line-height: 1.6; }
 .source-exception-banner > span { flex: 0 0 auto; padding: 8px 10px; border-radius: 8px; background: #f5d98f; font-size: 8px; font-weight: 900; letter-spacing: .05em; }
-.merchandising-summary-wrap { max-height: 640px; }
+.merchandising-summary-wrap { max-height: none; }
 .merchandising-summary-table { min-width: 1560px; }
 .merchandising-summary-table th, .merchandising-summary-table td { border-right: 1px solid #efeee9; text-align: center; }
 .merchandising-summary-table thead th { color: var(--ink); font-weight: 900; }

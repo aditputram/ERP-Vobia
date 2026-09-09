@@ -45,7 +45,11 @@ from .services.builder import (
     summarize_draft,
 )
 from .services.calculations import planning_buffer_incoming
-from .services.official_projection import official_current_month_values, official_planning_state
+from .services.official_projection import (
+    official_current_month_values,
+    official_planning_state,
+    received_return_values,
+)
 from .services.incoming_actuals import (
     carryover_totals,
     close_incoming_month,
@@ -472,12 +476,27 @@ def dashboard(request):
             )
         }
         month_values = {month: aggregates.get(month, {}) for month in range(1, 13)}
-        for values in month_values.values():
+        received_returns = received_return_values(
+            sku_ids,
+            planning_state["year"],
+            through_date=planning_state["run_date"],
+        )
+        current_month = planning_state["current_month_number"]
+        for month, values in month_values.items():
             gross = values.get("sales_gross")
             net = values.get("sales_net")
+            return_value = (
+                sum(
+                    (received_returns.get((sku_id, month), Decimal("0")) for sku_id in sku_ids),
+                    Decimal("0"),
+                )
+                if 7 < month <= current_month
+                else Decimal("0")
+            )
             values["sales_discount"] = gross - net if gross is not None and net is not None else None
-            values["sales_return"] = Decimal("0") if gross is not None and net is not None else None
-        current_month = planning_state["current_month_number"]
+            values["sales_return"] = return_value if gross is not None and net is not None else None
+            if net is not None:
+                values["sales_net"] = net - return_value
         current_aggregate = month_values[current_month]
         for field in (
             "beginning_gross", "sales_gross", "sales_discount", "sales_return",

@@ -15,6 +15,28 @@ from .calculations import current_month_metric_values, current_month_multiplier
 ZERO = Decimal("0")
 
 
+def received_return_values(sku_ids, year, through_date=None):
+    """Return received net value keyed by SKU and receipt month."""
+    rows = PhysicalReturnReceipt.objects.filter(
+        sales_line__is_counted=True,
+        sales_line__sku_id__in=sku_ids,
+        received_date__year=year,
+    )
+    if through_date:
+        rows = rows.filter(received_date__lte=through_date)
+    return {
+        (row["sales_line__sku_id"], row["received_date__month"]): row["actual_return"]
+        for row in rows.values("sales_line__sku_id", "received_date__month").annotate(
+            actual_return=Sum(
+                ExpressionWrapper(
+                    F("quantity") * F("sales_line__net_unit_price"),
+                    output_field=DecimalField(max_digits=24, decimal_places=4),
+                )
+            )
+        )
+    }
+
+
 def official_planning_state(batch, run_date=None):
     """Resolve the current official planning month and canonical Sales cutoff."""
     latest_snapshot_month = (
@@ -99,25 +121,7 @@ def official_current_month_values(batch, sku_ids, state):
             actual_net=Sum("total_net_sales"),
         )
     }
-    returns = {
-        row["sales_line__sku_id"]: row["actual_return"]
-        for row in PhysicalReturnReceipt.objects.filter(
-            sales_line__is_counted=True,
-            sales_line__sku_id__in=sku_ids,
-            received_date__year=year,
-            received_date__month=month_number,
-            received_date__lte=state["run_date"],
-        )
-        .values("sales_line__sku_id")
-        .annotate(
-            actual_return=Sum(
-                ExpressionWrapper(
-                    F("quantity") * F("sales_line__net_unit_price"),
-                    output_field=DecimalField(max_digits=24, decimal_places=4),
-                )
-            )
-        )
-    }
+    returns = received_return_values(sku_ids, year, through_date=state["run_date"])
 
     values = {}
     for sku_id, snapshot in current_snapshots.items():
@@ -128,7 +132,7 @@ def official_current_month_values(batch, sku_ids, state):
             actual_qty=actual.get("actual_qty", ZERO),
             actual_gross=actual.get("actual_gross"),
             actual_net=actual.get("actual_net", ZERO),
-            actual_return=returns.get(sku_id, ZERO),
+            actual_return=returns.get((sku_id, month_number), ZERO),
             cutoff_date=state["cutoff_date"],
             cogs=snapshot.cogs_snapshot,
             retail_price=snapshot.retail_price_snapshot,

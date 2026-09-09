@@ -16,8 +16,13 @@ from sales.models import SalesOrder, SalesOrderLine
 from ..models import SalesImportBatch, SalesImportIssue, StagedSalesRow
 
 
-PARSER_VERSION = "sales-v3"
+PARSER_VERSION = "sales-v4"
 SALES_CUTOVER_DATE = date(2026, 8, 1)
+SHOPEE_CANCEL_REASON_HEADERS = ("Alasan Pembatalan",)
+SHOPEE_RETURN_STATUS_HEADERS = (
+    "Status Pembatalan/ Pengembalian",
+    "Status Pembatalan/Pengembalian",
+)
 HEADER_ALIASES = {
     "Shopee": {
         "order_number": ("No. Pesanan",),
@@ -177,10 +182,39 @@ def _read_rows(path, file_format, source):
     raise ValueError("Format Sales import harus .xlsx atau .csv.")
 
 
-def _normalize_status(source, source_status, shipped_datetime):
+def _raw_text(raw, headers):
+    return next((_text(raw.get(header)) for header in headers if header in raw), "")
+
+
+def _normalize_status(
+    source,
+    source_status,
+    shipped_datetime,
+    *,
+    cancellation_reason="",
+    return_status="",
+):
     status = source_status.strip()
     lowered = status.casefold()
     cancelled = lowered in {"batal", "dibatalkan", "cancelled", "canceled"}
+    if source == SalesImportBatch.Source.SHOPEE:
+        reason = " ".join(cancellation_reason.casefold().replace("-", " ").split())
+        approved_return = " ".join(return_status.casefold().split()) == "permintaan disetujui"
+        system_return = (
+            "dibatalkan" in reason
+            and "sistem" in reason
+            and (
+                "paket hilang di perjalanan" in reason
+                or "pengiriman gagal" in reason
+            )
+        )
+        if (lowered == "selesai" and approved_return) or (cancelled and system_return):
+            return "Retur", True, False
+        if cancelled:
+            return "Batal", True, True
+        if lowered == "selesai":
+            return "Selesai", True, False
+        return status, False, False
     if cancelled:
         if shipped_datetime:
             return "Retur", True, False
@@ -312,6 +346,8 @@ def parse_sales_batch(batch):
     for row_number, raw in source_rows:
         order_number = _text(raw.get(resolved["order_number"]))
         source_status = _text(raw.get(resolved["status"]))
+        cancellation_reason = _raw_text(raw, SHOPEE_CANCEL_REASON_HEADERS)
+        return_status = _raw_text(raw, SHOPEE_RETURN_STATUS_HEADERS)
         source_seller_sku = _text(raw.get(resolved["sku"]))
         marketplace_sku_id = _text(raw.get("SKU ID")) if batch.source == SalesImportBatch.Source.TIKTOK else ""
         sku_mapping = marketplace_sku_mappings.get(marketplace_sku_id)
@@ -354,6 +390,8 @@ def parse_sales_batch(batch):
             batch.source,
             source_status,
             shipped_datetime,
+            cancellation_reason=cancellation_reason,
+            return_status=return_status,
         )
         is_out_of_scope = bool(
             order_datetime
@@ -501,6 +539,8 @@ def parse_sales_batch(batch):
             "quantity": _text(raw.get(resolved["quantity"])),
             "created_time": _text(raw.get(resolved["created_time"])),
             "shipped_time": _text(raw.get(resolved["shipped_time"])),
+            "cancellation_reason": cancellation_reason,
+            "return_status": return_status,
             "import_scope": "before_cutover" if is_out_of_scope else "in_scope",
             "historical_status_audit": historical_status_audit,
             "historical_status_update_allowed": historical_status_update_allowed,

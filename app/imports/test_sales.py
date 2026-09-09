@@ -29,6 +29,8 @@ from .services.storage import create_sales_import
 SHOPEE_HEADERS = [
     "No. Pesanan",
     "Status Pesanan",
+    "Alasan Pembatalan",
+    "Status Pembatalan/ Pengembalian",
     "Nomor Referensi SKU",
     "Jumlah",
     "Harga Setelah Diskon",
@@ -109,6 +111,8 @@ class SalesImportWorkflowTests(TestCase):
         values = {
             "No. Pesanan": "SHOPEE-ORDER-001",
             "Status Pesanan": "Selesai",
+            "Alasan Pembatalan": "",
+            "Status Pembatalan/ Pengembalian": "",
             "Nomor Referensi SKU": "SKU-001",
             "Jumlah": "2",
             "Harga Setelah Diskon": "299.000",
@@ -459,8 +463,15 @@ class SalesImportWorkflowTests(TestCase):
         self.assertEqual(SalesOrder.objects.count(), 0)
         self.assertEqual(SalesOrderLine.objects.count(), 0)
 
-    def test_cancelled_after_shipment_is_normalized_to_return(self):
-        row = self.shopee_row(**{"Status Pesanan": "Batal"})
+    def test_cancelled_shipping_failure_is_normalized_to_return(self):
+        row = self.shopee_row(
+            **{
+                "Status Pesanan": "Batal",
+                "Alasan Pembatalan": (
+                    "Dibatalkan secara otomatis oleh sistem Shopee. Alasan: Pengiriman gagal"
+                ),
+            }
+        )
         batch = create_sales_import(
             make_csv(SHOPEE_HEADERS, [row], "return.csv"),
             SalesImportBatch.Source.SHOPEE,
@@ -470,6 +481,77 @@ class SalesImportWorkflowTests(TestCase):
         self.assertEqual(staged.normalized_status, "Retur")
         self.assertTrue(staged.is_final)
         self.assertFalse(staged.is_pure_cancelled)
+
+    def test_cancelled_lost_package_is_normalized_to_return(self):
+        row = self.shopee_row(
+            **{
+                "Status Pesanan": "Batal",
+                "Alasan Pembatalan": (
+                    "Dibatalkan secara otomatis oleh sistem Shopee. Alasan: Paket hilang di perjalanan. "
+                    "Kompensasi yang memenuhi syarat telah dikreditkan ke Saldo Penjual-mu."
+                ),
+            }
+        )
+        batch = create_sales_import(
+            make_csv(SHOPEE_HEADERS, [row], "lost-package-return.csv"),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+
+        self.assertEqual(batch.staged_rows.get().normalized_status, "Retur")
+
+    def test_completed_approved_return_becomes_return_log_candidate(self):
+        row = self.shopee_row(
+            **{"Status Pembatalan/ Pengembalian": "Permintaan Disetujui"}
+        )
+        batch = create_sales_import(
+            make_csv(SHOPEE_HEADERS, [row], "completed-return.csv"),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+
+        staged = batch.staged_rows.get()
+        self.assertEqual(staged.normalized_status, "Retur")
+        self.assertEqual(
+            staged.selected_source_data["return_status"],
+            "Permintaan Disetujui",
+        )
+        approve_sales_import(batch.id, self.user)
+        order = SalesOrder.objects.get()
+        self.assertEqual(order.current_status, "Retur")
+        self.assertTrue(order.lines.get().expected_return)
+
+    def test_approved_return_flag_does_not_override_non_completed_order(self):
+        row = self.shopee_row(
+            **{
+                "Status Pesanan": "Sedang Dikirim",
+                "Status Pembatalan/ Pengembalian": "Permintaan Disetujui",
+            }
+        )
+        batch = create_sales_import(
+            make_csv(SHOPEE_HEADERS, [row], "non-completed-return.csv"),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+
+        self.assertEqual(batch.staged_rows.get().normalized_status, "Sedang Dikirim")
+
+    def test_cancelled_buyer_order_stays_pure_cancel_even_when_shipped_time_exists(self):
+        row = self.shopee_row(
+            **{
+                "Status Pesanan": "Batal",
+                "Alasan Pembatalan": "Dibatalkan oleh Pembeli. Alasan: Ubah Pesanan yang Ada",
+            }
+        )
+        batch = create_sales_import(
+            make_csv(SHOPEE_HEADERS, [row], "buyer-cancel.csv"),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+
+        staged = batch.staged_rows.get()
+        self.assertEqual(staged.normalized_status, "Batal")
+        self.assertTrue(staged.is_pure_cancelled)
 
     def test_second_import_updates_status_without_rewriting_snapshot(self):
         first_row = self.shopee_row(**{"Status Pesanan": "Sedang Dikirim"})

@@ -844,6 +844,7 @@ def return_log(request):
         "sales_line__sku__product_variant__product",
         "warehouse",
         "recorded_by",
+        "movement",
     ).order_by("-received_date", "-created_at")
     if request.method == "GET" and request.GET.get("export") == "xlsx":
         return _export_returns(

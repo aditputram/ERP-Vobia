@@ -329,6 +329,7 @@ class FIFOLayer(models.Model):
     class SourceType(models.TextChoices):
         OPENING = "OPENING", "Opening"
         PURCHASE_ORDER = "PURCHASE_ORDER", "Purchase Order"
+        RETURN = "RETURN", "Pre-cutover Sales Return"
         ADJUSTMENT = "ADJUSTMENT", "Approved Adjustment"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

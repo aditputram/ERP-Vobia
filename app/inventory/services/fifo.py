@@ -563,6 +563,53 @@ def create_expected_return(sales_line):
     return expected
 
 
+def _post_pre_cutover_return(*, receipt, actor):
+    snapshot = FIFOOpeningSnapshot.objects.select_for_update().filter(sku=receipt.sales_line.sku).first()
+    if snapshot is None:
+        raise ValidationError("Frozen Unit COGS SKU pra-cutover belum tersedia; Return In tidak dapat diposting.")
+    sales_line = receipt.sales_line
+    source_reference = f"{sales_line.order.display_source}|{sales_line.order.order_number}"
+    key = f"RETURN|{source_reference}|{sales_line.sku.sku}|{receipt.id}"
+    restored_cost = receipt.quantity * snapshot.frozen_unit_cogs
+    movement = InventoryMovement.objects.create(
+        movement_key=key,
+        movement_date=receipt.received_date,
+        movement_type=InventoryMovement.MovementType.RETURN_IN,
+        direction=InventoryMovement.Direction.IN,
+        sku=sales_line.sku,
+        warehouse=receipt.warehouse,
+        quantity=receipt.quantity,
+        allocated_cost=restored_cost,
+        source_reference=source_reference,
+        return_receipt=receipt,
+        reason="Retur sellable dari penjualan pra-cutover.",
+        posted_by=actor,
+    )
+    FIFOLayer.objects.create(
+        layer_key=key,
+        sku=sales_line.sku,
+        source_type=FIFOLayer.SourceType.RETURN,
+        source_reference=source_reference,
+        receipt_date=receipt.received_date,
+        original_qty=receipt.quantity,
+        remaining_qty=receipt.quantity,
+        unit_cost=snapshot.frozen_unit_cogs,
+        opening_movement=movement,
+    )
+    record_audit(
+        actor=actor,
+        action="pre_cutover_sellable_return_posted",
+        entity_type="inventory.inventorymovement",
+        entity_id=movement.id,
+        after_values={
+            "quantity": str(receipt.quantity),
+            "restored_cost": str(restored_cost),
+            "unit_cost_source": "fifo_opening_snapshot",
+        },
+    )
+    return movement
+
+
 @transaction.atomic
 def record_physical_return(*, sales_line, received_date, quantity, warehouse, condition, actor, notes=""):
     if received_date <= CUTOVER_DATE:
@@ -598,6 +645,8 @@ def record_physical_return(*, sales_line, received_date, quantity, warehouse, co
         return receipt, None
     sales_movement = sales_line.inventory_movements.filter(movement_type=InventoryMovement.MovementType.SALES_OUT).first()
     if sales_movement is None:
+        if not sales_line.order.affects_inventory and sales_line.order.order_date <= CUTOVER_DATE:
+            return receipt, _post_pre_cutover_return(receipt=receipt, actor=actor)
         InventoryException.objects.create(
             code=InventoryException.Code.RETURN_SOURCE_MISSING,
             sku=sales_line.sku,

@@ -496,6 +496,47 @@ class InventoryWorkflowTests(TestCase):
         self.assertIsNone(no_movement)
         self.assertEqual(inventory_balance(self.sku), Decimal("5"))
 
+    def test_pre_cutover_sellable_return_uses_frozen_cost_without_hiding_newer_missing_sales_out(self):
+        post_opening(sku=self.sku, quantity=10, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
+        historical_line = self._sales_line(number="PRE-CUTOVER-RETURN", quantity=2, order_date=date(2026, 7, 20))
+        historical_line.order.affects_inventory = False
+        historical_line.order.import_origin = SalesOrder.ImportOrigin.HISTORICAL
+        historical_line.order.save(update_fields=["affects_inventory", "import_origin"])
+
+        receipt, movement = record_physical_return(
+            sales_line=historical_line,
+            received_date=date(2026, 8, 1),
+            quantity=2,
+            warehouse=self.warehouse,
+            condition=PhysicalReturnReceipt.Condition.SELLABLE,
+            actor=self.user,
+        )
+
+        self.assertEqual(movement.return_receipt, receipt)
+        self.assertEqual(movement.allocated_cost, Decimal("200000"))
+        self.assertEqual(movement.created_fifo_layer.source_type, FIFOLayer.SourceType.RETURN)
+        self.assertEqual(movement.created_fifo_layer.remaining_qty, Decimal("2"))
+        self.assertEqual(inventory_balance(self.sku), Decimal("12"))
+        self.assertFalse(InventoryException.objects.filter(code=InventoryException.Code.RETURN_SOURCE_MISSING).exists())
+
+        current_line = self._sales_line(number="POST-CUTOVER-MISSING-OUT", quantity=1)
+        _, missing_movement = record_physical_return(
+            sales_line=current_line,
+            received_date=date(2026, 9, 15),
+            quantity=1,
+            warehouse=self.warehouse,
+            condition=PhysicalReturnReceipt.Condition.SELLABLE,
+            actor=self.user,
+        )
+        self.assertIsNone(missing_movement)
+        self.assertTrue(
+            InventoryException.objects.filter(
+                code=InventoryException.Code.RETURN_SOURCE_MISSING,
+                sku=self.sku,
+                status=InventoryException.Status.OPEN,
+            ).exists()
+        )
+
     def test_return_log_filters_order_and_receives_multiple_skus(self):
         first_line = self._sales_line(number="RETURN-ORDER-1", quantity=4)
         first_line.order.current_status = "Retur"

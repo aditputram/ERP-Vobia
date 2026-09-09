@@ -79,7 +79,7 @@
 <section class="panel section-gap">
   <div class="panel-header"><div><p class="eyebrow">RETURN HISTORY</p><h2>Sales Return Received</h2></div></div>
   <div class="table-wrap"><table><thead><tr><th>Date</th><th>Source</th><th>Order</th><th>SKU</th><th>Qty</th><th>Condition</th><th>Stock Impact</th><th>Warehouse</th><th>Received By</th></tr></thead><tbody>
-    {% for row in receipts %}<tr><td>{{ row.received_date|date:"d M Y" }}</td><td>{{ row.sales_line.order.display_source }}</td><td>{{ row.sales_line.order.order_number }}</td><td>{{ row.sales_line.sku.sku }}</td><td>{{ row.quantity|floatformat:"0g" }}</td><td>{{ row.get_condition_display }}</td><td>{% if row.condition == 'SELLABLE' %}<span class="status-badge ready">FIFO restored</span>{% else %}<span class="status-badge">No stock</span>{% endif %}</td><td>{{ row.warehouse.name }}</td><td>{{ row.recorded_by.username }}</td></tr>
+    {% for row in receipts %}<tr><td>{{ row.received_date|date:"d M Y" }}</td><td>{{ row.sales_line.order.display_source }}</td><td>{{ row.sales_line.order.order_number }}</td><td>{{ row.sales_line.sku.sku }}</td><td>{{ row.quantity|floatformat:"0g" }}</td><td>{{ row.get_condition_display }}</td><td>{% if row.movement %}<span class="status-badge ready">FIFO restored</span>{% elif row.condition == 'SELLABLE' %}<span class="status-badge">Stock not restored</span>{% else %}<span class="status-badge">No stock</span>{% endif %}</td><td>{{ row.warehouse.name }}</td><td>{{ row.recorded_by.username }}</td></tr>
     {% empty %}<tr><td colspan="9"><div class="empty-state">Belum ada Sales Return yang diterima.</div></td></tr>{% endfor %}
   </tbody></table></div>
 </section>

@@ -287,10 +287,11 @@ def _last_present(values):
     return present[-1] if present else None
 
 
-def _historical_sales_actuals(sku_ids, *, include_unmapped):
+def _completed_month_sales_actuals(sku_ids, *, year, current_month, include_unmapped):
     lines = SalesOrderLine.objects.filter(
         is_counted=True,
-        order__order_date__range=(date(2026, 1, 1), date(2026, 7, 31)),
+        order__order_date__year=year,
+        order__order_date__month__lt=current_month,
     )
     if not include_unmapped:
         lines = lines.filter(sku_id__in=sku_ids)
@@ -496,12 +497,15 @@ def dashboard(request):
             )
         }
         month_values = {month: aggregates.get(month, {}) for month in range(1, 13)}
-        historical_sales = _historical_sales_actuals(
+        current_month = planning_state["current_month_number"]
+        completed_month_sales = _completed_month_sales_actuals(
             sku_ids,
+            year=planning_state["year"],
+            current_month=current_month,
             include_unmapped=not any(selected.values()) and not query,
         )
-        for month in range(1, 8):
-            actual = historical_sales.get(month, {})
+        for month in range(1, current_month):
+            actual = completed_month_sales.get(month, {})
             for field in ("sales_gross", "sales_net", "sales_cogs"):
                 month_values[month][field] = actual.get(field) or Decimal("0")
         received_returns = received_return_values(
@@ -509,7 +513,6 @@ def dashboard(request):
             planning_state["year"],
             through_date=planning_state["run_date"],
         )
-        current_month = planning_state["current_month_number"]
         for month, values in month_values.items():
             gross = values.get("sales_gross")
             net = values.get("sales_net")

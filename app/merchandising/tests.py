@@ -1166,9 +1166,9 @@ class MerchandisingReportViewTests(TestCase):
             source=SalesOrder.Source.OTHER,
             source_label="Offline",
             order_number="AUGUST-RETURN-001",
-            order_datetime=timezone.make_aware(datetime(2026, 7, 20, 10, 0)),
-            shipped_datetime=timezone.make_aware(datetime(2026, 7, 20, 10, 0)),
-            order_date=date(2026, 7, 20),
+            order_datetime=timezone.make_aware(datetime(2026, 8, 5, 10, 0)),
+            shipped_datetime=timezone.make_aware(datetime(2026, 8, 5, 10, 0)),
+            order_date=date(2026, 8, 5),
             current_status="Retur",
             source_status="Retur",
             is_final=True,
@@ -1181,20 +1181,20 @@ class MerchandisingReportViewTests(TestCase):
             order=order,
             sku=self.sku,
             sku_code_snapshot=self.sku.sku,
-            quantity=1,
+            quantity=3,
             net_unit_price=Decimal("180000"),
             retail_price_snapshot=Decimal("200000"),
             sales_cogs_snapshot=Decimal("100000"),
-            total_gross_sales=Decimal("200000"),
-            total_net_sales=Decimal("180000"),
-            total_cogs=Decimal("100000"),
-            gpm=Decimal("80000"),
+            total_gross_sales=Decimal("600000"),
+            total_net_sales=Decimal("540000"),
+            total_cogs=Decimal("300000"),
+            gpm=Decimal("240000"),
             is_counted=True,
         )
         warehouse = Warehouse.objects.create(code="WH-AUG-RETURN", name="August Return")
         PhysicalReturnReceipt.objects.create(
             sales_line=line,
-            received_date=date(2026, 8, 1),
+            received_date=date(2026, 8, 10),
             quantity=1,
             warehouse=warehouse,
             condition=PhysicalReturnReceipt.Condition.SELLABLE,
@@ -1216,7 +1216,10 @@ class MerchandisingReportViewTests(TestCase):
         self.assertNotContains(response, "SUMMARY ↔ PROJECTION CONNECTED")
         rows = {row["label"]: row for row in response.context["table_rows"]}
         self.assertEqual(rows["Return"]["values"][7], Decimal("180000"))
-        self.assertEqual(rows["Sales Net"]["values"][7], Decimal("180000"))
+        self.assertEqual(rows["Sales Gross"]["values"][7], Decimal("600000"))
+        self.assertEqual(rows["Discount"]["values"][7], Decimal("60000"))
+        self.assertEqual(rows["Sales Net"]["values"][7], Decimal("360000"))
+        self.assertEqual(rows["Sales COGS"]["values"][7], Decimal("300000"))
         self.assertEqual(
             rows["Sales Net"]["values"][7],
             rows["Sales Gross"]["values"][7]

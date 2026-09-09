@@ -109,6 +109,22 @@ class InventoryWorkflowTests(TestCase):
             gpm_rate=Decimal("0.4"),
         )
 
+    def test_operation_inventory_pages_export_valid_excel_workbooks(self):
+        self.client.force_login(self.user)
+        expected_sheets = {
+            "inventory:turnover": ["Inventory Turnover"],
+            "inventory:inbound": ["Delivery Queue", "Completed Delivery", "Outstanding PO", "Inbound History"],
+            "inventory:return_log": ["Selected Order", "Marketplace Claims", "Return History"],
+            "inventory:outbound": ["Outbound"],
+        }
+
+        for route_name, sheets in expected_sheets.items():
+            with self.subTest(route=route_name):
+                response = self.client.get(reverse(route_name), {"export": "xlsx"})
+                self.assertEqual(response.status_code, 200)
+                workbook = load_workbook(io.BytesIO(response.content), read_only=True)
+                self.assertEqual(workbook.sheetnames, sheets)
+
     def test_qc_then_partial_inbound_creates_actual_layer_only_after_receipt(self):
         inspected_at = timezone.make_aware(datetime(2026, 9, 5, 10, 0))
         record_qc(

@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header">
   <div><p class="eyebrow">PPIC · PURCHASE ORDER</p><h1>Daftar dan Tracking Purchase Order</h1><p>Menggabungkan daftar sheet Purchase Order dan PO Tracking Vobia MD 2026. Progres diturunkan dari PO, QC, dan inbound canonical ERP.</p></div>
-  <div class="header-actions"><a class="secondary-button" href="{% url 'purchasing:po_wip_list' %}">PO WIP Migration</a><a class="primary-button" href="{% url 'purchasing:generator' %}">Buka PO Generator</a></div>
+  <div class="header-actions"><a class="secondary-button" href="?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=xlsx">Export Excel</a><a class="secondary-button" href="{% url 'purchasing:po_wip_list' %}">PO WIP Migration</a><a class="primary-button" href="{% url 'purchasing:generator' %}">Buka PO Generator</a></div>
 </header>
 <form method="get" class="panel inventory-filter section-gap" data-auto-submit>
   <div class="inventory-filter-grid">

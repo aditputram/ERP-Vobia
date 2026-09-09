@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header">
   <div><p class="eyebrow">PRODUCTION · READ ONLY</p><h1>Production Monitoring</h1><p>Memantau progres PO yang sudah memiliki Production Plan Active. Seluruh perubahan hanya melalui Production Activity.</p></div>
-  <div class="header-actions"><a class="primary-button" href="{% url 'production:activity' %}">Entry Production Activity</a><a class="secondary-button" href="{% url 'production:planning' %}">Production Plan</a></div>
+  <div class="header-actions"><a class="secondary-button" href="?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=xlsx">Export Excel</a><a class="primary-button" href="{% url 'production:activity' %}">Entry Production Activity</a><a class="secondary-button" href="{% url 'production:planning' %}">Production Plan</a></div>
 </header>
 <section class="panel inventory-filter">
   <form method="get" class="inventory-filter-grid" data-preserve-scroll>

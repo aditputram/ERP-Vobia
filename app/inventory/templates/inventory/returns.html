@@ -7,6 +7,7 @@
     <h1>Catatan Barang Retur</h1>
     <p>Pilih Source dan No. Pesanan untuk menampilkan seluruh SKU yang diharapkan kembali.</p>
   </div>
+  <a class="secondary-button" href="?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=xlsx">Export Excel</a>
 </header>
 
 <form method="get" class="panel inventory-filter" data-auto-submit>

@@ -11,7 +11,9 @@ from django.http import HttpResponseNotAllowed
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.shortcuts import get_object_or_404, redirect, render
+from openpyxl import Workbook
 
+from config.excel_exports import append_table, workbook_response
 from inventory.services.aging import po_aging_snapshot
 from imports.services.storage import DuplicateRawFile
 from master_data.models import Supplier
@@ -274,7 +276,7 @@ def _create_generator_pos(request, state):
     return created, [], supplier, arrivals
 
 
-def _tracking_rows(filters=None):
+def _tracking_rows(filters=None, *, limit=100):
     filters = filters or {}
     rows = []
     today = timezone.localdate()
@@ -295,7 +297,8 @@ def _tracking_rows(filters=None):
             pass
         else:
             pos = pos.filter(need_month__year=year, need_month__month=month)
-    pos = pos[:100]
+    if limit is not None:
+        pos = pos[:limit]
     for po in pos:
         line_count = 0
         total_qty = Decimal("0")
@@ -360,6 +363,71 @@ def _tracking_rows(filters=None):
     return rows
 
 
+def _export_requirements(rows):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "PPIC Requirement"
+    append_table(
+        sheet,
+        (
+            "Need Month", "SKU", "Parent SKU", "Product", "Variant", "Size",
+            "Product Status", "Category", "Approved Qty", "Ordered Qty", "Remaining Qty",
+            "Allocation Status",
+        ),
+        (
+            (
+                row.need_month,
+                row.sku.sku,
+                row.sku.product_variant.product.parent_sku,
+                row.sku.product_variant.product.name,
+                row.sku.product_variant.name,
+                row.sku.size,
+                row.sku.product_variant.product.status.name,
+                row.sku.product_variant.product.category.name,
+                row.approved_qty,
+                row.ordered_qty,
+                row.remaining_qty,
+                row.ui_status,
+            )
+            for row in rows
+        ),
+        number_formats={9: "#,##0", 10: "#,##0", 11: "#,##0"},
+    )
+    return workbook_response(workbook, f"VOBIA-PPIC-Requirement-{timezone.localdate():%Y-%m-%d}.xlsx")
+
+
+def _export_purchase_orders(rows):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Purchase Order"
+    append_table(
+        sheet,
+        (
+            "No. PO", "Vendor", "Need Month", "Required Arrival", "Jumlah SKU", "PO Qty",
+            "Production", "Received", "Outstanding", "Schedule", "QC Passed", "Status",
+        ),
+        (
+            (
+                row["po"].po_number or "Draft",
+                row["po"].supplier.name,
+                row["po"].need_month,
+                row["po"].required_arrival,
+                row["line_count"],
+                row["total_qty"],
+                row["production_status"],
+                row["received"],
+                row["outstanding"],
+                row["schedule_status"],
+                row["qc_passed"],
+                row["progress_status"],
+            )
+            for row in rows
+        ),
+        number_formats={5: "#,##0", 6: "#,##0", 8: "#,##0", 9: "#,##0", 11: "#,##0"},
+    )
+    return workbook_response(workbook, f"VOBIA-Purchase-Order-{timezone.localdate():%Y-%m-%d}.xlsx")
+
+
 @login_required
 def requirements(request):
     base_rows = _requirements_with_ui_state()
@@ -416,6 +484,8 @@ def requirements(request):
         for row in after_category
         if not selected_allocation_statuses or row.ui_status in selected_allocation_statuses
     ]
+    if request.GET.get("export") == "xlsx":
+        return _export_requirements(rows)
     return render(
         request,
         "purchasing/requirements.html",
@@ -506,7 +576,9 @@ def purchase_orders(request):
         "po_status": request.GET.get("po_status", ""),
         "schedule_status": request.GET.get("schedule_status", ""),
     }
-    rows = _tracking_rows(selected)
+    rows = _tracking_rows(selected, limit=None if request.GET.get("export") == "xlsx" else 100)
+    if request.GET.get("export") == "xlsx":
+        return _export_purchase_orders(rows)
     return render(
         request,
         "purchasing/tracking.html",

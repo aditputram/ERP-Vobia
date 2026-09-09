@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header">
   <div><p class="eyebrow">PRODUCTION · PLANNING GATE</p><h1>Production Plan</h1><p>Lengkapi seluruh target PO sebelum aktivitas produksi dimulai. Hanya plan Active yang masuk Production Monitoring.</p></div>
-  <div class="header-actions"><a class="secondary-button" href="{% url 'production:monitoring' %}">Buka Monitoring</a></div>
+  <div class="header-actions"><a class="secondary-button" href="?export=xlsx">Export Excel</a><a class="secondary-button" href="{% url 'production:monitoring' %}">Buka Monitoring</a></div>
 </header>
 
 <section class="panel">

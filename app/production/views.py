@@ -9,7 +9,9 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from openpyxl import Workbook
 
+from config.excel_exports import append_table, workbook_response
 from inventory.models import QCFollowUp, QCFollowUpEvent, QCInspection
 from inventory.services.fifo import complete_qc_rework, record_re_qc
 from purchasing.models import PurchaseOrder
@@ -155,6 +157,118 @@ def _production_audit_rows(production_order):
     return sorted(rows, key=lambda row: row["occurred_at"], reverse=True)
 
 
+def _export_monitoring(rows, qc_follow_up_rows):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Production Monitoring"
+    append_table(
+        sheet,
+        (
+            "Purchase Order", "Vendor", "PO Qty", "Passed Process", "Next Process", "Material",
+            "Trial", "Cut Qty", "Make Qty", "Trim Qty", "QC Inspected", "QC Passed",
+            "Inbound", "Delivering", "Ready to Deliver", "Target", "Risk",
+        ),
+        (
+            (
+                row["production_order"].po.po_number,
+                row["production_order"].po.supplier.name,
+                row["ordered_qty"],
+                row["passed_process_label"],
+                row["next_process_label"],
+                row["material_status_display"],
+                (
+                    f"{row['trial'].get_status_display()} · R{row['trial'].revision}"
+                    if row["trial"] else ""
+                ),
+                row["cmt_quantities"][ProductionStage.Stage.CUT]["completed_qty"],
+                row["cmt_quantities"][ProductionStage.Stage.MAKE]["completed_qty"],
+                row["cmt_quantities"][ProductionStage.Stage.TRIM]["completed_qty"],
+                row["inspected_qty"],
+                row["passed_qty"],
+                row["received_qty"],
+                row["delivering_qty"],
+                row["ready_to_deliver_qty"],
+                row["target_date"],
+                "Late" if row["is_late"] else "On track",
+            )
+            for row in rows
+        ),
+        number_formats={column: "#,##0" for column in range(3, 16) if column not in (4, 5, 6, 7)},
+    )
+    follow_up_sheet = workbook.create_sheet("QC Follow Up")
+    next_steps = {
+        QCFollowUp.Status.AWAITING_REWORK: "Catat Rework",
+        QCFollowUp.Status.READY_RE_QC: "Catat Re-QC",
+        QCFollowUp.Status.REJECTED: "Keputusan final tercatat",
+        QCFollowUp.Status.ACCEPTED_EXCEPTION: "Keputusan final tercatat",
+    }
+    append_table(
+        follow_up_sheet,
+        ("PO", "Vendor", "SKU", "Product", "Qty", "Status", "Langkah Berikutnya"),
+        (
+            (
+                item.po_line.po.po_number,
+                item.po_line.po.supplier.name,
+                item.po_line.sku.sku,
+                item.po_line.sku.product_variant.product.name,
+                item.open_qty,
+                item.get_status_display(),
+                next_steps.get(item.status, ""),
+            )
+            for item in qc_follow_up_rows
+        ),
+        number_formats={5: "#,##0"},
+    )
+    return workbook_response(workbook, f"VOBIA-Production-Monitoring-{timezone.localdate():%Y-%m-%d}.xlsx")
+
+
+def _export_planning(rows):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Production Plan"
+
+    def values():
+        for row in rows:
+            try:
+                plan = row.plan
+            except ProductionPlan.DoesNotExist:
+                plan = None
+            lines = list(row.po.lines.all())
+            yield (
+                row.po.po_number,
+                row.po.supplier.name,
+                row.po.need_month,
+                len(lines),
+                sum((line.ordered_qty for line in lines), Decimal("0")),
+                plan.get_status_display() if plan else "Belum dibuat",
+                getattr(plan, "target_material_purchase_date", None),
+                getattr(plan, "target_trial_date", None),
+                getattr(plan, "target_cut_start_date", None),
+                getattr(plan, "target_cut_end_date", None),
+                getattr(plan, "target_make_start_date", None),
+                getattr(plan, "target_make_end_date", None),
+                getattr(plan, "target_trim_start_date", None),
+                getattr(plan, "target_trim_end_date", None),
+                getattr(plan, "target_qc_start_date", None),
+                getattr(plan, "target_qc_end_date", None),
+                getattr(plan, "target_inbound_date", None),
+                getattr(plan, "notes", ""),
+            )
+
+    append_table(
+        sheet,
+        (
+            "No. PO", "Vendor", "Need Month", "Jumlah SKU", "PO Qty", "Status Plan",
+            "Target Pembelian Material", "Target Trial", "Target Cut Mulai", "Target Cut Selesai",
+            "Target Make Mulai", "Target Make Selesai", "Target Trim Mulai", "Target Trim Selesai",
+            "Target QC Mulai", "Target QC Selesai", "Target Inbound", "Notes",
+        ),
+        values(),
+        number_formats={4: "#,##0", 5: "#,##0"},
+    )
+    return workbook_response(workbook, f"VOBIA-Production-Plan-{timezone.localdate():%Y-%m-%d}.xlsx")
+
+
 @login_required
 def dashboard(request):
     _ensure_released_workflows(request.user)
@@ -207,6 +321,8 @@ def monitoring(request):
             QCFollowUp.Status.ACCEPTED_EXCEPTION,
         ),
     )
+    if request.GET.get("export") == "xlsx":
+        return _export_monitoring(rows, qc_follow_up_rows)
     return render(
         request,
         "production/monitoring.html",
@@ -311,6 +427,8 @@ def planning(request):
     planning_rows = rows.filter(
         Q(plan__isnull=True) | Q(plan__status=ProductionPlan.Status.DRAFT)
     )
+    if request.method == "GET" and request.GET.get("export") == "xlsx":
+        return _export_planning(rows)
     return render(
         request,
         "production/planning.html",

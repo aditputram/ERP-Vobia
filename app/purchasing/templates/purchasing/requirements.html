@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header">
   <div><p class="eyebrow">PPIC · REQUIREMENT</p><h1>PPIC Requirement</h1><p>Mengacu ke sheet PPIC Requirement (PPIC Generator) Vobia MD 2026. Hanya Final Approved Incoming yang boleh membentuk requirement.</p></div>
-  <a class="primary-button" href="{% url 'purchasing:generator' %}">Buka PO Generator</a>
+  <div class="header-actions"><a class="secondary-button" href="?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=xlsx">Export Excel</a><a class="primary-button" href="{% url 'purchasing:generator' %}">Buka PO Generator</a></div>
 </header>
 
 <form method="get" class="panel inventory-filter section-gap" data-auto-submit>

@@ -1,4 +1,5 @@
 import tempfile
+from io import BytesIO
 from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import patch
@@ -8,6 +9,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from accounts.models import User
 from audit.models import AuditEvent
@@ -61,6 +63,30 @@ class PurchasingWorkflowTests(TestCase):
         plan = create_incoming_plan(projection.id, 0)
         approve_incoming_plan(plan.id, qty, self.user)
         return IncomingPlan.objects.get(pk=plan.id)
+
+    def test_operation_lists_export_valid_excel_workbooks(self):
+        self.client.force_login(self.user)
+        self._approved_incoming(100)
+        create_draft_po(
+            supplier=self.supplier,
+            need_month=date(2026, 9, 1),
+            actor=self.user,
+            manual_lines=[(self.sku, Decimal("5"))],
+        )
+
+        requirement_response = self.client.get(reverse("purchasing:requirements"), {"export": "xlsx"})
+        self.assertEqual(requirement_response.status_code, 200)
+        requirement_workbook = load_workbook(BytesIO(requirement_response.content), read_only=True)
+        self.assertEqual(requirement_workbook.sheetnames, ["PPIC Requirement"])
+        self.assertEqual(requirement_workbook["PPIC Requirement"]["A1"].value, "Need Month")
+        self.assertEqual(requirement_workbook["PPIC Requirement"].max_row, 2)
+
+        po_response = self.client.get(reverse("purchasing:purchase_orders"), {"export": "xlsx"})
+        self.assertEqual(po_response.status_code, 200)
+        po_workbook = load_workbook(BytesIO(po_response.content), read_only=True)
+        self.assertEqual(po_workbook.sheetnames, ["Purchase Order"])
+        self.assertEqual(po_workbook["Purchase Order"]["A1"].value, "No. PO")
+        self.assertEqual(po_workbook["Purchase Order"].max_row, 2)
 
     def test_only_approved_incoming_syncs_and_keeps_revision_history(self):
         plan = self._approved_incoming(100)

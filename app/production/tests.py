@@ -1,10 +1,12 @@
 from datetime import date, datetime
 from decimal import Decimal
+from io import BytesIO
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from accounts.models import User
 from audit.models import AuditEvent
@@ -91,6 +93,38 @@ class ProductionWorkflowTests(TestCase):
             notes="UAT complete",
             actor=self.user,
         )
+
+    def test_planning_and_monitoring_export_valid_excel_workbooks(self):
+        self.client.force_login(self.user)
+        ProductionPlan.objects.create(
+            production_order=self.production_order,
+            status=ProductionPlan.Status.ACTIVE,
+            target_material_purchase_date=date(2026, 8, 1),
+            target_trial_date=date(2026, 8, 2),
+            target_cut_start_date=date(2026, 8, 3),
+            target_cut_end_date=date(2026, 8, 4),
+            target_make_start_date=date(2026, 8, 5),
+            target_make_end_date=date(2026, 8, 6),
+            target_trim_start_date=date(2026, 8, 7),
+            target_trim_end_date=date(2026, 8, 8),
+            target_qc_start_date=date(2026, 8, 9),
+            target_qc_end_date=date(2026, 8, 10),
+            target_inbound_date=date(2026, 8, 11),
+            created_by=self.user,
+        )
+
+        planning_response = self.client.get(reverse("production:planning"), {"export": "xlsx"})
+        self.assertEqual(planning_response.status_code, 200)
+        planning_workbook = load_workbook(BytesIO(planning_response.content), read_only=True)
+        self.assertEqual(planning_workbook.sheetnames, ["Production Plan"])
+        self.assertEqual(planning_workbook["Production Plan"]["A1"].value, "No. PO")
+
+        monitoring_response = self.client.get(reverse("production:monitoring"), {"export": "xlsx"})
+        self.assertEqual(monitoring_response.status_code, 200)
+        monitoring_workbook = load_workbook(BytesIO(monitoring_response.content), read_only=True)
+        self.assertEqual(monitoring_workbook.sheetnames, ["Production Monitoring", "QC Follow Up"])
+        self.assertEqual(monitoring_workbook["Production Monitoring"]["A1"].value, "Purchase Order")
+        self.assertEqual(monitoring_workbook["Production Monitoring"].max_row, 2)
 
     def _approve_trial(self):
         target_trial_date = date(2026, 8, 9)

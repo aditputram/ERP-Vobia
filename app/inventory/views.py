@@ -39,6 +39,7 @@ from .services.fifo import CUTOVER_DATE, create_expected_return, inventory_balan
 from .services.opening_import import approve_opening_import, create_opening_import
 from .services.reporting import filtered_skus, inventory_parent_summary_rows, inventory_summary_rows, movement_ledger_rows, parent_movement_ledger_rows
 from production.models import ProductionActivity
+from config.excel_exports import append_table, workbook_response
 
 
 def _excel_text(value):
@@ -104,6 +105,230 @@ def _export_inventory(balances, *, as_of_date, warehouse, sku_type, stock_status
         f'attachment; filename="VOBIA-Inventory-{status_label}-{as_of_date:%Y-%m-%d}.xlsx"'
     )
     return response
+
+
+def _export_turnover(rows, *, sku_type):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Inventory Turnover"
+    append_table(
+        sheet,
+        (
+            "Date", "Warehouse", "Parent SKU" if sku_type == "parent" else "SKU", "Movement",
+            "Direction", "Qty", "Signed Qty", "Allocated Cost", "Balance Qty", "Balance Value",
+            "Reference", "Ledger Key",
+        ),
+        (
+            (
+                row["date"],
+                row["warehouse_name"],
+                row["parent_sku"] if sku_type == "parent" else row["sku"].sku,
+                row["type_label"],
+                row["direction"],
+                row["quantity"],
+                row["signed_quantity"],
+                row["allocated_cost"],
+                row["running_balance"],
+                row["running_value"],
+                row["reference"],
+                row["key"],
+            )
+            for row in rows
+        ),
+        number_formats={6: "#,##0", 7: "#,##0", 8: "Rp #,##0", 9: "#,##0", 10: "Rp #,##0"},
+    )
+    return workbook_response(workbook, f"VOBIA-Inventory-Turnover-{timezone.localdate():%Y-%m-%d}.xlsx")
+
+
+def _export_inbound(delivery_orders, completed_delivery_orders, outstanding, receipts):
+    workbook = Workbook()
+    queue_sheet = workbook.active
+    queue_sheet.title = "Delivery Queue"
+    append_table(
+        queue_sheet,
+        ("No. DO", "Jenis", "Tanggal Kirim", "PO", "Vendor", "Jumlah SKU", "Qty Delivering", "Qty Received", "Remaining"),
+        (
+            (
+                shipment["delivery_order"].number,
+                shipment["kind_label"],
+                shipment["delivery_date"],
+                shipment["production_order"].po.po_number,
+                shipment["production_order"].po.supplier.name,
+                len(shipment["rows"]),
+                shipment["remaining"],
+                shipment["received"],
+                shipment["remaining"],
+            )
+            for shipment in delivery_orders
+        ),
+        number_formats={6: "#,##0", 7: "#,##0", 8: "#,##0", 9: "#,##0"},
+    )
+    completed_sheet = workbook.create_sheet("Completed Delivery")
+    append_table(
+        completed_sheet,
+        ("No. DO", "Jenis", "Tanggal Kirim", "Tanggal Diterima", "PO", "Vendor", "Qty Dikirim", "Qty Received", "Status"),
+        (
+            (
+                shipment["delivery_order"].number,
+                shipment["kind_label"],
+                shipment["delivery_date"],
+                shipment["received_date"],
+                shipment["production_order"].po.po_number,
+                shipment["production_order"].po.supplier.name,
+                shipment["shipped"],
+                shipment["received"],
+                "Received",
+            )
+            for shipment in completed_delivery_orders
+        ),
+        number_formats={7: "#,##0", 8: "#,##0"},
+    )
+    outstanding_sheet = workbook.create_sheet("Outstanding PO")
+    append_table(
+        outstanding_sheet,
+        ("PO", "Source", "SKU", "Product", "Variant", "Size", "Ordered", "QC Passed", "Received", "Eligible Now", "Outstanding"),
+        (
+            (
+                row["line"].po.po_number,
+                row["line"].po.get_source_display(),
+                row["line"].sku.sku,
+                row["line"].sku.product_variant.product.name,
+                row["line"].sku.product_variant.name,
+                row["line"].sku.size,
+                row["line"].ordered_qty,
+                row["qc_passed"],
+                row["received"],
+                row["eligible"],
+                row["outstanding"],
+            )
+            for row in outstanding
+        ),
+        number_formats={column: "#,##0" for column in range(7, 12)},
+    )
+    history_sheet = workbook.create_sheet("Inbound History")
+    append_table(
+        history_sheet,
+        ("Date", "No. DO", "Reference", "PO", "SKU", "Product", "Variant", "Size", "Qty", "COGS Snapshot", "Retail Snapshot", "Warehouse", "Recorded By"),
+        (
+            (
+                row.inbound_date,
+                (
+                    row.delivery_activity.delivery_order.number
+                    if row.delivery_activity_id and row.delivery_activity.delivery_order_id
+                    else ""
+                ),
+                row.reference,
+                row.po_line.po.po_number,
+                row.po_line.sku.sku,
+                row.po_line.sku.product_variant.product.name,
+                row.po_line.sku.product_variant.name,
+                row.po_line.sku.size,
+                row.received_qty,
+                row.po_line.cogs_snapshot,
+                row.retail_price_snapshot,
+                row.warehouse.name,
+                row.recorded_by.username,
+            )
+            for row in receipts
+        ),
+        number_formats={9: "#,##0", 10: "Rp #,##0", 11: "Rp #,##0"},
+    )
+    return workbook_response(workbook, f"VOBIA-Inbound-{timezone.localdate():%Y-%m-%d}.xlsx")
+
+
+def _export_returns(return_rows, claim_receipts, receipts, selected_order):
+    workbook = Workbook()
+    selected_sheet = workbook.active
+    selected_sheet.title = "Selected Order"
+    append_table(
+        selected_sheet,
+        ("Source", "Order", "SKU", "Product", "Variant", "Size", "Sales Qty", "Expected Return", "Received", "Remaining"),
+        (
+            (
+                selected_order.display_source if selected_order else "",
+                selected_order.order_number if selected_order else "",
+                row["line"].sku.sku,
+                row["line"].sku.product_variant.product.name,
+                row["line"].sku.product_variant.name,
+                row["line"].sku.size,
+                row["line"].quantity,
+                row["expected_qty"],
+                row["returned_qty"],
+                row["remaining_qty"],
+            )
+            for row in return_rows
+        ),
+        number_formats={column: "#,##0" for column in range(7, 11)},
+    )
+    claims_sheet = workbook.create_sheet("Marketplace Claims")
+    append_table(
+        claims_sheet,
+        ("Date", "Source", "Order", "SKU", "Product", "Qty", "Condition", "Follow-up Status", "Warehouse", "Received By"),
+        (
+            (
+                row.received_date,
+                row.sales_line.order.display_source,
+                row.sales_line.order.order_number,
+                row.sales_line.sku.sku,
+                row.sales_line.sku.product_variant.product.name,
+                row.quantity,
+                row.get_condition_display(),
+                row.get_follow_up_status_display(),
+                row.warehouse.name,
+                row.recorded_by.username,
+            )
+            for row in claim_receipts
+        ),
+        number_formats={6: "#,##0"},
+    )
+    history_sheet = workbook.create_sheet("Return History")
+    append_table(
+        history_sheet,
+        ("Date", "Source", "Order", "SKU", "Product", "Qty", "Condition", "Stock Impact", "Warehouse", "Received By"),
+        (
+            (
+                row.received_date,
+                row.sales_line.order.display_source,
+                row.sales_line.order.order_number,
+                row.sales_line.sku.sku,
+                row.sales_line.sku.product_variant.product.name,
+                row.quantity,
+                row.get_condition_display(),
+                "FIFO restored" if row.condition == PhysicalReturnReceipt.Condition.SELLABLE else "No stock",
+                row.warehouse.name,
+                row.recorded_by.username,
+            )
+            for row in receipts
+        ),
+        number_formats={6: "#,##0"},
+    )
+    return workbook_response(workbook, f"VOBIA-Return-Log-{timezone.localdate():%Y-%m-%d}.xlsx")
+
+
+def _export_outbound(rows):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Outbound"
+    append_table(
+        sheet,
+        ("Date", "Source", "Order", "SKU", "Qty", "FIFO COGS", "Status", "Ledger Key", "Posted By"),
+        (
+            (
+                row.movement_date,
+                row.sales_line.order.display_source,
+                row.sales_line.order.order_number,
+                row.sku.sku,
+                row.quantity,
+                row.allocated_cost,
+                row.sales_line.order.current_status,
+                row.movement_key,
+                row.posted_by.username,
+            )
+            for row in rows
+        ),
+        number_formats={5: "#,##0", 6: "Rp #,##0"},
+    )
+    return workbook_response(workbook, f"VOBIA-Outbound-{timezone.localdate():%Y-%m-%d}.xlsx")
 
 
 @login_required
@@ -269,6 +494,8 @@ def turnover(request):
             movement_type=valid_movement_type,
             warehouse=selected_warehouse,
         )
+    if request.GET.get("export") == "xlsx":
+        return _export_turnover(rows, sku_type=sku_type)
     page = Paginator(rows, 100).get_page(request.GET.get("page"))
     return render(request, "inventory/turnover.html", {
         "page": page,
@@ -469,13 +696,16 @@ def inbound(request):
         eligible_qty = max(qc_passed - received, 0)
         if outstanding_qty:
             outstanding.append({"line": line, "qc_passed": qc_passed, "received": received, "outstanding": outstanding_qty, "eligible": eligible_qty})
-    receipts = InboundReceipt.objects.select_related(
+    receipt_rows = InboundReceipt.objects.select_related(
         "po_line__po",
-        "po_line__sku",
+        "po_line__sku__product_variant__product",
         "warehouse",
         "recorded_by",
         "delivery_activity__delivery_order",
-    ).order_by("-inbound_date", "-created_at")[:300]
+    ).order_by("-inbound_date", "-created_at")
+    if request.method == "GET" and request.GET.get("export") == "xlsx":
+        return _export_inbound(delivery_orders, completed_delivery_orders, outstanding, receipt_rows)
+    receipts = receipt_rows[:300]
     return render(
         request,
         "inventory/inbound.html",
@@ -615,6 +845,13 @@ def return_log(request):
         "warehouse",
         "recorded_by",
     ).order_by("-received_date", "-created_at")
+    if request.method == "GET" and request.GET.get("export") == "xlsx":
+        return _export_returns(
+            return_rows,
+            receipt_rows.filter(condition__in=claim_conditions),
+            receipt_rows,
+            selected_order,
+        )
     receipts = receipt_rows[:300]
     claim_receipts = receipt_rows.filter(condition__in=claim_conditions)[:300]
     return render(
@@ -652,7 +889,10 @@ def outbound(request):
         rows = rows.filter(movement_date__lte=date_to)
     if source:
         rows = rows.filter(sales_line__order__source=source)
-    page = Paginator(rows.order_by("-movement_date", "-posted_at"), 100).get_page(request.GET.get("page"))
+    rows = rows.order_by("-movement_date", "-posted_at")
+    if request.GET.get("export") == "xlsx":
+        return _export_outbound(rows)
+    page = Paginator(rows, 100).get_page(request.GET.get("page"))
     return render(request, "inventory/outbound.html", {"page": page, "query": query, "date_from": date_from, "date_to": date_to, "source": source})
 
 

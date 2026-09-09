@@ -157,14 +157,17 @@ def _cleanup_operation_uat(apps, schema_editor):
     if lines.filter(requirement_id__isnull=True).exists():
         raise RuntimeError("Cleanup UAT dibatalkan: ada PO line tanpa PPIC Requirement.")
 
-    requirements = PPICRequirement.objects.using(database).filter(incoming_plan__scenario_id=scenario.pk)
-    requirement_ids = list(requirements.values_list("id", flat=True))
-    linked_po_numbers = set(
-        PurchaseOrderLine.objects.using(database)
-        .filter(requirement_id__in=requirement_ids)
-        .values_list("po__po_number", flat=True)
+    scenario_requirements = PPICRequirement.objects.using(database).filter(
+        incoming_plan__scenario_id=scenario.pk
     )
-    if linked_po_numbers != set(TARGET_POS.values()):
+    target_line_requirement_ids = list(lines.values_list("requirement_id", flat=True))
+    requirements = PPICRequirement.objects.using(database).filter(
+        Q(pk__in=target_line_requirement_ids) | Q(incoming_plan__scenario_id=scenario.pk)
+    ).distinct()
+    requirement_ids = list(requirements.values_list("id", flat=True))
+    if PurchaseOrderLine.objects.using(database).filter(requirement_id__in=requirement_ids).exclude(
+        po_id__in=po_ids
+    ).exists():
         raise RuntimeError("Cleanup UAT dibatalkan: Requirement Scenario terhubung ke PO di luar target.")
     if lines.exclude(requirement_id__in=requirement_ids).exists():
         raise RuntimeError("Cleanup UAT dibatalkan: PO target terhubung ke Scenario lain.")
@@ -289,6 +292,8 @@ def _cleanup_operation_uat(apps, schema_editor):
         after_values={
             "po_count": 0,
             "scenario_count": 0,
+            "scenario_requirement_count": scenario_requirements.count(),
+            "target_requirement_count": requirements.count(),
             "inventory_qty_removed": "427",
         },
         metadata={

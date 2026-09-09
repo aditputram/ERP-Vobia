@@ -1298,10 +1298,9 @@ def correct_production_activity(
     failed_disposition="",
     notes="",
 ):
-    activity = ProductionActivity.objects.select_for_update().select_related(
-        "production_order__po",
-        "po_line__sku",
-    ).get(pk=activity.pk)
+    # Lock only the activity row. Optional relations such as ``po_line`` must
+    # not participate in PostgreSQL's FOR UPDATE outer join.
+    activity = ProductionActivity.objects.select_for_update().get(pk=activity.pk)
     if activity.entry_kind != ProductionActivity.EntryKind.ACTIVITY:
         raise ValidationError("Hanya Production Activity asli yang dapat dikoreksi.")
     reason = (reason or "").strip()

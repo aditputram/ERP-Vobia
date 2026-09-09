@@ -218,6 +218,56 @@ class ProductionWorkflowTests(TestCase):
         self.assertEqual(correction.source_activity, original)
         self.assertEqual(correction.entry_kind, ProductionActivity.EntryKind.CORRECTION)
 
+    def test_qc_activity_date_can_be_corrected_auditably(self):
+        self._activate_plan()
+        self._complete_stage(ProductionStage.Stage.MATERIAL_PURCHASE)
+        self._approve_trial()
+        for activity_type, activity_date in (
+            (ProductionActivity.ActivityType.CUT, date(2026, 8, 27)),
+            (ProductionActivity.ActivityType.MAKE, date(2026, 8, 28)),
+            (ProductionActivity.ActivityType.TRIM, date(2026, 8, 29)),
+        ):
+            submit_cmt_activity_batch(
+                production_order=self.production_order,
+                activity_type=activity_type,
+                activity_date=activity_date,
+                line_quantities=[(self.line, 62)],
+                actor=self.user,
+            )
+        original = submit_production_activity(
+            production_order=self.production_order,
+            activity_type=ProductionActivity.ActivityType.QC,
+            activity_date=date(2026, 9, 9),
+            po_line=self.line,
+            qty_inspected=62,
+            qty_passed=55,
+            qty_failed=7,
+            failed_disposition=QCInspection.Disposition.REJECTED,
+            notes="Cacat material.",
+            actor=self.user,
+        )
+
+        correction = correct_production_activity(
+            activity=original,
+            activity_date=date(2026, 9, 1),
+            quantity=62,
+            qty_inspected=62,
+            qty_passed=55,
+            qty_failed=7,
+            failed_disposition=QCInspection.Disposition.REJECTED,
+            notes="Cacat material.",
+            reason="Salah memasukkan tanggal.",
+            actor=self.user,
+        )
+
+        qc = QCInspection.objects.get(pk=original.after_values["qc_inspection_id"])
+        original.refresh_from_db()
+        self.assertEqual(qc.inspected_at.date(), date(2026, 9, 1))
+        self.assertEqual(original.activity_date, date(2026, 9, 9))
+        self.assertEqual(correction.activity_date, date(2026, 9, 1))
+        self.assertEqual(correction.source_activity, original)
+        self.assertEqual(correction.entry_kind, ProductionActivity.EntryKind.CORRECTION)
+
     def test_legacy_plan_activation_removes_unreceived_migration_qc_shortcut(self):
         PurchaseOrder.objects.filter(pk=self.po.pk).update(source=PurchaseOrder.Source.LEGACY_WIP)
         self.po.refresh_from_db()

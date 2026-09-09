@@ -315,7 +315,11 @@ def _partial_selling_rows(current_values, cutoff_date):
         row["actual_gross"] += values["actual_sales_gross"]
         row["projected_gross"] += values["sales_gross"]
         start_date = values.get("selling_start_date")
-        is_partial = values.get("launch_date_missing") or not start_date or start_date > month_start
+        is_partial = (
+            values.get("launch_date_missing")
+            or (start_date and start_date > month_start)
+            or (not start_date and values["actual_sales_qty"] > 0)
+        )
         if is_partial:
             row["partial_sku_count"] += 1
             row["launch_date_missing"] |= values.get("launch_date_missing", False)

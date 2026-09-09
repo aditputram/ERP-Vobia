@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 
 from dashboard.models import CampaignProduct
-from django.db.models import DecimalField, ExpressionWrapper, F, Max, Sum
+from django.db.models import DecimalField, ExpressionWrapper, F, Max, Min, Sum
 from django.utils import timezone
 
 from sales.models import SalesOrderLine
@@ -95,7 +95,7 @@ def _seasonal_launch_dates(product_ids):
     return launches
 
 
-def _selling_contexts(skus, year, month_number, cutoff_date):
+def _selling_contexts(skus, year, month_number, cutoff_date, first_sales=None):
     if not cutoff_date:
         return {}
     month_start = date(year, month_number, 1)
@@ -106,6 +106,7 @@ def _selling_contexts(skus, year, month_number, cutoff_date):
         {sku.product_variant.product_id for sku in skus}
     )
     contexts = {}
+    first_sales = first_sales or {}
     for sku in skus:
         product = sku.product_variant.product
         is_seasonal_new = product.status.name.strip().casefold() == "seasonal new"
@@ -117,6 +118,10 @@ def _selling_contexts(skus, year, month_number, cutoff_date):
             launch_date = None
             start_date = regular_starts.get(sku.id, month_start)
             reason = "Stok awal kosong" if start_date and start_date > month_start else "Reguler"
+            first_sale_date = first_sales.get(sku.id)
+            if first_sale_date and (not start_date or first_sale_date < start_date):
+                start_date = first_sale_date
+                reason = "Stock ledger perlu dicek · first sale fallback"
         selling_days = (
             (cutoff_date - start_date).days + 1
             if start_date and start_date <= cutoff_date
@@ -205,12 +210,6 @@ def official_current_month_values(batch, sku_ids, state):
         )
     )
     sku_by_id = {sku.id: sku for sku in skus}
-    selling_contexts = _selling_contexts(
-        skus,
-        year,
-        month_number,
-        state["cutoff_date"],
-    )
     current_snapshots = {
         row.sku_id: row
         for row in MerchandisingMonthlySnapshot.objects.filter(
@@ -251,8 +250,16 @@ def official_current_month_values(batch, sku_ids, state):
             actual_gross=Sum("total_gross_sales"),
             actual_net=Sum("total_net_sales"),
             actual_cogs=Sum("total_cogs"),
+            first_sale_date=Min("order__order_date"),
         )
     }
+    selling_contexts = _selling_contexts(
+        skus,
+        year,
+        month_number,
+        state["cutoff_date"],
+        {sku_id: row["first_sale_date"] for sku_id, row in actuals.items()},
+    )
     returns = received_return_values(sku_ids, year, through_date=state["run_date"])
 
     values = {}

@@ -1272,6 +1272,7 @@ class ProductionWorkflowTests(TestCase):
         )
         self.assertContains(remembered_date_page, 'value="2026-08-27"')
         self.assertContains(remembered_date_page, "vobia:inventory-inbound:dates")
+        self.assertContains(remembered_date_page, "vobia:inventory-inbound:quantities")
         rejected_early_date = self.client.post(
             reverse("inventory:inbound"),
             {

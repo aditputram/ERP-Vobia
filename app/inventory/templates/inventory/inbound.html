@@ -61,10 +61,20 @@ document.querySelectorAll('[data-delivery-order-toggle]').forEach(button => {
     button.textContent = detail.hidden ? 'View Detail' : 'Tutup Detail';
   });
 });
+const inboundQtyKey = 'vobia:inventory-inbound:quantities';
+let savedInboundQuantities = {};
+try { savedInboundQuantities = JSON.parse(sessionStorage.getItem(inboundQtyKey) || '{}'); } catch (_) {}
 document.querySelectorAll('.delivery-order-product-table input[name="received_qty"]').forEach(input => {
+  const formId = input.getAttribute('form');
   const button = document.querySelector(`[data-receive-button][form="${input.getAttribute('form')}"]`);
   const refresh = () => button.disabled = input.value.trim() === '';
-  input.addEventListener('input', refresh);
+  if (savedInboundQuantities[formId]) input.value = savedInboundQuantities[formId];
+  input.addEventListener('input', () => {
+    if (input.value) savedInboundQuantities[formId] = input.value;
+    else delete savedInboundQuantities[formId];
+    sessionStorage.setItem(inboundQtyKey, JSON.stringify(savedInboundQuantities));
+    refresh();
+  });
   refresh();
 });
 const inboundDateKey = 'vobia:inventory-inbound:dates';

@@ -1,9 +1,11 @@
 from datetime import date, datetime
 from decimal import Decimal
+from io import BytesIO
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from accounts.models import User
 from audit.models import AuditEvent
@@ -1027,6 +1029,34 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(rows["Incoming Capital Turnover"]["kind"], "ratio2")
         self.assertEqual(rows["Sales Gross"]["total"], Decimal("2800000"))
 
+    def test_dashboard_exports_the_filtered_indicator_matrix_as_xlsx(self):
+        params = {"status": ["Active"], "incoming_mode": "projection"}
+        page = self.client.get("/merchandising/dashboard/", params)
+        export = self.client.get(
+            "/merchandising/dashboard/",
+            {**params, "export": "xlsx"},
+        )
+
+        self.assertEqual(export.status_code, 200)
+        self.assertEqual(
+            export["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn("VOBIA-Merchandising-Dashboard-", export["Content-Disposition"])
+        workbook = load_workbook(BytesIO(export.content), data_only=True)
+        sheet = workbook["Dashboard"]
+        self.assertEqual(sheet["A9"].value, "Indicator")
+        self.assertEqual(sheet["B9"].value, "January")
+        self.assertEqual(sheet["N9"].value, "Total")
+        rows = {row["label"]: row for row in page.context["table_rows"]}
+        exported = {
+            sheet.cell(row=index, column=1).value: sheet.cell(row=index, column=2).value
+            for index in range(10, sheet.max_row + 1)
+        }
+        self.assertEqual(exported["Sales Gross"], rows["Sales Gross"]["values"][0])
+        self.assertEqual(sheet["B5"].value, "Active")
+        workbook.close()
+
     def test_draft_scenario_is_visible_in_projection_and_dashboard_with_warning(self):
         scenario = ProjectionScenario.objects.create(
             name="September Draft Preview",
@@ -1116,6 +1146,46 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(response.context["selected_detail_columns"], [])
         self.assertNotContains(response, "<th>Status</th>", html=True)
         self.assertNotContains(response, "<th>Retail Price</th>", html=True)
+
+    def test_projection_exports_the_active_grain_columns_and_filters_as_xlsx(self):
+        params = {
+            "month": ["7"],
+            "metric": ["ending"],
+            "submetric": ["qty", "cogs"],
+            "detail": ["status", "category"],
+            "product": ["Report Product"],
+        }
+        page = self.client.get("/merchandising/projection/", params)
+        export = self.client.get(
+            "/merchandising/projection/",
+            {**params, "export": "xlsx"},
+        )
+
+        self.assertEqual(export.status_code, 200)
+        self.assertIn("VOBIA-Merchandising-Projection-", export["Content-Disposition"])
+        workbook = load_workbook(BytesIO(export.content), data_only=True)
+        sheet = workbook["Projection"]
+        expected_headers = ["SKU", "Product", "Status", "Category"] + [
+            f'{header["month"]} · {header["label"]}'
+            for header in page.context["dynamic_headers"]
+        ]
+        self.assertEqual(
+            [sheet.cell(row=10, column=index).value for index in range(1, len(expected_headers) + 1)],
+            expected_headers,
+        )
+        self.assertEqual(sheet["A11"].value, "REPORT-SKU")
+        self.assertEqual(sheet["B11"].value, "Report Product")
+        self.assertEqual(sheet["C11"].value, "Active")
+        self.assertEqual(sheet["B7"].value, "Report Product")
+        exported_values = [
+            sheet.cell(row=11, column=5 + index).value
+            for index in range(len(page.context["dynamic_headers"]))
+        ]
+        self.assertEqual(
+            exported_values,
+            [cell["value"] for cell in page.context["table_rows"][0]["cells"]],
+        )
+        workbook.close()
 
     def test_projection_product_detail_columns_are_opt_in(self):
         response = self.client.get(

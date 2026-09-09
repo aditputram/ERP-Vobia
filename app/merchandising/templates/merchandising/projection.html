@@ -17,6 +17,7 @@
     <label class="filter-field sku-type-field"><span class="filter-label">SKU TYPE</span><select name="sku_type"><option value="sku" {% if sku_type == "sku" %}selected{% endif %}>SKU</option><option value="parent" {% if sku_type == "parent" %}selected{% endif %}>Parent SKU</option></select></label>
     <label class="filter-field sku-type-field"><span class="filter-label">INCOMING CURRENT MONTH</span><select name="incoming_mode"><option value="projection" {% if incoming_mode == 'projection' %}selected{% endif %}>Projection</option><option value="actual" {% if incoming_mode == 'actual' %}selected{% endif %}>Actual Warehouse</option><option value="comparison" {% if incoming_mode == 'comparison' %}selected{% endif %}>Comparison</option></select></label>
     {% include "sales/includes/multi_select_filter.html" with label="Product" name="product" options=products selected=selected.product all_label="All Products" search_placeholder="Ketik produk..." %}
+    <button class="secondary-button" type="submit" name="export" value="xlsx">Export Excel</button>
     <a class="secondary-button" href="{% url 'merchandising:projection' %}">Reset</a>
   </div>
   <div class="selection-rail">

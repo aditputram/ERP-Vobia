@@ -1,16 +1,21 @@
 from calendar import month_abbr, month_name
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Q, Sum
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from inventory.services.fifo import inventory_balance
 from master_data.models import Category, Product, ProductStatus, Subcategory
@@ -270,6 +275,136 @@ def _last_present(values):
     return present[-1] if present else None
 
 
+def _excel_text(value):
+    value = str(value or "")
+    return f"'{value}" if value.startswith(("=", "+", "-", "@")) else value
+
+
+def _style_export_sheet(sheet, header_row, *, freeze_panes):
+    sheet.sheet_view.showGridLines = False
+    header_fill = PatternFill("solid", fgColor="161814")
+    for cell in sheet[header_row]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    sheet.freeze_panes = freeze_panes
+    sheet.auto_filter.ref = f"A{header_row}:{get_column_letter(sheet.max_column)}{sheet.max_row}"
+    for column in sheet.columns:
+        values = [len(str(cell.value or "")) for cell in column]
+        sheet.column_dimensions[get_column_letter(column[0].column)].width = min(max(values, default=10) + 2, 34)
+
+
+def _workbook_response(workbook, filename):
+    output = BytesIO()
+    workbook.save(output)
+    workbook.close()
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+def _export_dashboard(context):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Dashboard"
+    sheet.append(("VOBIA MERCHANDISING DASHBOARD",))
+    sheet["A1"].font = Font(bold=True, size=16)
+    sheet.append(("Source", _excel_text(context["batch"].source_file_name)))
+    sheet.append(("SKU sesuai filter", context["filtered_count"]))
+    sheet.append(("Incoming current month", context["incoming_mode"].title()))
+    sheet.append(("Status Product", _excel_text(", ".join(context["selected"]["status"]) or "All")))
+    sheet.append(("Category", _excel_text(", ".join(context["selected"]["category"]) or "All")))
+    sheet.append(("Product", _excel_text(", ".join(context["selected"]["product"]) or "All")))
+    sheet.append(())
+    header_row = sheet.max_row + 1
+    sheet.append(("Indicator", *context["months"], "Total"))
+    for row in context["table_rows"]:
+        sheet.append((row["label"], *row["values"], row["total"]))
+        number_format = {
+            "money": '"Rp" #,##0',
+            "percent": "0.0%",
+            "ratio2": "0.00",
+        }.get(row["kind"], "#,##0.0")
+        for cell in sheet[sheet.max_row][1:]:
+            cell.number_format = number_format
+    _style_export_sheet(sheet, header_row, freeze_panes=f"B{header_row + 1}")
+    return _workbook_response(
+        workbook,
+        f"VOBIA-Merchandising-Dashboard-{timezone.localdate():%Y-%m-%d}.xlsx",
+    )
+
+
+def _export_projection(context):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Projection"
+    sheet.append(("VOBIA MERCHANDISING PROJECTION",))
+    sheet["A1"].font = Font(bold=True, size=16)
+    sheet.append(("Source", _excel_text(context["batch"].source_file_name)))
+    sheet.append(("Grain", context["row_identity_label"]))
+    sheet.append(("Incoming current month", context["incoming_mode"].title()))
+    sheet.append(("Status Product", _excel_text(", ".join(context["selected"]["status"]) or "All")))
+    sheet.append(("Category", _excel_text(", ".join(context["selected"]["category"]) or "All")))
+    sheet.append(("Product", _excel_text(", ".join(context["selected"]["product"]) or "All")))
+    sheet.append(("Pencarian", _excel_text(context["query"]) or "—"))
+    sheet.append(())
+    detail_labels = dict(PROJECTION_DETAIL_COLUMNS)
+    headers = [context["row_identity_label"], "Product"]
+    headers.extend(detail_labels[value] for value in context["selected_detail_columns"])
+    headers.extend(f'{header["month"]} · {header["label"]}' for header in context["dynamic_headers"])
+    header_row = sheet.max_row + 1
+    sheet.append(headers)
+
+    for row in context["table_rows"]:
+        identity = row["identity"]
+        identity_values = [
+            _excel_text(identity["sku__sku"]),
+            _excel_text(identity["product_snapshot"]),
+        ]
+        for detail in context["selected_detail_columns"]:
+            if detail == "status":
+                value = identity["status_snapshot"]
+            elif detail == "variant":
+                value = identity["variant_snapshot"]
+            elif detail == "category":
+                value = identity["category_snapshot"]
+            elif detail == "subcategory":
+                value = identity["subcategory_snapshot"]
+            elif detail == "size":
+                value = identity["size_snapshot"]
+            elif identity.get("is_parent"):
+                value = "Per SKU"
+            elif detail == "cogs":
+                value = identity["cogs_snapshot"]
+            else:
+                value = identity["retail_price_snapshot"]
+            identity_values.append(_excel_text(value) if isinstance(value, str) else value)
+        sheet.append((*identity_values, *(cell["value"] for cell in row["cells"])))
+        data_start = 2 + len(context["selected_detail_columns"])
+        for cell, data in zip(sheet[sheet.max_row][data_start:], row["cells"]):
+            cell.number_format = "0.00" if data["kind"] == "ratio" else ('"Rp" #,##0' if data["kind"] == "money" else "#,##0")
+
+    if context["table_summary"]:
+        summary = context["table_summary"]
+        prefix = ["TOTAL FILTER", f'{summary["sku_count"]} SKU']
+        prefix.extend("" for _ in context["selected_detail_columns"])
+        sheet.append((*prefix, *(cell["value"] for cell in summary["cells"])))
+        sheet[sheet.max_row][0].font = Font(bold=True)
+        data_start = 2 + len(context["selected_detail_columns"])
+        for cell, data in zip(sheet[sheet.max_row][data_start:], summary["cells"]):
+            cell.font = Font(bold=True)
+            cell.number_format = "0.00" if data["kind"] == "ratio" else ('"Rp" #,##0' if data["kind"] == "money" else "#,##0")
+
+    _style_export_sheet(sheet, header_row, freeze_panes=f"C{header_row + 1}")
+    return _workbook_response(
+        workbook,
+        f"VOBIA-Merchandising-Projection-{timezone.localdate():%Y-%m-%d}.xlsx",
+    )
+
+
 @login_required
 def dashboard(request):
     batch = _active_batch()
@@ -477,6 +612,8 @@ def dashboard(request):
         "closed_month_numbers": closed_month_numbers if batch else [],
         **_filter_options(batch),
     }
+    if batch and request.GET.get("export") == "xlsx":
+        return _export_dashboard(context)
     return render(request, "merchandising/dashboard.html", context)
 
 
@@ -1338,41 +1475,42 @@ def projection(request):
         table_summary = {"cells": summary_cells, "sku_count": len(sku_ids)}
         visible_row_count = len(table_rows)
 
-    return render(
-        request,
-        "merchandising/projection.html",
-        {
-            "batch": batch,
-            "month_options": [(month, month_abbr[month]) for month in range(1, 13)],
-            "metric_options": PROJECTION_METRIC_GROUPS,
-            "submetric_options": PROJECTION_SUBMETRICS,
-            "selected_months": selected_months,
-            "selected_metrics": selected_metrics,
-            "selected_submetrics": selected_submetrics,
-            "detail_column_options": PROJECTION_DETAIL_COLUMNS,
-            "selected_detail_columns": selected_detail_columns,
-            "identity_summary_colspan": 1 + len(selected_detail_columns),
-            "projection_table_colspan": (
-                2 + len(selected_detail_columns) + len(dynamic_headers)
-            ),
-            "sku_type": sku_type,
-            "row_identity_label": "Parent SKU" if sku_type == "parent" else "SKU",
-            "selected": selected,
-            "query": query,
-            "visible_row_count": visible_row_count,
-            "dynamic_headers": dynamic_headers,
-            "table_rows": table_rows,
-            "table_summary": table_summary,
-            "planning_state": planning_state,
-            "incoming_mode": incoming_mode,
-            "incoming_comparison_summary": incoming_comparison_summary,
-            "planning_preview": planning_preview,
-            "carryover_rows": carryover_rows,
-            "month_close_form": IncomingMonthCloseForm(),
-            "month_closes": IncomingMonthClose.objects.prefetch_related("actual_rows", "carryovers")[:12],
-            **filter_options,
-        },
-    )
+    context = {
+        "batch": batch,
+        "month_options": [(month, month_abbr[month]) for month in range(1, 13)],
+        "metric_options": PROJECTION_METRIC_GROUPS,
+        "submetric_options": PROJECTION_SUBMETRICS,
+        "selected_months": selected_months,
+        "selected_metrics": selected_metrics,
+        "selected_submetrics": selected_submetrics,
+        "detail_column_options": PROJECTION_DETAIL_COLUMNS,
+        "selected_detail_columns": selected_detail_columns,
+        "identity_summary_colspan": 1 + len(selected_detail_columns),
+        "projection_table_colspan": (
+            2 + len(selected_detail_columns) + len(dynamic_headers)
+        ),
+        "sku_type": sku_type,
+        "row_identity_label": "Parent SKU" if sku_type == "parent" else "SKU",
+        "selected": selected,
+        "query": query,
+        "visible_row_count": visible_row_count,
+        "dynamic_headers": dynamic_headers,
+        "table_rows": table_rows,
+        "table_summary": table_summary,
+        "planning_state": planning_state,
+        "incoming_mode": incoming_mode,
+        "incoming_comparison_summary": incoming_comparison_summary,
+        "planning_preview": planning_preview,
+        "carryover_rows": carryover_rows,
+        "month_close_form": IncomingMonthCloseForm(),
+        "month_closes": IncomingMonthClose.objects.prefetch_related(
+            "actual_rows", "carryovers"
+        )[:12],
+        **filter_options,
+    }
+    if batch and request.GET.get("export") == "xlsx":
+        return _export_projection(context)
+    return render(request, "merchandising/projection.html", context)
 
 
 @login_required

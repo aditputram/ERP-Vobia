@@ -15,6 +15,7 @@
   {% include "sales/includes/multi_select_filter.html" with label="Status Product" name="status" options=statuses selected=selected.status all_label="All Status" search_placeholder="Ketik status..." %}
   {% include "sales/includes/multi_select_filter.html" with label="Category" name="category" options=categories selected=selected.category all_label="All Categories" search_placeholder="Ketik category..." %}
   {% include "sales/includes/multi_select_filter.html" with label="Product" name="product" options=products selected=selected.product all_label="All Products" search_placeholder="Ketik produk..." %}
+  <button class="secondary-button" type="submit" name="export" value="xlsx">Export Excel</button>
   <a class="secondary-button" href="{% url 'merchandising:dashboard' %}">Reset</a>
 </form>
 

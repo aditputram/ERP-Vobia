@@ -247,6 +247,25 @@ def save_production_plan(*, production_order, values, activate, actor, change_re
     plan.full_clean()
     plan.save()
 
+    legacy_qc_restatement = []
+    if activate and production_order.po.source == PurchaseOrder.Source.LEGACY_WIP:
+        for line in production_order.po.lines.select_for_update().all():
+            received_qty = line.received_before_cutover_qty + (
+                line.inbound_receipts.aggregate(total=Sum("received_qty"))["total"] or Decimal("0")
+            )
+            new_baseline = min(line.qc_passed_before_cutover_qty, received_qty)
+            if new_baseline == line.qc_passed_before_cutover_qty:
+                continue
+            legacy_qc_restatement.append(
+                {
+                    "sku": line.sku.sku,
+                    "before": str(line.qc_passed_before_cutover_qty),
+                    "after": str(new_baseline),
+                }
+            )
+            line.qc_passed_before_cutover_qty = new_baseline
+            line.save(update_fields=("qc_passed_before_cutover_qty",))
+
     stages = _stage_map(production_order)
     stage_targets = {
         ProductionStage.Stage.MATERIAL_PURCHASE: (
@@ -281,7 +300,11 @@ def save_production_plan(*, production_order, values, activate, actor, change_re
         stage="PLAN",
         description=description,
         before=before,
-        after={**after, "change_reason": change_reason.strip()},
+        after={
+            **after,
+            "change_reason": change_reason.strip(),
+            "legacy_qc_restatement": legacy_qc_restatement,
+        },
     )
     return plan
 

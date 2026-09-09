@@ -517,6 +517,11 @@ def turnover(request):
 
 @login_required
 def inbound(request):
+    requested_inbound_date = parse_date(
+        request.POST.get("inbound_date", "")
+        if request.method == "POST" and request.POST.get("form_name") == "delivery_receive"
+        else request.GET.get("inbound_date", "")
+    )
     delivery_rows = []
     deliveries = ProductionActivity.objects.filter(
         entry_kind=ProductionActivity.EntryKind.ACTIVITY,
@@ -621,6 +626,7 @@ def inbound(request):
             delivery_order_id = selected_delivery["delivery"].delivery_order_id
             return redirect(
                 f"{reverse('inventory:inbound')}?delivery_order={delivery_order_id}"
+                f"&inbound_date={values['inbound_date']:%Y-%m-%d}"
                 f"#delivery-order-{delivery_order_id}"
             )
 
@@ -636,7 +642,14 @@ def inbound(request):
                 else DeliveryReceiveForm(
                     max_qty=row["remaining"],
                     min_date=delivery.activity_date,
-                    initial={"delivery_activity": delivery.id},
+                    initial={
+                        "delivery_activity": delivery.id,
+                        "inbound_date": (
+                            requested_inbound_date
+                            if requested_inbound_date and requested_inbound_date >= delivery.activity_date
+                            else max(timezone.localdate(), delivery.activity_date)
+                        ),
+                    },
                     default_warehouse_code="REJECT" if row["is_rejected"] else "MAIN",
                 )
             )

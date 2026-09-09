@@ -11,7 +11,7 @@ from openpyxl import load_workbook
 from accounts.models import User
 from audit.models import AuditEvent
 from inventory.models import FIFOLayer, InboundReceipt, InventoryMovement, QCFollowUp, QCInspection
-from inventory.services.fifo import record_inbound, record_qc
+from inventory.services.fifo import qc_approved_qty, record_inbound, record_qc
 from master_data.models import Category, Product, ProductStatus, ProductVariant, SKU, Supplier, Warehouse
 from purchasing.models import PurchaseOrder, PurchaseOrderLine
 
@@ -171,6 +171,64 @@ class ProductionWorkflowTests(TestCase):
             activate=True,
             actor=self.user,
         )
+
+    def test_legacy_plan_activation_removes_unreceived_migration_qc_shortcut(self):
+        PurchaseOrder.objects.filter(pk=self.po.pk).update(source=PurchaseOrder.Source.LEGACY_WIP)
+        self.po.refresh_from_db()
+        self.line.qc_passed_before_cutover_qty = Decimal("100")
+        self.line.save(update_fields=("qc_passed_before_cutover_qty",))
+
+        self._activate_plan()
+        self.line.refresh_from_db()
+        self.assertEqual(self.line.qc_passed_before_cutover_qty, Decimal("0"))
+        self.assertEqual(qc_approved_qty(self.line), Decimal("0"))
+
+        ProductionStage.objects.filter(
+            production_order=self.production_order,
+            stage=ProductionStage.Stage.TRIM,
+        ).update(completed_qty=Decimal("12"))
+        ProductionActivity.objects.create(
+            production_order=self.production_order,
+            action="production_activity_recorded",
+            stage=ProductionStage.Stage.TRIM,
+            entry_kind=ProductionActivity.EntryKind.ACTIVITY,
+            activity_type=ProductionActivity.ActivityType.TRIM,
+            activity_date=date(2026, 8, 25),
+            quantity=Decimal("12"),
+            po_line=self.line,
+            description="Trim 12 pcs.",
+            actor=self.user,
+        )
+
+        qc = record_qc(
+            po_line=self.line,
+            inspected_at=timezone.make_aware(datetime(2026, 8, 26, 10, 0)),
+            qty_inspected=12,
+            qty_passed=12,
+            qty_failed=0,
+            actor=self.user,
+        )
+        self.assertEqual(qc_approved_qty(self.line), Decimal("12"))
+
+    def test_legacy_plan_activation_preserves_only_already_received_qc_baseline(self):
+        PurchaseOrder.objects.filter(pk=self.po.pk).update(source=PurchaseOrder.Source.LEGACY_WIP)
+        self.po.refresh_from_db()
+        self.line.qc_passed_before_cutover_qty = Decimal("100")
+        self.line.save(update_fields=("qc_passed_before_cutover_qty",))
+        warehouse = Warehouse.objects.create(code="WH-LEGACY", name="Legacy Warehouse")
+        record_inbound(
+            po_line=self.line,
+            inbound_date=date(2026, 8, 20),
+            received_qty=3,
+            warehouse=warehouse,
+            reference="LEGACY-BEFORE-PLAN-001",
+            actor=self.user,
+        )
+
+        self._activate_plan()
+        self.line.refresh_from_db()
+        self.assertEqual(self.line.qc_passed_before_cutover_qty, Decimal("3"))
+        self.assertEqual(qc_approved_qty(self.line), Decimal("3"))
 
     def test_gate_prevents_skipping_material_trial_and_cmt(self):
         with self.assertRaisesMessage(ValidationError, "setelah Pembelian Material selesai"):
@@ -1208,6 +1266,12 @@ class ProductionWorkflowTests(TestCase):
         today_value = timezone.localdate().isoformat()
         self.assertContains(inbound_page, 'min="2026-08-26"')
         self.assertContains(inbound_page, f'value="{today_value}"')
+        remembered_date_page = self.client.get(
+            reverse("inventory:inbound"),
+            {"delivery_order": delivery_order.id, "inbound_date": "2026-08-27"},
+        )
+        self.assertContains(remembered_date_page, 'value="2026-08-27"')
+        self.assertContains(remembered_date_page, "vobia:inventory-inbound:dates")
         rejected_early_date = self.client.post(
             reverse("inventory:inbound"),
             {
@@ -1250,6 +1314,7 @@ class ProductionWorkflowTests(TestCase):
         self.assertRedirects(
             inbound_response,
             f"{reverse('inventory:inbound')}?delivery_order={delivery_order.id}"
+            f"&inbound_date=2026-08-27"
             f"#delivery-order-{delivery_order.id}",
         )
         snapshot = production_snapshot(self.production_order)

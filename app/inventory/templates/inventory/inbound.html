@@ -67,6 +67,19 @@ document.querySelectorAll('.delivery-order-product-table input[name="received_qt
   input.addEventListener('input', refresh);
   refresh();
 });
+const inboundDateKey = 'vobia:inventory-inbound:dates';
+let savedInboundDates = {};
+try { savedInboundDates = JSON.parse(sessionStorage.getItem(inboundDateKey) || '{}'); } catch (_) {}
+document.querySelectorAll('.delivery-order-product-table input[name="inbound_date"]').forEach(input => {
+  const formId = input.getAttribute('form');
+  if (savedInboundDates[formId] && (!input.min || savedInboundDates[formId] >= input.min)) {
+    input.value = savedInboundDates[formId];
+  }
+  input.addEventListener('change', () => {
+    savedInboundDates[formId] = input.value;
+    sessionStorage.setItem(inboundDateKey, JSON.stringify(savedInboundDates));
+  });
+});
 const inboundScrollKey = 'vobia:inventory-inbound:scroll';
 const savedInboundScroll = sessionStorage.getItem(inboundScrollKey);
 if (savedInboundScroll !== null) {

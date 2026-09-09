@@ -1061,8 +1061,59 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(september["sales_cogs"], Decimal("500000"))
         self.assertEqual(september["ending_cogs"], Decimal("750000"))
 
-    def test_dashboard_uses_snapshot_and_surfaces_source_range_exception(self):
-        response = self.client.get("/merchandising/dashboard/")
+    def test_dashboard_uses_canonical_historical_sales_and_snapshot_stock(self):
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.OTHER,
+            source_label="Offline",
+            order_number="JAN-CANONICAL-001",
+            order_datetime=timezone.make_aware(datetime(2026, 1, 5, 10, 0)),
+            order_date=date(2026, 1, 5),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            import_origin=SalesOrder.ImportOrigin.HISTORICAL,
+            affects_inventory=False,
+            first_seen_batch_id="00000000-0000-0000-0000-000000000000",
+            latest_batch_id="00000000-0000-0000-0000-000000000000",
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku=self.sku,
+            sku_code_snapshot=self.sku.sku,
+            product_status_snapshot="Active",
+            quantity=2,
+            net_unit_price=Decimal("180000"),
+            retail_price_snapshot=Decimal("200000"),
+            sales_cogs_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("400000"),
+            total_net_sales=Decimal("360000"),
+            total_cogs=Decimal("200000"),
+            gpm=Decimal("160000"),
+            is_counted=True,
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku=None,
+            sku_code_snapshot="LEGACY-UNMAPPED",
+            quantity=1,
+            net_unit_price=Decimal("45000"),
+            retail_price_snapshot=Decimal("50000"),
+            sales_cogs_snapshot=Decimal("25000"),
+            total_gross_sales=Decimal("50000"),
+            total_net_sales=Decimal("45000"),
+            total_cogs=Decimal("25000"),
+            gpm=Decimal("20000"),
+            is_counted=True,
+        )
+        state = {
+            "year": 2026,
+            "current_month_number": 8,
+            "cutoff_date": date(2026, 8, 19),
+            "run_date": date(2026, 8, 21),
+            "day_factor": 27,
+        }
+        with patch("merchandising.views.official_planning_state", return_value=state):
+            response = self.client.get("/merchandising/dashboard/")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Monthly Merchandising Indicators")
         self.assertContains(response, "Stock Value Ratio")
@@ -1079,7 +1130,8 @@ class MerchandisingReportViewTests(TestCase):
         self.assertNotContains(response, "SOURCE-RANGE EXCEPTION")
         self.assertNotContains(response, "SUMMARY ↔ PROJECTION CONNECTED")
         rows = {row["label"]: row for row in response.context["table_rows"]}
-        self.assertEqual(rows["Discount"]["values"][0], Decimal("40000"))
+        self.assertEqual(rows["Sales Gross"]["values"][0], Decimal("450000"))
+        self.assertEqual(rows["Discount"]["values"][0], Decimal("45000"))
         self.assertEqual(rows["Return"]["values"][0], Decimal("0"))
         self.assertEqual(
             rows["Sales Net"]["values"][0],
@@ -1094,15 +1146,20 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(rows["Sales Gross"]["values"][8:], [Decimal("0")] * 4)
         self.assertEqual(rows["Ending Stock Gross"]["values"][8:], [Decimal("3600000")] * 4)
         self.assertEqual(rows["GPM"]["values"][8:], [Decimal("0")] * 4)
-        self.assertEqual(rows["GPM"]["values"][0], Decimal("160000"))
+        self.assertEqual(rows["GPM"]["values"][0], Decimal("180000"))
         self.assertEqual(rows["GPM Rate"]["values"][0], Decimal("0.4"))
         self.assertEqual(rows["Margin Ratio"]["values"][0], Decimal("1.8"))
-        self.assertEqual(rows["Incoming Capital Turnover"]["values"][0], Decimal("0.8"))
-        self.assertEqual(rows["Stock Value Ratio"]["values"][0], Decimal("5"))
+        self.assertEqual(rows["Incoming Capital Turnover"]["values"][0], Decimal("0.9"))
+        self.assertEqual(rows["Stock Value Ratio"]["values"][0], Decimal("40") / Decimal("9"))
         self.assertEqual(rows["Stock Value Ratio"]["kind"], "ratio2")
         self.assertEqual(rows["Margin Ratio"]["kind"], "ratio2")
         self.assertEqual(rows["Incoming Capital Turnover"]["kind"], "ratio2")
-        self.assertEqual(rows["Sales Gross"]["total"], Decimal("2800000"))
+        self.assertEqual(rows["Sales Gross"]["total"], Decimal("450000"))
+
+        with patch("merchandising.views.official_planning_state", return_value=state):
+            filtered = self.client.get("/merchandising/dashboard/", {"status": ["Active"]})
+        filtered_rows = {row["label"]: row for row in filtered.context["table_rows"]}
+        self.assertEqual(filtered_rows["Sales Gross"]["values"][0], Decimal("400000"))
 
     def test_dashboard_reads_august_return_log_without_waiting_for_month_close(self):
         order = SalesOrder.objects.create(

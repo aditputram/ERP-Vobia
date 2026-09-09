@@ -8,6 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Q, Sum
+from django.db.models.functions import TruncMonth
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -19,7 +20,7 @@ from openpyxl.utils import get_column_letter
 
 from inventory.services.fifo import inventory_balance
 from master_data.models import Category, Product, ProductStatus, Subcategory
-from sales.models import SalesPlanSKU
+from sales.models import SalesOrderLine, SalesPlanSKU
 
 from .forms import IncomingMonthCloseForm, ProjectionBuilderForm, ProjectionScenarioForm
 from .models import (
@@ -286,6 +287,25 @@ def _last_present(values):
     return present[-1] if present else None
 
 
+def _historical_sales_actuals(sku_ids, *, include_unmapped):
+    lines = SalesOrderLine.objects.filter(
+        is_counted=True,
+        order__order_date__range=(date(2026, 1, 1), date(2026, 7, 31)),
+    )
+    if not include_unmapped:
+        lines = lines.filter(sku_id__in=sku_ids)
+    return {
+        row["month"].month: row
+        for row in lines.annotate(month=TruncMonth("order__order_date"))
+        .values("month")
+        .annotate(
+            sales_gross=Sum("total_gross_sales"),
+            sales_net=Sum("total_net_sales"),
+            sales_cogs=Sum("total_cogs"),
+        )
+    }
+
+
 def _excel_text(value):
     value = str(value or "")
     return f"'{value}" if value.startswith(("=", "+", "-", "@")) else value
@@ -476,6 +496,14 @@ def dashboard(request):
             )
         }
         month_values = {month: aggregates.get(month, {}) for month in range(1, 13)}
+        historical_sales = _historical_sales_actuals(
+            sku_ids,
+            include_unmapped=not any(selected.values()) and not query,
+        )
+        for month in range(1, 8):
+            actual = historical_sales.get(month, {})
+            for field in ("sales_gross", "sales_net", "sales_cogs"):
+                month_values[month][field] = actual.get(field) or Decimal("0")
         received_returns = received_return_values(
             sku_ids,
             planning_state["year"],

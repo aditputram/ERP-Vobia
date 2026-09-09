@@ -46,6 +46,7 @@ TIKTOK_HEADERS = [
     "SKU Seller Discount",
     "Created Time",
     "Shipped Time",
+    "Cancelation/Return Type",
 ]
 
 
@@ -364,6 +365,52 @@ class SalesImportWorkflowTests(TestCase):
         approve_sales_import(batch.id, self.user)
         self.assertEqual(str(SalesOrderLine.objects.get().total_net_sales), "498000.0000")
 
+    def test_tiktok_cancelled_after_shipment_is_normalized_to_return(self):
+        row = [
+            "TIKTOK-CANCELLED-SHIPPED-001",
+            "Dibatalkan",
+            "SKU-001",
+            "1",
+            "299000",
+            "0",
+            "18/08/2026 23:12:43",
+            "19/08/2026 09:00:00",
+            "Cancel",
+        ]
+        batch = create_sales_import(
+            make_csv(TIKTOK_HEADERS, [row], "tiktok-cancelled-shipped.csv"),
+            SalesImportBatch.Source.TIKTOK,
+            self.user,
+        )
+
+        self.assertEqual(batch.staged_rows.get().normalized_status, "Retur")
+
+    def test_tiktok_completed_return_refund_becomes_return_log_candidate(self):
+        row = [
+            "TIKTOK-COMPLETED-RETURN-001",
+            "Selesai",
+            "SKU-001",
+            "1",
+            "299000",
+            "0",
+            "18/08/2026 23:12:43",
+            "19/08/2026 09:00:00",
+            "Return/Refund",
+        ]
+        batch = create_sales_import(
+            make_csv(TIKTOK_HEADERS, [row], "tiktok-completed-return.csv"),
+            SalesImportBatch.Source.TIKTOK,
+            self.user,
+        )
+
+        staged = batch.staged_rows.get()
+        self.assertEqual(staged.normalized_status, "Retur")
+        self.assertEqual(staged.selected_source_data["return_status"], "Return/Refund")
+        approve_sales_import(batch.id, self.user)
+        order = SalesOrder.objects.get()
+        self.assertEqual(order.current_status, "Retur")
+        self.assertTrue(order.lines.get().expected_return)
+
     def test_live_marketplace_cancel_override_preserves_raw_and_prevents_sales_commit(self):
         row = [
             "TIKTOK-LIVE-CANCEL-001",
@@ -432,6 +479,7 @@ class SalesImportWorkflowTests(TestCase):
             "0",
             "18/08/2026 23:12:43",
             "19/08/2026 09:00:00",
+            "",
             "TIKTOK-SKU-ID-001",
         ]
         batch = create_sales_import(

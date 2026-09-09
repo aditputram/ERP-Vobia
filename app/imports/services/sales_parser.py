@@ -16,12 +16,16 @@ from sales.models import SalesOrder, SalesOrderLine
 from ..models import SalesImportBatch, SalesImportIssue, StagedSalesRow
 
 
-PARSER_VERSION = "sales-v4"
+PARSER_VERSION = "sales-v5"
 SALES_CUTOVER_DATE = date(2026, 8, 1)
 SHOPEE_CANCEL_REASON_HEADERS = ("Alasan Pembatalan",)
 SHOPEE_RETURN_STATUS_HEADERS = (
     "Status Pembatalan/ Pengembalian",
     "Status Pembatalan/Pengembalian",
+)
+TIKTOK_RETURN_STATUS_HEADERS = (
+    "Cancelation/Return Type",
+    "Cancellation/Return Type",
 )
 HEADER_ALIASES = {
     "Shopee": {
@@ -215,6 +219,12 @@ def _normalize_status(
         if lowered == "selesai":
             return "Selesai", True, False
         return status, False, False
+    if (
+        source == SalesImportBatch.Source.TIKTOK
+        and lowered == "selesai"
+        and "".join(return_status.casefold().split()) in {"return/refund", "retur/refund"}
+    ):
+        return "Retur", True, False
     if cancelled:
         if shipped_datetime:
             return "Retur", True, False
@@ -347,7 +357,10 @@ def parse_sales_batch(batch):
         order_number = _text(raw.get(resolved["order_number"]))
         source_status = _text(raw.get(resolved["status"]))
         cancellation_reason = _raw_text(raw, SHOPEE_CANCEL_REASON_HEADERS)
-        return_status = _raw_text(raw, SHOPEE_RETURN_STATUS_HEADERS)
+        return_status = _raw_text(
+            raw,
+            SHOPEE_RETURN_STATUS_HEADERS + TIKTOK_RETURN_STATUS_HEADERS,
+        )
         source_seller_sku = _text(raw.get(resolved["sku"]))
         marketplace_sku_id = _text(raw.get("SKU ID")) if batch.source == SalesImportBatch.Source.TIKTOK else ""
         sku_mapping = marketplace_sku_mappings.get(marketplace_sku_id)

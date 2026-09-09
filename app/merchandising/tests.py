@@ -10,6 +10,7 @@ from openpyxl import load_workbook
 
 from accounts.models import User
 from audit.models import AuditEvent
+from dashboard.models import Campaign, CampaignProduct
 from master_data.models import Category, Product, ProductStatus, ProductVariant, SKU, Subcategory, Supplier, Warehouse
 from purchasing.models import PPICRequirement, PurchaseOrder, PurchaseOrderLine
 
@@ -106,6 +107,28 @@ class MerchandisingCalculationTests(TestCase):
                 cutoff_date=date(2026, 8, 10),
                 beginning_qty=-5,
                 run_date=date(2026, 8, 20),
+            ),
+            Decimal("0"),
+        )
+
+    def test_current_projection_uses_effective_selling_days(self):
+        self.assertEqual(
+            current_month_projection(
+                actual_qty=110,
+                cutoff_date=date(2026, 8, 14),
+                beginning_qty=500,
+                run_date=date(2026, 8, 15),
+                selling_days=11,
+            ),
+            Decimal("260"),
+        )
+        self.assertEqual(
+            current_month_projection(
+                actual_qty=110,
+                cutoff_date=date(2026, 8, 14),
+                beginning_qty=500,
+                run_date=date(2026, 8, 15),
+                selling_days=0,
             ),
             Decimal("0"),
         )
@@ -1227,6 +1250,92 @@ class MerchandisingReportViewTests(TestCase):
             - rows["Return"]["values"][7],
         )
 
+    def test_seasonal_new_uses_campaign_launch_date_and_sales_view_modes(self):
+        seasonal = ProductStatus.objects.create(code="SEASONAL-NEW", name="Seasonal New")
+        self.product.status = seasonal
+        self.product.article = "Sembara"
+        self.product.save(update_fields=["status", "article"])
+        MerchandisingMonthlySnapshot.objects.filter(
+            batch=self.batch,
+            sku=self.sku,
+            month=date(2026, 7, 1),
+        ).update(ending_qty=100)
+        MerchandisingMonthlySnapshot.objects.filter(
+            batch=self.batch,
+            sku=self.sku,
+            month=date(2026, 8, 1),
+        ).update(incoming_qty=0)
+        campaign = Campaign.objects.create(
+            name="Sembara Launch",
+            description="Launch",
+            approval_date=date(2026, 8, 1),
+            sample_date=date(2026, 8, 1),
+            creative_date=date(2026, 8, 2),
+            prelaunch_date=date(2026, 8, 3),
+            launch_date=date(2026, 8, 4),
+            budget=0,
+            created_by=self.user,
+        )
+        CampaignProduct.objects.create(
+            campaign=campaign,
+            product=self.product,
+            target_qty=100,
+            retail_price_snapshot=200000,
+            target_gross_sales=20000000,
+        )
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.OTHER,
+            source_label="Offline",
+            order_number="SEASONAL-PROJECTION-001",
+            order_datetime=timezone.make_aware(datetime(2026, 8, 10, 10, 0)),
+            order_date=date(2026, 8, 10),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            import_origin=SalesOrder.ImportOrigin.MANUAL,
+            affects_inventory=True,
+            first_seen_batch_id="00000000-0000-0000-0000-000000000000",
+            latest_batch_id="00000000-0000-0000-0000-000000000000",
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku=self.sku,
+            sku_code_snapshot=self.sku.sku,
+            quantity=11,
+            net_unit_price=Decimal("180000"),
+            retail_price_snapshot=Decimal("200000"),
+            sales_cogs_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("2200000"),
+            total_net_sales=Decimal("1980000"),
+            total_cogs=Decimal("1100000"),
+            gpm=Decimal("880000"),
+            is_counted=True,
+        )
+        state = {
+            "year": 2026,
+            "current_month_number": 8,
+            "cutoff_date": date(2026, 8, 14),
+            "run_date": date(2026, 8, 15),
+            "day_factor": 26,
+        }
+
+        values = official_current_month_values(self.batch, [self.sku.id], state)[self.sku.id]
+        self.assertEqual(values["selling_start_date"], date(2026, 8, 4))
+        self.assertEqual(values["selling_days"], 11)
+        self.assertEqual(values["sales_qty"], Decimal("26"))
+
+        with patch("merchandising.views.official_planning_state", return_value=state):
+            projection = self.client.get("/merchandising/dashboard/", {"sales_mode": "projection"})
+            actual = self.client.get("/merchandising/dashboard/", {"sales_mode": "actual"})
+            comparison = self.client.get("/merchandising/dashboard/", {"sales_mode": "comparison"})
+        projection_rows = {row["label"]: row for row in projection.context["table_rows"]}
+        actual_rows = {row["label"]: row for row in actual.context["table_rows"]}
+        self.assertEqual(projection_rows["Sales Gross"]["values"][7], Decimal("5200000"))
+        self.assertEqual(actual_rows["Sales Gross"]["values"][7], Decimal("2200000"))
+        self.assertEqual(comparison.context["sales_comparison_summary"]["projected_gross"], Decimal("5200000"))
+        self.assertEqual(comparison.context["partial_selling_rows"][0]["article"], "Sembara")
+        self.assertContains(comparison, "Produk dengan Periode Jual Parsial")
+
     def test_dashboard_exports_the_filtered_indicator_matrix_as_xlsx(self):
         params = {"status": ["Active"], "incoming_mode": "projection"}
         page = self.client.get("/merchandising/dashboard/", params)
@@ -1243,18 +1352,18 @@ class MerchandisingReportViewTests(TestCase):
         self.assertIn("VOBIA-Merchandising-Dashboard-", export["Content-Disposition"])
         workbook = load_workbook(BytesIO(export.content), data_only=True)
         sheet = workbook["Dashboard"]
-        self.assertEqual(sheet["A9"].value, "Indicator")
-        self.assertEqual(sheet["B9"].value, "January")
-        self.assertEqual(sheet["N9"].value, "Total")
+        self.assertEqual(sheet["A10"].value, "Indicator")
+        self.assertEqual(sheet["B10"].value, "January")
+        self.assertEqual(sheet["N10"].value, "Total")
         rows = {row["label"]: row for row in page.context["table_rows"]}
         exported = {
             sheet.cell(row=index, column=1).value: sheet.cell(row=index, column=2).value
-            for index in range(10, sheet.max_row + 1)
+            for index in range(11, sheet.max_row + 1)
         }
         self.assertEqual(exported["Sales Gross"], rows["Sales Gross"]["values"][0])
         self.assertEqual(exported["Discount"], rows["Discount"]["values"][0])
         self.assertEqual(exported["Return"], rows["Return"]["values"][0])
-        self.assertEqual(sheet["B5"].value, "Active")
+        self.assertEqual(sheet["B6"].value, "Active")
         workbook.close()
 
     def test_draft_scenario_is_visible_in_projection_and_dashboard_with_warning(self):

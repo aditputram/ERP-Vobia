@@ -28,7 +28,13 @@ def beginning_quantity(prior_ending_qty, current_month_incoming_qty):
     return Decimal(prior_ending_qty) + Decimal(current_month_incoming_qty)
 
 
-def current_month_projection(actual_qty, cutoff_date, beginning_qty, run_date=None):
+def current_month_projection(
+    actual_qty,
+    cutoff_date,
+    beginning_qty,
+    run_date=None,
+    selling_days=None,
+):
     """Project actual-to-full-month and cap sales to non-negative sellable beginning."""
     actual_qty = Decimal(actual_qty)
     beginning_qty = Decimal(beginning_qty)
@@ -37,7 +43,12 @@ def current_month_projection(actual_qty, cutoff_date, beginning_qty, run_date=No
         raise ValidationError("Actual Qty tidak boleh negatif.")
     if cutoff_date.day <= 0:
         raise ValidationError("Cutoff date tidak valid.")
-    recommendation = actual_qty / Decimal(cutoff_date.day) * Decimal(
+    selling_days = cutoff_date.day if selling_days is None else int(selling_days)
+    if selling_days < 0:
+        raise ValidationError("Hari jual tidak boleh negatif.")
+    if selling_days == 0:
+        return ZERO
+    recommendation = actual_qty / Decimal(selling_days) * Decimal(
         current_month_multiplier(run_date)
     )
     recommendation = recommendation.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
@@ -52,10 +63,12 @@ def current_month_metric_values(
     actual_net,
     actual_gross=None,
     actual_return=ZERO,
+    actual_cogs=None,
     cutoff_date,
     cogs,
     retail_price,
     run_date,
+    selling_days=None,
 ):
     """Build the official current-month merchandising metrics from ERP actuals."""
     prior_ending_qty = Decimal(prior_ending_qty or ZERO)
@@ -70,10 +83,21 @@ def current_month_metric_values(
     actual_return = Decimal(actual_return or ZERO)
     cogs = Decimal(cogs or ZERO)
     retail_price = Decimal(retail_price or ZERO)
+    actual_cogs = (
+        Decimal(actual_cogs)
+        if actual_cogs is not None
+        else actual_qty * cogs
+    )
 
     beginning_qty = beginning_quantity(prior_ending_qty, incoming_qty)
     sales_qty = (
-        current_month_projection(actual_qty, cutoff_date, beginning_qty, run_date=run_date)
+        current_month_projection(
+            actual_qty,
+            cutoff_date,
+            beginning_qty,
+            run_date=run_date,
+            selling_days=selling_days,
+        )
         if cutoff_date
         else ZERO
     )
@@ -102,6 +126,12 @@ def current_month_metric_values(
         "sales_discount": sales_discount,
         "sales_return": sales_return,
         "sales_net": sales_net,
+        "actual_sales_qty": actual_qty,
+        "actual_sales_gross": actual_gross,
+        "actual_sales_discount": actual_gross - actual_net,
+        "actual_sales_return": sales_return,
+        "actual_sales_net": actual_net - sales_return,
+        "actual_sales_cogs": actual_cogs,
         "ratio": beginning_qty / sales_qty if sales_qty else None,
         "ending_qty": ending_qty,
         "ending_cogs": ending_qty * cogs,

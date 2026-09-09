@@ -287,6 +287,58 @@ def _last_present(values):
     return present[-1] if present else None
 
 
+def _partial_selling_rows(current_values, cutoff_date):
+    if not cutoff_date:
+        return []
+    month_start = cutoff_date.replace(day=1)
+    products = {}
+    for values in current_values.values():
+        product_id = values.get("product_id")
+        if not product_id:
+            continue
+        row = products.setdefault(
+            product_id,
+            {
+                "article": values.get("article") or values.get("product_name") or "—",
+                "status": values.get("product_status") or "—",
+                "sku_count": 0,
+                "partial_sku_count": 0,
+                "start_dates": [],
+                "selling_days": [],
+                "launch_date_missing": False,
+                "actual_gross": Decimal("0"),
+                "projected_gross": Decimal("0"),
+                "reasons": set(),
+            },
+        )
+        row["sku_count"] += 1
+        row["actual_gross"] += values["actual_sales_gross"]
+        row["projected_gross"] += values["sales_gross"]
+        start_date = values.get("selling_start_date")
+        is_partial = values.get("launch_date_missing") or not start_date or start_date > month_start
+        if is_partial:
+            row["partial_sku_count"] += 1
+            row["launch_date_missing"] |= values.get("launch_date_missing", False)
+            if start_date:
+                row["start_dates"].append(start_date)
+            row["selling_days"].append(values.get("selling_days", 0))
+            row["reasons"].add(values.get("selling_start_reason") or "Periode jual parsial")
+
+    rows = []
+    for row in products.values():
+        if not row["partial_sku_count"]:
+            continue
+        row["start_date_min"] = min(row["start_dates"]) if row["start_dates"] else None
+        row["start_date_max"] = max(row["start_dates"]) if row["start_dates"] else None
+        row["selling_days_min"] = min(row["selling_days"]) if row["selling_days"] else 0
+        row["selling_days_max"] = max(row["selling_days"]) if row["selling_days"] else 0
+        row["reason"] = ", ".join(sorted(row.pop("reasons")))
+        row.pop("start_dates")
+        row.pop("selling_days")
+        rows.append(row)
+    return sorted(rows, key=lambda row: (row["launch_date_missing"], row["article"].casefold()), reverse=True)
+
+
 def _completed_month_sales_actuals(sku_ids, *, year, current_month, include_unmapped):
     lines = SalesOrderLine.objects.filter(
         is_counted=True,
@@ -347,6 +399,7 @@ def _export_dashboard(context):
     sheet.append(("Source", _excel_text(context["batch"].source_file_name)))
     sheet.append(("SKU sesuai filter", context["filtered_count"]))
     sheet.append(("Incoming current month", context["incoming_mode"].title()))
+    sheet.append(("Sales current month", context["sales_mode"].title()))
     sheet.append(("Status Product", _excel_text(", ".join(context["selected"]["status"]) or "All")))
     sheet.append(("Category", _excel_text(", ".join(context["selected"]["category"]) or "All")))
     sheet.append(("Product", _excel_text(", ".join(context["selected"]["product"]) or "All")))
@@ -450,6 +503,11 @@ def dashboard(request):
     if incoming_mode not in {"projection", "actual", "comparison"}:
         incoming_mode = "projection"
     incoming_comparison_summary = None
+    sales_mode = request.GET.get("sales_mode", "projection")
+    if sales_mode not in {"projection", "actual", "comparison"}:
+        sales_mode = "projection"
+    sales_comparison_summary = None
+    partial_selling_rows = []
     planning_preview = {"draft_scenario_count": 0, "draft_scenarios": [], "draft_projection_count": 0}
     if batch:
         snapshots, selected, query = _filtered_snapshots(request, batch)
@@ -459,6 +517,9 @@ def dashboard(request):
         planning_state = official_planning_state(batch)
         planning_state["current_month"] = month_name[planning_state["current_month_number"]]
         current_values = official_current_month_values(batch, sku_ids, planning_state)
+        partial_selling_rows = _partial_selling_rows(
+            current_values, planning_state["cutoff_date"]
+        )
         current_month_date = date(planning_state["year"], planning_state["current_month_number"], 1)
         current_snapshots = {
             row.sku_id: row
@@ -537,6 +598,26 @@ def dashboard(request):
             current_aggregate[field] = sum(
                 (values[field] for values in current_values.values()), Decimal("0")
             )
+        projected_sales_gross = current_aggregate["sales_gross"]
+        actual_sales_gross = sum(
+            (values["actual_sales_gross"] for values in current_values.values()),
+            Decimal("0"),
+        )
+        sales_comparison_summary = {
+            "projected_gross": projected_sales_gross,
+            "actual_gross": actual_sales_gross,
+            "variance_gross": actual_sales_gross - projected_sales_gross,
+            "achievement_rate": _divide(actual_sales_gross, projected_sales_gross),
+            "cutoff_date": planning_state["cutoff_date"],
+        }
+        if sales_mode == "actual":
+            for field in (
+                "sales_gross", "sales_discount", "sales_return", "sales_net", "sales_cogs"
+            ):
+                current_aggregate[field] = sum(
+                    (values[f"actual_{field}"] for values in current_values.values()),
+                    Decimal("0"),
+                )
         comparison = incoming_comparison(batch, date(planning_state["year"], current_month, 1), sku_ids)
         projected_incoming = sum((row["projection"]["incoming_qty"] for row in comparison.values()), Decimal("0"))
         actual_incoming = sum((row["actual"]["incoming_qty"] for row in comparison.values()), Decimal("0"))
@@ -671,6 +752,9 @@ def dashboard(request):
         "planning_state": planning_state,
         "incoming_mode": incoming_mode,
         "incoming_comparison_summary": incoming_comparison_summary,
+        "sales_mode": sales_mode,
+        "sales_comparison_summary": sales_comparison_summary,
+        "partial_selling_rows": partial_selling_rows,
         "planning_preview": planning_preview,
         "closed_month_numbers": closed_month_numbers if batch else [],
         **_filter_options(batch),

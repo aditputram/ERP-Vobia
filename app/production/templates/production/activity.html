@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header">
   <div><p class="eyebrow">PRODUCTION · FIELD ENTRY</p><h1>Production Activity</h1><p>Semua realisasi Material, Trial, Cut, Make, Trim, dan QC dicatat di sini. Submit bersifat append-only.</p></div>
-  <div class="header-actions"><a class="secondary-button" href="{% url 'production:monitoring' %}">Buka Monitoring</a></div>
+  {% if tab_permissions.operation.production_monitoring %}<div class="header-actions"><a class="secondary-button" href="{% url 'production:monitoring' %}">Buka Monitoring</a></div>{% endif %}
 </header>
 
 <section class="panel">

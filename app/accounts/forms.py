@@ -3,16 +3,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
-
-MODULES = (
-    ("sales", "Sales"),
-    ("operation", "Operation"),
-    ("rnd", "RnD"),
-    ("marketing", "Marketing"),
-    ("master_data", "Master Data"),
-    ("reconciliation", "Reconciliation"),
-    ("guide", "Panduan & UAT"),
-)
+from .access import MODULES, MODULE_TABS
 ACCESS_LEVELS = (
     ("none", "Tidak ada akses"),
     ("view", "Lihat"),
@@ -65,6 +56,8 @@ class ManagedUserForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         saved_access = self.instance.module_access if self.instance.pk else {}
+        saved_tabs = self.instance.tab_access if self.instance.pk else {}
+        self.module_permission_rows = []
         for key, label in MODULES:
             self.fields[f"access_{key}"] = forms.ChoiceField(
                 label=label,
@@ -72,6 +65,42 @@ class ManagedUserForm(forms.ModelForm):
                 initial="approve" if self.instance.is_superuser else saved_access.get(key, "none"),
                 disabled=self.instance.is_superuser,
             )
+            tab_choices = [
+                (tab_key, f"{section} · {tab_label}")
+                for tab_key, tab_label, section, _view_names in MODULE_TABS[key]
+            ]
+            initial_tabs = (
+                saved_tabs[key]
+                if key in saved_tabs
+                else [tab_key for tab_key, _tab_label, _section, _view_names in MODULE_TABS[key]]
+            )
+            self.fields[f"tabs_{key}"] = forms.MultipleChoiceField(
+                label=f"Tab {label}",
+                choices=tab_choices,
+                initial=initial_tabs,
+                required=False,
+                disabled=self.instance.is_superuser,
+                widget=forms.CheckboxSelectMultiple,
+            )
+            self.module_permission_rows.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "access": self[f"access_{key}"],
+                    "tabs": self[f"tabs_{key}"],
+                }
+            )
+
+    def clean(self):
+        cleaned = super().clean()
+        for key, label in MODULES:
+            level = cleaned.get(f"access_{key}")
+            tabs = cleaned.get(f"tabs_{key}") or []
+            if level != "none" and not tabs:
+                self.add_error(f"tabs_{key}", f"Pilih minimal satu tab untuk modul {label}.")
+            if level == "none":
+                cleaned[f"tabs_{key}"] = []
+        return cleaned
 
     def clean_password(self):
         password = self.cleaned_data.get("password")
@@ -86,6 +115,9 @@ class ManagedUserForm(forms.ModelForm):
         if not user.is_superuser:
             user.module_access = {
                 key: self.cleaned_data[f"access_{key}"] for key, _ in MODULES
+            }
+            user.tab_access = {
+                key: self.cleaned_data[f"tabs_{key}"] for key, _ in MODULES
             }
         password = self.cleaned_data.get("password")
         if password:

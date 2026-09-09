@@ -200,7 +200,11 @@ def user_create(request):
             action="user_created",
             entity_type="accounts.user",
             entity_id=str(user.pk),
-            metadata={"username": user.username, "module_access": user.module_access},
+            metadata={
+                "username": user.username,
+                "module_access": user.module_access,
+                "tab_access": user.tab_access,
+            },
         )
         messages.success(request, f"Akun {user.username} berhasil dibuat.")
         return redirect("accounts:user_list")
@@ -221,7 +225,11 @@ def user_edit(request, user_id):
                 action="user_updated",
                 entity_type="accounts.user",
                 entity_id=str(user.pk),
-                metadata={"username": user.username, "module_access": user.module_access},
+                metadata={
+                    "username": user.username,
+                    "module_access": user.module_access,
+                    "tab_access": user.tab_access,
+                },
             )
             messages.success(request, f"Akun {user.username} berhasil diperbarui.")
             return redirect("accounts:user_list")

@@ -5,10 +5,27 @@
 <form method="post" class="panel user-access-form">{% csrf_token %}
 {% if form.non_field_errors %}<div class="message error">{{ form.non_field_errors }}</div>{% endif %}
 <div class="user-identity-grid">
-{% for field in form %}{% if not field.name|slice:":7" == "access_" %}<label>{{ field.label }}{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</label>{% endif %}{% endfor %}
+{% for field in form %}{% if not field.name|slice:":7" == "access_" and not field.name|slice:":5" == "tabs_" %}<label>{{ field.label }}{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</label>{% endif %}{% endfor %}
 </div>
-<div class="section-heading"><p class="eyebrow">MODULE ACCESS</p><h2>Hak Akses per Modul</h2>{% if managed_user.is_superuser %}<p>Super Admin selalu memiliki akses Approve ke seluruh modul.</p>{% endif %}</div>
-<div class="module-access-grid">{% for field in form %}{% if field.name|slice:":7" == "access_" %}<label><span>{{ field.label }}</span>{{ field }}{{ field.errors }}</label>{% endif %}{% endfor %}</div>
+<div class="section-heading"><p class="eyebrow">MODULE &amp; TAB ACCESS</p><h2>Hak Akses per Modul</h2><p>Atur level tindakan, lalu pilih tab dan sub-tab yang boleh dibuka.</p>{% if managed_user.is_superuser %}<p>Super Admin selalu memiliki akses Approve ke seluruh modul dan tab.</p>{% endif %}</div>
+<div class="module-access-grid">{% for row in form.module_permission_rows %}<section class="module-access-card" data-module-access-card><label class="module-level-field"><span>{{ row.label }}</span>{{ row.access }}{{ row.access.errors }}</label><div class="module-tab-field"><span>Tab yang dapat dibuka</span>{{ row.tabs }}{{ row.tabs.errors }}</div></section>{% endfor %}</div>
 <div class="form-actions"><button class="primary-button" type="submit">Simpan Pengguna</button><a class="secondary-button" href="{% url 'accounts:user_list' %}">Batal</a></div>
 </form>
+<script>
+document.querySelectorAll("[data-module-access-card]").forEach((card) => {
+    const level = card.querySelector("select");
+    const tabs = [...card.querySelectorAll('input[type="checkbox"]')];
+    if (!level || !tabs.length) return;
+    const sync = (changed) => {
+        const inactive = level.value === "none";
+        if (changed && !inactive && !tabs.some((tab) => tab.checked)) {
+            tabs.forEach((tab) => { tab.checked = true; });
+        }
+        tabs.forEach((tab) => { tab.disabled = inactive || level.disabled; });
+        card.classList.toggle("is-disabled", inactive);
+    };
+    level.addEventListener("change", () => sync(true));
+    sync(false);
+});
+</script>
 {% endblock %}

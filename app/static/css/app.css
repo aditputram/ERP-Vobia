@@ -854,12 +854,19 @@ tbody tr:last-child td { border-bottom: 0; }
 .table-subcopy { display: block; margin-top: 4px; color: var(--muted); font-size: 8px; }
 .access-chip { display: inline-flex; margin: 2px; padding: 5px 7px; border-radius: 999px; color: #4e650b; background: #eff7d6; font-size: 8px; font-weight: 800; }
 .user-access-form { display: grid; gap: 24px; }
-.user-identity-grid, .module-access-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.user-identity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.module-access-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .user-identity-grid label, .module-access-grid label { display: grid; gap: 7px; color: var(--muted); font-size: 9px; font-weight: 800; }
 .user-identity-grid input, .module-access-grid select { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: white; }
 .user-identity-grid input[type="checkbox"] { width: 18px; min-height: 18px; }
 .user-identity-grid small { font-weight: 500; line-height: 1.5; }
 .user-identity-grid .errorlist, .module-access-grid .errorlist { margin: 0; padding: 0; list-style: none; color: var(--danger); }
+.module-access-card { display: grid; gap: 14px; align-content: start; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #fafaf7; }
+.module-tab-field { display: grid; gap: 8px; color: var(--muted); font-size: 9px; font-weight: 800; }
+.module-tab-field > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; }
+.module-tab-field label { display: flex; grid-template-columns: none; align-items: center; gap: 7px; min-width: 0; color: var(--ink); font-size: 9px; font-weight: 650; line-height: 1.35; }
+.module-tab-field input[type="checkbox"] { width: 16px; min-height: 16px; margin: 0; flex: 0 0 auto; }
+.module-access-card.is-disabled .module-tab-field { opacity: .45; }
 
 @media (max-width: 1080px) {
     .metric-grid.five, .metric-grid.six { grid-template-columns: repeat(3, 1fr); }
@@ -935,6 +942,7 @@ tbody tr:last-child td { border-bottom: 0; }
     .trial-summary .span-two { grid-column: auto; }
     .production-plan-selector, .production-plan-grid, .production-monitor-card-grid, .production-activity-form-grid { grid-template-columns: 1fr; }
     .user-identity-grid, .module-access-grid { grid-template-columns: 1fr; }
+    .module-tab-field > div { grid-template-columns: 1fr; }
     .production-plan-field.full, .production-plan-field.wide, .production-activity-form-grid .wide { grid-column: auto; }
     .production-plan-pair { grid-column: auto; }
     .production-activity-layout { grid-template-columns: 1fr; }

@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header">
     <div><p class="eyebrow">R&amp;D · DEVELOPMENT · {{ collection.code }}</p><h1>{{ collection.name }}</h1><p>Progress Development dijalankan per Product, sementara Collection tetap menjadi project induk.</p></div>
-    <div class="header-actions"><a class="secondary-button" href="{% url 'rnd:collection_detail' collection.id %}">Buka Collection</a><a class="secondary-button" href="{% url 'rnd:development_list' %}">Daftar Development</a></div>
+    <div class="header-actions">{% if tab_permissions.rnd.collections %}<a class="secondary-button" href="{% url 'rnd:collection_detail' collection.id %}">Buka Collection</a>{% endif %}<a class="secondary-button" href="{% url 'rnd:development_list' %}">Daftar Development</a></div>
 </header>
 <section class="metric-grid three">
     <article class="metric-card"><span>Total Product</span><strong>{{ products|length }}</strong></article>

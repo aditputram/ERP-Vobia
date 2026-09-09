@@ -8,6 +8,7 @@ class User(AbstractUser):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     job_title = models.CharField(max_length=120, blank=True)
     module_access = models.JSONField(default=dict, blank=True)
+    tab_access = models.JSONField(default=dict, blank=True)
 
 
 class LoginThrottle(models.Model):

@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from audit.models import AuditEvent
 
+from .access import VIEW_TABS
 from .models import LoginThrottle
 
 
@@ -175,11 +176,16 @@ class UserManagementTests(TestCase):
                 "access_master_data": "view",
                 "access_reconciliation": "none",
                 "access_guide": "view",
+                "tabs_sales": ["dashboard"],
+                "tabs_marketing": ["dashboard", "campaigns"],
+                "tabs_master_data": ["master_data"],
+                "tabs_guide": ["guide"],
             },
         )
         self.assertRedirects(response, reverse("accounts:user_list"))
         user = get_user_model().objects.get(username="marketing.team")
         self.assertEqual(user.module_access["marketing"], "edit")
+        self.assertEqual(user.tab_access["marketing"], ["dashboard", "campaigns"])
         self.assertTrue(user.check_password("Marketing-Aman-2026!"))
         self.assertTrue(AuditEvent.objects.filter(action="user_created", actor=self.admin).exists())
 
@@ -213,6 +219,83 @@ class UserManagementTests(TestCase):
         self.client.force_login(user)
         self.assertEqual(self.client.get(reverse("sales:dashboard")).status_code, 200)
         self.assertEqual(self.client.get(reverse("merchandising:overview")).status_code, 200)
+
+    def test_operation_tab_allowlist_hides_and_blocks_other_tabs(self):
+        user = get_user_model().objects.create_user(
+            username="field-team",
+            password=self.password,
+            module_access={"operation": "edit"},
+            tab_access={"operation": ["production_activity"]},
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("production:activity"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("production:activity"))
+        self.assertNotContains(response, reverse("production:planning"))
+        self.assertNotContains(response, reverse("production:monitoring"))
+        self.assertNotContains(response, reverse("merchandising:dashboard"))
+        self.assertEqual(self.client.get(reverse("production:planning")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("merchandising:dashboard")).status_code, 403)
+
+    def test_user_form_lists_operation_subtabs(self):
+        user = get_user_model().objects.create_user(
+            username="field-team",
+            password=self.password,
+            module_access={"operation": "edit"},
+            tab_access={"operation": ["production_activity"]},
+        )
+
+        response = self.client.get(reverse("accounts:user_edit", args=[user.id]))
+
+        self.assertContains(response, "Production · Production Activity")
+        self.assertContains(response, 'name="tabs_operation"', count=17)
+        self.assertContains(
+            response,
+            'value="production_activity" id="id_tabs_operation_10" checked',
+        )
+
+    def test_rnd_product_documents_are_shared_by_collection_and_development_tabs(self):
+        self.assertEqual(
+            VIEW_TABS["rnd:product_detail"],
+            ("rnd", ["collections", "development"]),
+        )
+
+    def test_enter_module_opens_first_allowed_tab(self):
+        user = get_user_model().objects.create_user(
+            username="field-team",
+            password=self.password,
+            module_access={"operation": "edit"},
+            tab_access={"operation": ["production_activity"]},
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard:enter_module", args=["operation"]))
+
+        self.assertRedirects(response, reverse("production:activity"))
+
+    def test_active_module_requires_at_least_one_selected_tab(self):
+        response = self.client.post(
+            reverse("accounts:user_create"),
+            {
+                "username": "field-team",
+                "first_name": "Tim",
+                "last_name": "Lapangan",
+                "is_active": "on",
+                "password": "Field-Team-Aman-2026!",
+                "access_sales": "none",
+                "access_operation": "edit",
+                "access_rnd": "none",
+                "access_marketing": "none",
+                "access_master_data": "none",
+                "access_reconciliation": "none",
+                "access_guide": "none",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Pilih minimal satu tab untuk modul Operation")
+        self.assertFalse(get_user_model().objects.filter(username="field-team").exists())
 
     def test_master_import_respects_master_data_access_level(self):
         user = get_user_model().objects.create_user(

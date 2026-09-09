@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 
 from audit.services import record_audit
+from accounts.access import first_allowed_route, module_level
 
 
 MODULES = (
@@ -77,12 +78,15 @@ MODULES = (
 
 @login_required
 def index(request):
-    access = request.user.module_access or {}
     modules = [
         {
             **module,
-            "accessible": request.user.is_superuser
-            or access.get(module["slug"], "none" if module["slug"] == "rnd" else "approve") != "none",
+            "accessible": not module["available"]
+            or request.user.is_superuser
+            or (
+                module_level(request.user, module["slug"]) != "none"
+                and first_allowed_route(request.user, module["slug"]) is not None
+            ),
         }
         for module in MODULES
     ]
@@ -101,8 +105,10 @@ def enter_module(request, module_slug):
             f"Modul {module['name']} sudah masuk roadmap dan akan diaktifkan setelah proses bisnisnya siap.",
         )
         return redirect("dashboard:index")
-    default_level = "none" if module_slug == "rnd" else "approve"
-    if not request.user.is_superuser and (request.user.module_access or {}).get(module_slug, default_level) == "none":
+    destination = first_allowed_route(request.user, module_slug)
+    if not request.user.is_superuser and (
+        module_level(request.user, module_slug) == "none" or destination is None
+    ):
         messages.error(request, "yang tidak berkepentingan dilarang masuk!")
         return redirect("dashboard:index")
 
@@ -114,13 +120,7 @@ def enter_module(request, module_slug):
         entity_id=module_slug,
         metadata={"module_name": module["name"]},
     )
-    if module_slug == "sales":
-        return redirect("sales:dashboard")
-    if module_slug == "marketing":
-        return redirect("dashboard:instagram_dashboard")
-    if module_slug == "rnd":
-        return redirect("rnd:dashboard")
-    return redirect("merchandising:overview")
+    return redirect(destination or first_allowed_route(request.user, module_slug))
 
 
 @login_required

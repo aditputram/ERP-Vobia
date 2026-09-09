@@ -306,12 +306,14 @@ def _partial_selling_rows(current_values, cutoff_date):
                 "start_dates": [],
                 "selling_days": [],
                 "launch_date_missing": False,
+                "actual_qty": Decimal("0"),
                 "actual_gross": Decimal("0"),
                 "projected_gross": Decimal("0"),
                 "reasons": set(),
             },
         )
         row["sku_count"] += 1
+        row["actual_qty"] += values["actual_sales_qty"]
         row["actual_gross"] += values["actual_sales_gross"]
         row["projected_gross"] += values["sales_gross"]
         start_date = values.get("selling_start_date")
@@ -330,7 +332,7 @@ def _partial_selling_rows(current_values, cutoff_date):
 
     rows = []
     for row in products.values():
-        if not row["partial_sku_count"]:
+        if not row["partial_sku_count"] or row["actual_qty"] <= 0:
             continue
         row["start_date_min"] = min(row["start_dates"]) if row["start_dates"] else None
         row["start_date_max"] = max(row["start_dates"]) if row["start_dates"] else None
@@ -339,6 +341,7 @@ def _partial_selling_rows(current_values, cutoff_date):
         row["reason"] = ", ".join(sorted(row.pop("reasons")))
         row.pop("start_dates")
         row.pop("selling_days")
+        row.pop("actual_qty")
         rows.append(row)
     return sorted(rows, key=lambda row: (row["launch_date_missing"], row["article"].casefold()), reverse=True)
 

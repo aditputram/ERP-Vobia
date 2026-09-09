@@ -1393,6 +1393,24 @@ class MerchandisingReportViewTests(TestCase):
         self.assertFalse(values["launch_date_missing"])
         self.assertEqual(values["sales_qty"], Decimal("13"))
 
+    def test_seasonal_new_without_current_sales_is_not_a_partial_action_item(self):
+        seasonal = ProductStatus.objects.create(code="SEASONAL-NEW-NO-SALES", name="Seasonal New")
+        self.product.status = seasonal
+        self.product.save(update_fields=["status"])
+        state = {
+            "year": 2026,
+            "current_month_number": 8,
+            "cutoff_date": date(2026, 8, 14),
+            "run_date": date(2026, 8, 15),
+            "day_factor": 26,
+        }
+
+        with patch("merchandising.views.official_planning_state", return_value=state):
+            response = self.client.get("/merchandising/dashboard/")
+
+        self.assertEqual(response.context["partial_selling_rows"], [])
+        self.assertNotContains(response, "Launching Date belum diisi")
+
     def test_dashboard_exports_the_filtered_indicator_matrix_as_xlsx(self):
         params = {"status": ["Active"], "incoming_mode": "projection"}
         page = self.client.get("/merchandising/dashboard/", params)

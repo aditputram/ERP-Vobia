@@ -1,3 +1,7 @@
+from django.urls import reverse
+
+from finance.catalog import FINANCE_NAV_SECTIONS, ROUTES as FINANCE_ROUTES
+
 from .access import MODULE_TABS, can_access_tab
 
 
@@ -24,6 +28,30 @@ def tab_permissions(request):
         current_module = "sales"
     else:
         current_module = request.session.get("active_module", "sales")
+    current_url_name = getattr(getattr(request, "resolver_match", None), "url_name", "")
+    current_slug = (getattr(getattr(request, "resolver_match", None), "kwargs", {}) or {}).get("slug")
+    finance_nav_sections = []
+    for section in FINANCE_NAV_SECTIONS:
+        items = []
+        for tab_key, label, slug in section["items"]:
+            if not permissions["finance"].get(tab_key):
+                continue
+            route = FINANCE_ROUTES.get(tab_key, "finance:feature")
+            if tab_key == "journals":
+                active = "journal" in current_url_name
+            else:
+                active = current_slug == slug if slug else current_url_name == route.split(":")[-1]
+            items.append(
+                {
+                    "label": label,
+                    "href": reverse(route, args=[slug] if slug else None),
+                    "active": active,
+                }
+            )
+        if items:
+            finance_nav_sections.append(
+                {**section, "items": items, "active": any(item["active"] for item in items)}
+            )
     return {
         "tab_permissions": permissions,
         "current_business_module": current_module,
@@ -35,4 +63,5 @@ def tab_permissions(request):
                 ("guide", "guide"),
             )
         ),
+        "finance_nav_sections": finance_nav_sections,
     }

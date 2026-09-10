@@ -14,4 +14,5 @@ urlpatterns = [
     path("reports/trial-balance/", views.trial_balance, name="trial_balance"),
     path("reports/balance-sheet/", views.balance_sheet, name="balance_sheet"),
     path("reports/profit-loss/", views.profit_loss, name="profit_loss"),
+    path("workspaces/<slug:slug>/", views.feature, name="feature"),
 ]

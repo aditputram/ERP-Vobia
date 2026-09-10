@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}{{ feature.title }} · Finance{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div><p class="eyebrow">{{ feature.section }}</p><h1>{{ feature.title }}</h1></div>
+    {% if action %}<a class="primary-button" href="{{ action.href }}">{{ action.label }}</a>{% endif %}
+</header>
+{% if slug == 'cash-flow' or slug == 'general-ledger-summary' %}
+<form method="get" class="panel inventory-filter"><div class="inventory-filter-grid"><label>Mulai<input type="date" name="start" value="{{ start|date:'Y-m-d' }}"></label><label>Sampai<input type="date" name="end" value="{{ end|date:'Y-m-d' }}"></label><button class="primary-button" type="submit">Tampilkan</button></div></form>
+{% elif slug == 'financial-ratio' or 'outstanding' in slug or 'aging' in slug or slug == 'supplier-payable-per-month' or slug == 'inventory-valuation' %}
+<form method="get" class="panel inventory-filter"><div class="inventory-filter-grid"><label>Per tanggal<input type="date" name="as_of" value="{{ as_of|date:'Y-m-d' }}"></label><button class="primary-button" type="submit">Tampilkan</button></div></form>
+{% endif %}
+{% if metrics %}<section class="metric-grid section-gap">{% for label, value in metrics %}<article class="metric-card"><span>{{ label }}</span><strong>{{ value|floatformat:"2g" }}</strong></article>{% endfor %}</section>{% endif %}
+<section class="panel section-gap">
+    <div class="panel-header"><div><h2>{{ feature.title }}</h2><p>{{ data_note }}</p></div></div>
+    {% if columns %}<div class="table-wrap warehouse-table-wrap"><table><thead><tr>{% for column in columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in rows %}<tr>{% for cell in row %}<td>{% if cell == None %}—{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>{% empty %}<tr><td colspan="{{ columns|length }}"><div class="empty-state">Belum ada data.</div></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">Struktur menu sudah tersedia. Field, approval, dan posting otomatis akan diaktifkan setelah flow operasional fitur ini ditetapkan bersama tim Finance.</div>{% endif %}
+</section>
+{% endblock %}

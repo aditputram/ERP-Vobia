@@ -1,3 +1,6 @@
+from finance.catalog import FINANCE_NAV_SECTIONS, ROUTES as FINANCE_ROUTES
+
+
 MODULES = (
     ("sales", "Sales"),
     ("operation", "Operation"),
@@ -232,16 +235,25 @@ MODULE_TABS = {
     ),
     "finance": (
         ("dashboard", "Dashboard", "Finance", ("finance:dashboard",)),
-        ("accounts", "Chart of Accounts", "General Ledger", ("finance:accounts",)),
-        (
-            "journals",
-            "Jurnal Voucher",
-            "General Ledger",
-            ("finance:journals", "finance:journal_create", "finance:journal_detail", "finance:journal_approve"),
+        *tuple(
+            (
+                tab,
+                label,
+                section["label"],
+                (
+                    (
+                        "finance:journal_create",
+                        "finance:journal_detail",
+                        "finance:journal_approve",
+                        "finance:journals",
+                    )
+                    if tab == "journals"
+                    else (FINANCE_ROUTES.get(tab, "finance:feature"),)
+                ),
+            )
+            for section in FINANCE_NAV_SECTIONS
+            for tab, label, _slug in section["items"]
         ),
-        ("trial_balance", "Trial Balance", "Report", ("finance:trial_balance",)),
-        ("balance_sheet", "Balance Sheet", "Report", ("finance:balance_sheet",)),
-        ("profit_loss", "Profit & Loss", "Report", ("finance:profit_loss",)),
     ),
     "master_data": (
         (
@@ -308,11 +320,11 @@ TAB_ENTRY_ROUTES = {
     },
     "finance": {
         "dashboard": "finance:dashboard",
-        "accounts": "finance:accounts",
-        "journals": "finance:journals",
-        "trial_balance": "finance:trial_balance",
-        "balance_sheet": "finance:balance_sheet",
-        "profit_loss": "finance:profit_loss",
+        **{
+            tab: FINANCE_ROUTES.get(tab, f"/finance/workspaces/{slug}/")
+            for section in FINANCE_NAV_SECTIONS
+            for tab, _label, slug in section["items"]
+        },
     },
     "master_data": {"master_data": "master_data:overview"},
     "reconciliation": {"reconciliation": "reconciliation:overview"},

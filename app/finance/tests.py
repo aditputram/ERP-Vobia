@@ -12,6 +12,7 @@ from openpyxl import Workbook
 from audit.models import AuditEvent
 
 from .importers import stage_finance_cutover
+from .catalog import FEATURES
 from .models import Account, JournalEntry, JournalLine
 from .services import account_balances, post_journal
 
@@ -102,6 +103,32 @@ class FinanceJournalTests(TestCase):
         user = get_user_model().objects.create_user(username="legacy", password="test")
         self.client.force_login(user)
         self.assertEqual(self.client.get(reverse("finance:dashboard")).status_code, 403)
+
+    def test_every_requested_finance_workspace_renders(self):
+        self.client.force_login(self.user)
+        for slug in FEATURES:
+            with self.subTest(slug=slug):
+                self.assertEqual(self.client.get(reverse("finance:feature", args=[slug])).status_code, 200)
+
+    def test_finance_workspace_respects_exact_tab_permission(self):
+        user = get_user_model().objects.create_user(
+            username="cashier",
+            password="test",
+            module_access={"finance": "view"},
+            tab_access={"finance": ["other_payment"]},
+        )
+        self.client.force_login(user)
+
+        self.assertEqual(self.client.get(reverse("finance:feature", args=["other-payment"])).status_code, 200)
+        self.assertEqual(self.client.get(reverse("finance:feature", args=["other-deposit"])).status_code, 403)
+
+    def test_cash_workspace_prefills_matching_journal_workflow(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("finance:journal_create"), {"workflow": "bank-transfer"})
+
+        self.assertContains(response, 'name="workflow" value="bank-transfer"')
+        self.assertEqual(response.context["form"].initial["description"], "Bank Transfer")
 
 
 class FinanceCutoverImportTests(TestCase):

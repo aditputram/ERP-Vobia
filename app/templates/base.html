@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="light">
     <title>Vobia Space - {% block title %}ERP{% endblock %}</title>
     <link rel="icon" type="image/png" href="{% static 'img/vobia-tiktok-app-icon.png' %}?v=20260831">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260910-01">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260910-02">
     <script src="{% static 'js/app.js' %}?v=20260829-02" defer></script>
 </head>
 <body>
@@ -125,21 +125,12 @@
                 {% elif current_business_module == 'finance' %}
                 <span class="nav-label">FINANCE</span>
                 {% if tab_permissions.finance.dashboard %}<a class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'finance:dashboard' %}"><span>Dashboard</span></a>{% endif %}
-                {% if tab_permissions.finance.accounts or tab_permissions.finance.journals %}
-                <button class="nav-item nav-group-toggle active" type="button" data-nav-group-toggle="finance-gl" data-nav-group-active="true" aria-expanded="true"><span>General Ledger</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
-                <div class="nav-subitems" data-nav-group-panel="finance-gl">
-                    {% if tab_permissions.finance.accounts %}<a class="nav-subitem {% if request.resolver_match.url_name == 'accounts' %}active{% endif %}" href="{% url 'finance:accounts' %}">Chart of Accounts</a>{% endif %}
-                    {% if tab_permissions.finance.journals %}<a class="nav-subitem {% if 'journal' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'finance:journals' %}">Jurnal Voucher</a>{% endif %}
+                {% for section in finance_nav_sections %}
+                <button class="nav-item nav-group-toggle {% if section.active %}active{% endif %}" type="button" data-nav-group-toggle="finance-{{ section.key }}" data-nav-group-active="{% if section.active %}true{% else %}false{% endif %}" aria-expanded="{% if section.active %}true{% else %}false{% endif %}"><span>{{ section.label }}</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+                <div class="nav-subitems" data-nav-group-panel="finance-{{ section.key }}"{% if not section.active %} hidden{% endif %}>
+                    {% for item in section.items %}<a class="nav-subitem {% if item.active %}active{% endif %}" href="{{ item.href }}">{{ item.label }}</a>{% endfor %}
                 </div>
-                {% endif %}
-                {% if tab_permissions.finance.trial_balance or tab_permissions.finance.balance_sheet or tab_permissions.finance.profit_loss %}
-                <button class="nav-item nav-group-toggle active" type="button" data-nav-group-toggle="finance-report" data-nav-group-active="true" aria-expanded="true"><span>Report</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
-                <div class="nav-subitems" data-nav-group-panel="finance-report">
-                    {% if tab_permissions.finance.trial_balance %}<a class="nav-subitem {% if request.resolver_match.url_name == 'trial_balance' %}active{% endif %}" href="{% url 'finance:trial_balance' %}">Trial Balance</a>{% endif %}
-                    {% if tab_permissions.finance.balance_sheet %}<a class="nav-subitem {% if request.resolver_match.url_name == 'balance_sheet' %}active{% endif %}" href="{% url 'finance:balance_sheet' %}">Balance Sheet</a>{% endif %}
-                    {% if tab_permissions.finance.profit_loss %}<a class="nav-subitem {% if request.resolver_match.url_name == 'profit_loss' %}active{% endif %}" href="{% url 'finance:profit_loss' %}">Profit &amp; Loss</a>{% endif %}
-                </div>
-                {% endif %}
+                {% endfor %}
                 {% else %}
                 <span class="nav-label">SALES</span>
                 {% if tab_permissions.sales.dashboard %}

@@ -1644,7 +1644,16 @@ def production_snapshot(production_order):
             "remaining_qty": max(available_qty - completed_qty, Decimal("0")),
             "waiting_upstream_qty": max(ordered - available_qty, Decimal("0")),
         }
-    if inspected > 0:
+    cut_completed_qty = cmt_quantities[ProductionStage.Stage.CUT]["completed_qty"]
+    make_completed_qty = cmt_quantities[ProductionStage.Stage.MAKE]["completed_qty"]
+    has_cmt_progress = cut_completed_qty > 0 or make_completed_qty > 0 or trim_completed_qty > 0
+    if has_cmt_progress and cut_completed_qty < ordered:
+        current_code, current_label = "CUT", "Cut · Potong"
+    elif has_cmt_progress and make_completed_qty < cut_completed_qty:
+        current_code, current_label = "MAKE", "Make · Jahit"
+    elif has_cmt_progress and trim_completed_qty < make_completed_qty:
+        current_code, current_label = "TRIM", "Trim · Finishing"
+    elif inspected > 0:
         if trim_complete and inspected >= trim_completed_qty:
             current_code, current_label = "QC_COMPLETE", "QC Complete"
         else:
@@ -1673,8 +1682,6 @@ def production_snapshot(production_order):
         plan = None
 
     material_stage = stages.get(ProductionStage.Stage.MATERIAL_PURCHASE)
-    cut_completed_qty = cmt_quantities[ProductionStage.Stage.CUT]["completed_qty"]
-    make_completed_qty = cmt_quantities[ProductionStage.Stage.MAKE]["completed_qty"]
     material_status_display = (
         "Material telah diproses"
         if cut_completed_qty > 0
@@ -1683,7 +1690,13 @@ def production_snapshot(production_order):
     inbound_complete = bool(trim_complete and inspected >= trim_completed_qty and passed > 0 and received >= passed)
     qc_complete = bool(trim_complete and trim_completed_qty > 0 and inspected >= trim_completed_qty)
 
-    if inbound_complete:
+    if has_cmt_progress and cut_completed_qty < ordered:
+        passed_process_label, next_process_label = "Trial Production Approved", "Cut - Potong"
+    elif has_cmt_progress and make_completed_qty < cut_completed_qty:
+        passed_process_label, next_process_label = "Cut - Potong", "Make · Jahit"
+    elif has_cmt_progress and trim_completed_qty < make_completed_qty:
+        passed_process_label, next_process_label = "Make · Jahit", "Trim · Finishing"
+    elif inbound_complete:
         passed_process_label, next_process_label = "Inbound Warehouse", "Completed"
     elif delivering > 0:
         passed_process_label, next_process_label = "Deliver to Warehouse", "Warehouse Receive"

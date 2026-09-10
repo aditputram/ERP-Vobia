@@ -88,6 +88,7 @@ class PurchaseOrder(models.Model):
         INCOMING_PLAN = "INCOMING_PLAN", "Approved Incoming Plan"
         MANUAL_NEW_PRODUCT = "MANUAL_NEW_PRODUCT", "Manual – New Product"
         LEGACY_WIP = "LEGACY_WIP", "PO WIP · outstanding per 31 July 2026"
+        SUPPLEMENTAL_WIP = "SUPPLEMENTAL_WIP", "PO WIP · supplemental import"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     po_number = models.CharField(max_length=40, unique=True, null=True, blank=True)
@@ -148,6 +149,11 @@ class PurchaseOrder(models.Model):
                 raise ValidationError({"migration_cutoff_date": "PO WIP wajib memakai cutoff 31 July 2026."})
             if not self.migration_evidence_reference.strip():
                 raise ValidationError({"migration_evidence_reference": "PO WIP wajib memiliki referensi bukti migrasi."})
+        elif self.source == self.Source.SUPPLEMENTAL_WIP:
+            if self.migration_cutoff_date is not None:
+                raise ValidationError({"migration_cutoff_date": "PO WIP tambahan tidak memakai cutoff opening 31 July 2026."})
+            if not self.migration_evidence_reference.strip():
+                raise ValidationError({"migration_evidence_reference": "PO WIP tambahan wajib memiliki referensi bukti migrasi."})
 
     def delete(self, *args, **kwargs):
         if self.status != self.Status.DRAFT:

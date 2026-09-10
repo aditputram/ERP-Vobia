@@ -724,6 +724,34 @@ class PurchasingWorkflowTests(TestCase):
                 "Tidak boleh untuk PO reguler",
             )
 
+    def test_supplemental_wip_requires_evidence_and_allows_vendor_revision(self):
+        corrected_supplier = Supplier.objects.create(code="MORPH", name="Morph")
+        po = PurchaseOrder(
+            po_number="PO-VOB-08/26-124",
+            issue_month=date(2026, 8, 1),
+            supplier=self.supplier,
+            need_month=date(2026, 8, 1),
+            source=PurchaseOrder.Source.SUPPLEMENTAL_WIP,
+            status=PurchaseOrder.Status.RELEASED,
+            created_by=self.user,
+            released_by=self.user,
+            migration_evidence_reference="PO WIP tambahan.xlsx · test checksum",
+        )
+        po.full_clean()
+        po.save()
+
+        revised = revise_legacy_wip_supplier(
+            po.id,
+            corrected_supplier,
+            self.user,
+            "Koreksi vendor berdasarkan file tambahan.",
+        )
+
+        self.assertEqual(revised.supplier, corrected_supplier)
+        po.migration_cutoff_date = date(2026, 7, 31)
+        with self.assertRaises(ValidationError):
+            po.full_clean()
+
     def test_legacy_wip_vendor_revision_view_requires_reason(self):
         corrected_supplier = Supplier.objects.create(code="HARMONI", name="Harmoni")
         po = PurchaseOrder.objects.create(

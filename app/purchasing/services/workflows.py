@@ -293,7 +293,10 @@ def cancel_po(po_id, actor, reason):
 @transaction.atomic
 def revise_legacy_wip_supplier(po_id, supplier, actor, reason):
     po = PurchaseOrder.objects.select_for_update().select_related("supplier").get(pk=po_id)
-    if po.source != PurchaseOrder.Source.LEGACY_WIP:
+    if po.source not in {
+        PurchaseOrder.Source.LEGACY_WIP,
+        PurchaseOrder.Source.SUPPLEMENTAL_WIP,
+    }:
         raise ValidationError("Revisi vendor ini hanya berlaku untuk PO WIP hasil migrasi.")
     if po.status != PurchaseOrder.Status.RELEASED:
         raise ValidationError("Vendor hanya dapat direvisi pada PO WIP berstatus Released.")

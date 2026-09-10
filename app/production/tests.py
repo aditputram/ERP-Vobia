@@ -348,6 +348,42 @@ class ProductionWorkflowTests(TestCase):
         self.assertEqual(qc.qty_passed, Decimal("98"))
         self.assertTrue(ProductionActivity.objects.filter(action="production_trial_approved").exists())
 
+    def test_added_po_line_reopens_completed_workflow_at_cut(self):
+        self._activate_plan()
+        self._complete_stage(ProductionStage.Stage.MATERIAL_PURCHASE)
+        self._approve_trial()
+        self._complete_stage(ProductionStage.Stage.CUT)
+        self._complete_stage(ProductionStage.Stage.MAKE)
+        self._complete_stage(ProductionStage.Stage.TRIM)
+        record_qc(
+            po_line=self.line,
+            inspected_at=timezone.make_aware(datetime(2026, 8, 30, 10, 0)),
+            qty_inspected=100,
+            qty_passed=100,
+            qty_failed=0,
+            actor=self.user,
+        )
+        extra_sku = SKU.objects.create(
+            sku="SKU-PROD-2",
+            product_variant=self.sku.product_variant,
+            size="XL",
+            current_retail_price=Decimal("299000"),
+            current_master_cogs=Decimal("120000"),
+        )
+        PurchaseOrderLine.objects.create(
+            po=self.po,
+            sku=extra_sku,
+            ordered_qty=Decimal("20"),
+            cogs_snapshot=Decimal("120000"),
+        )
+
+        snapshot = production_snapshot(self.production_order)
+
+        self.assertEqual(snapshot["ordered_qty"], Decimal("120"))
+        self.assertEqual(snapshot["current_code"], "CUT")
+        self.assertEqual(snapshot["current_label"], "Cut · Potong")
+        self.assertEqual(snapshot["next_process_label"], "Cut - Potong")
+
     def test_material_arrival_date_is_required_before_material_stage_complete(self):
         with self.assertRaisesMessage(ValidationError, "Tanggal material datang"):
             update_stage(

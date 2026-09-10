@@ -82,6 +82,8 @@ class FinanceJournalTests(TestCase):
             with self.subTest(name=name):
                 self.assertEqual(self.client.get(reverse(f"finance:{name}")).status_code, 200)
 
+        self.assertContains(self.client.get(reverse("finance:dashboard")), "Finance UAT")
+
     def test_inventory_account_is_included_as_balance_sheet_asset(self):
         inventory = Account.objects.create(code="110401", name="Inventory", account_type="INTR")
         entry = JournalEntry.objects.create(
@@ -129,6 +131,32 @@ class FinanceJournalTests(TestCase):
 
         self.assertContains(response, 'name="workflow" value="bank-transfer"')
         self.assertEqual(response.context["form"].initial["description"], "Bank Transfer")
+
+    def test_created_journal_is_marked_as_uat(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("finance:journal_create"),
+            {
+                "entry_date": "2026-10-10",
+                "description": "UAT payment",
+                "reference": "UAT-001",
+                "lines-TOTAL_FORMS": "2",
+                "lines-INITIAL_FORMS": "0",
+                "lines-MIN_NUM_FORMS": "0",
+                "lines-MAX_NUM_FORMS": "1000",
+                "lines-0-account": str(self.cash.id),
+                "lines-0-description": "",
+                "lines-0-debit": "100",
+                "lines-0-credit": "0",
+                "lines-1-account": str(self.capital.id),
+                "lines-1-description": "",
+                "lines-1-debit": "0",
+                "lines-1-credit": "100",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        created = JournalEntry.objects.exclude(pk=self.entry.pk).get()
+        self.assertEqual(created.source_metadata["environment"], "UAT")
 
 
 class FinanceCutoverImportTests(TestCase):

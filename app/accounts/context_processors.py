@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.urls import reverse
 
 from finance.catalog import FINANCE_NAV_SECTIONS, ROUTES as FINANCE_ROUTES
@@ -64,4 +65,5 @@ def tab_permissions(request):
             )
         ),
         "finance_nav_sections": finance_nav_sections,
+        "finance_uat_mode": settings.FINANCE_UAT_MODE,
     }

@@ -56,7 +56,7 @@ MODULES = (
         "name": "Finance",
         "eyebrow": "FINANCIAL CONTROL",
         "description": "Cash flow, payable, receivable, budgeting, dan financial reporting.",
-        "status": "Fondasi aktif",
+        "status": "UAT",
         "available": True,
         "accent": "blue",
         "image": "img/modules/module-finance.jpg",

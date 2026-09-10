@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Finance · Vobia ERP{% endblock %}
 {% block content %}
-<header class="page-header"><div><p class="eyebrow">FINANCE · DASHBOARD</p><h1>Finance</h1></div>{% if can_edit %}<div class="header-actions"><a class="primary-button" href="{% url 'finance:journal_create' %}">Buat Jurnal Voucher</a></div>{% endif %}</header>
+<header class="page-header"><div><p class="eyebrow">FINANCE · {% if finance_uat_mode %}UAT{% else %}DASHBOARD{% endif %}</p><h1>Finance{% if finance_uat_mode %} UAT{% endif %}</h1></div>{% if can_edit %}<div class="header-actions"><a class="primary-button" href="{% url 'finance:journal_create' %}">Buat Jurnal Voucher</a></div>{% endif %}</header>
 <section class="metric-grid five">
     <article class="metric-card"><span>Cutover</span><strong>{{ cutover_date|date:"d M Y" }}</strong></article>
     <article class="metric-card"><span>Akun</span><strong>{{ account_count|floatformat:"0g" }}</strong></article>

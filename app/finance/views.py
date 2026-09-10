@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import DecimalField, ExpressionWrapper, F, Q, Sum
@@ -85,7 +86,10 @@ def journal_create(request):
                 entry = form.save(commit=False)
                 entry.number = next_journal_number(entry.entry_date)
                 entry.created_by = request.user
-                entry.source_metadata = {"workflow": workflow} if workflow else {}
+                entry.source_metadata = {
+                    **({"workflow": workflow} if workflow else {}),
+                    **({"environment": "UAT"} if settings.FINANCE_UAT_MODE else {}),
+                }
                 entry.full_clean()
                 entry.save()
                 lines = formset.save(commit=False)

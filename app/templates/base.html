@@ -19,7 +19,7 @@
             </a>
 
             <a class="module-switcher" href="{% url 'dashboard:index' %}">
-                <span>{% if current_business_module == 'rnd' %}RnD{% elif current_business_module == 'marketing' %}Marketing{% elif current_business_module == 'operation' %}Operation{% elif current_business_module == 'finance' %}Finance{% else %}Sales{% endif %}</span>
+                <span>{% if current_business_module == 'rnd' %}RnD{% elif current_business_module == 'marketing' %}Marketing{% elif current_business_module == 'operation' %}Operation{% elif current_business_module == 'finance' %}Finance{% if finance_uat_mode %} · UAT{% endif %}{% else %}Sales{% endif %}</span>
                 <small>Ganti modul</small>
             </a>
 
@@ -123,7 +123,7 @@
                 </div>
                 {% endif %}
                 {% elif current_business_module == 'finance' %}
-                <span class="nav-label">FINANCE</span>
+                <span class="nav-label">FINANCE{% if finance_uat_mode %} · UAT{% endif %}</span>
                 {% if tab_permissions.finance.dashboard %}<a class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'finance:dashboard' %}"><span>Dashboard</span></a>{% endif %}
                 {% for section in finance_nav_sections %}
                 <button class="nav-item nav-group-toggle {% if section.active %}active{% endif %}" type="button" data-nav-group-toggle="finance-{{ section.key }}" data-nav-group-active="{% if section.active %}true{% else %}false{% endif %}" aria-expanded="{% if section.active %}true{% else %}false{% endif %}"><span>{{ section.label }}</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>

@@ -38,6 +38,8 @@ services:
         value: "0"
       - key: VOBIA_ALLOW_INITIAL_SETUP
         value: "0"
+      - key: FINANCE_UAT_MODE
+        value: "1"
       - key: VOBIA_PRIVATE_UPLOAD_ROOT
         value: /var/data/private_uploads
       - key: INSTAGRAM_CONNECTION_DIR

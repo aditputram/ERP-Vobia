@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Profit & Loss · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">FINANCIAL REPORT</p><h1>Profit &amp; Loss</h1></div></header>
+<p class="finance-control-note">Aktivitas operasional dihitung mulai 1 September 2026; jurnal opening cutover tidak masuk laba rugi periode.</p>
+<form method="get" class="panel inventory-filter"><div class="inventory-filter-grid"><label>Mulai<input type="date" name="start" value="{{ start|date:'Y-m-d' }}"></label><label>Sampai<input type="date" name="end" value="{{ end|date:'Y-m-d' }}"></label><button class="primary-button" type="submit">Tampilkan</button></div></form>
+<section class="metric-grid section-gap"><article class="metric-card"><span>Pendapatan</span><strong>Rp {{ revenue_total|floatformat:"2g" }}</strong></article><article class="metric-card"><span>Beban</span><strong>Rp {{ expense_total|floatformat:"2g" }}</strong></article><article class="metric-card"><span>Laba / Rugi</span><strong>Rp {{ profit|floatformat:"2g" }}</strong></article></section>
+<section class="panel"><div class="panel-header"><div><h2>Rincian akun</h2></div></div><div class="table-wrap"><table><thead><tr><th>Kode</th><th>Akun</th><th>Kelompok</th><th>Nilai</th></tr></thead><tbody>{% for row in revenue %}<tr><td>{{ row.account.code }}</td><td>{{ row.account.name }}</td><td>Pendapatan</td><td>Rp {{ row.amount|floatformat:"2g" }}</td></tr>{% endfor %}{% for row in expense %}<tr><td>{{ row.account.code }}</td><td>{{ row.account.name }}</td><td>Beban</td><td>Rp {{ row.amount|floatformat:"2g" }}</td></tr>{% empty %}{% if not revenue %}<tr><td colspan="4">Belum ada transaksi Posted pada periode ini.</td></tr>{% endif %}{% endfor %}</tbody></table></div></section>
+{% endblock %}

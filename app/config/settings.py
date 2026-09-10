@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     "traffic",
     "dashboard",
     "rnd",
+    "finance",
 ]
 
 MIDDLEWARE = [

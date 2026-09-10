@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Finance · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">FINANCE · DASHBOARD</p><h1>Finance</h1></div>{% if can_edit %}<div class="header-actions"><a class="primary-button" href="{% url 'finance:journal_create' %}">Buat Jurnal Voucher</a></div>{% endif %}</header>
+<section class="metric-grid five">
+    <article class="metric-card"><span>Cutover</span><strong>{{ cutover_date|date:"d M Y" }}</strong></article>
+    <article class="metric-card"><span>Akun</span><strong>{{ account_count|floatformat:"0g" }}</strong></article>
+    <article class="metric-card"><span>Akun transaksi</span><strong>{{ postable_count|floatformat:"0g" }}</strong></article>
+    <article class="metric-card"><span>Draft jurnal</span><strong>{{ draft_count|floatformat:"0g" }}</strong></article>
+    <article class="metric-card"><span>Posted jurnal</span><strong>{{ posted_count|floatformat:"0g" }}</strong></article>
+</section>
+<section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">OPENING BALANCE</p><h2>Saldo awal 1 September 2026</h2></div>{% if opening %}<span class="status-badge {% if opening.status == 'POSTED' %}ready{% endif %}">{{ opening.get_status_display }}</span>{% endif %}</div>
+{% if opening %}<div class="finance-opening-grid"><div><span>Referensi</span><strong>{{ opening.reference }}</strong></div><div><span>Total Debit</span><strong>Rp {{ opening.debit_total|floatformat:"2g" }}</strong></div><div><span>Total Kredit</span><strong>Rp {{ opening.credit_total|floatformat:"2g" }}</strong></div><a class="secondary-button compact" href="{% url 'finance:journal_detail' opening.id %}">Review opening journal</a></div>{% else %}<div class="empty-state">Chart of Accounts dan Trial Balance belum di-stage.</div>{% endif %}</section>
+{% endblock %}

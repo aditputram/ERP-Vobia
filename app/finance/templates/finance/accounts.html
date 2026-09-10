@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Chart of Accounts · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">GENERAL LEDGER</p><h1>Chart of Accounts</h1></div></header>
+<form method="get" class="panel inventory-filter"><div class="inventory-filter-grid"><label class="inventory-search-field">Cari akun<input type="search" name="q" value="{{ query }}" placeholder="Kode atau nama akun"></label><button class="primary-button" type="submit">Cari</button><a class="secondary-button" href="{% url 'finance:accounts' %}">Reset</a></div></form>
+<section class="panel section-gap"><div class="table-wrap warehouse-table-wrap"><table><thead><tr><th>Kode</th><th>Nama Akun</th><th>Tipe</th><th>Akun Induk</th><th>Mata Uang</th><th>Status</th></tr></thead><tbody>{% for account in accounts %}<tr><td><strong class="code-label">{{ account.code }}</strong></td><td>{{ account.name }}</td><td>{{ account.account_type }}</td><td>{% if account.parent %}{{ account.parent.code }} · {{ account.parent.name }}{% else %}—{% endif %}</td><td>{{ account.currency }}</td><td><span class="status-badge {% if account.is_postable %}ready{% endif %}">{% if account.is_postable %}Transaksi{% else %}Induk{% endif %}</span></td></tr>{% empty %}<tr><td colspan="6">Tidak ada akun.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

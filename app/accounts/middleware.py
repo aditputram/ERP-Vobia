@@ -13,6 +13,7 @@ MODULE_PATHS = (
     ("/inventory/", "operation"),
     ("/rnd/", "rnd"),
     ("/marketing/", "marketing"),
+    ("/finance/", "finance"),
     ("/master-data/", "master_data"),
     ("/imports/master/", "master_data"),
     ("/reconciliation/", "reconciliation"),

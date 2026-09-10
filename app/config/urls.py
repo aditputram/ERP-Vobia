@@ -24,5 +24,6 @@ urlpatterns = [
     path("reconciliation/", include("reconciliation.urls")),
     path("master-data/", include("master_data.urls")),
     path("rnd/", include("rnd.urls")),
+    path("finance/", include("finance.urls")),
     path("", include("dashboard.urls")),
 ]

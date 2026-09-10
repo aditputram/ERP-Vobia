@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Trial Balance · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">FINANCIAL REPORT</p><h1>Trial Balance</h1></div></header>
+<form method="get" class="panel inventory-filter"><div class="inventory-filter-grid"><label>Per tanggal<input type="date" name="as_of" value="{{ as_of|date:'Y-m-d' }}"></label><label>Mode<select name="mode"><option value="posted">Posted</option><option value="preview" {% if include_draft %}selected{% endif %}>Preview termasuk Draft</option></select></label><button class="primary-button" type="submit">Tampilkan</button></div></form>
+<section class="panel section-gap"><div class="table-wrap warehouse-table-wrap"><table><thead><tr><th>Kode</th><th>Nama Akun</th><th>Debit</th><th>Kredit</th></tr></thead><tbody>{% for row in rows %}<tr><td>{{ row.account.code }}</td><td>{% if not row.account.is_postable %}<strong>{{ row.account.name }}</strong>{% else %}{{ row.account.name }}{% endif %}</td><td>{% if row.debit_balance %}Rp {{ row.debit_balance|floatformat:"2g" }}{% else %}—{% endif %}</td><td>{% if row.credit_balance %}Rp {{ row.credit_balance|floatformat:"2g" }}{% else %}—{% endif %}</td></tr>{% empty %}<tr><td colspan="4">Belum ada saldo Posted.</td></tr>{% endfor %}</tbody><tfoot><tr><td colspan="2">TOTAL</td><td>Rp {{ debit|floatformat:"2g" }}</td><td>Rp {{ credit|floatformat:"2g" }}</td></tr></tfoot></table></div></section>
+{% endblock %}

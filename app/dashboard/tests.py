@@ -66,7 +66,7 @@ class DashboardAccessTests(TestCase):
         self.client.force_login(user)
 
         dashboard = self.client.get(reverse("dashboard:index"))
-        self.assertContains(dashboard, '<button class="module-card-action" type="button" data-access-warning>', count=3)
+        self.assertContains(dashboard, '<button class="module-card-action" type="button" data-access-warning>', count=4)
         self.assertContains(dashboard, "yang tidak berkepentingan dilarang masuk!")
 
         denied = self.client.get(reverse("dashboard:enter_module", args=["operation"]), follow=True)
@@ -150,6 +150,16 @@ class DashboardAccessTests(TestCase):
         self.assertFalse(rnd_module["accessible"])
         self.assertEqual(self.client.get(reverse("rnd:dashboard")).status_code, 403)
 
+    def test_finance_module_opens_foundation_dashboard(self):
+        user = get_user_model().objects.create_superuser(
+            username="vobiasuperadmin",
+            password="AmanSekali-ERP-2026!",
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard:enter_module", args=["finance"]))
+        self.assertRedirects(response, reverse("finance:dashboard"))
+        self.assertEqual(self.client.session["active_module"], "finance")
+
     def test_future_module_stays_on_selector_with_clear_status(self):
         user = get_user_model().objects.create_superuser(
             username="vobiasuperadmin",
@@ -157,11 +167,11 @@ class DashboardAccessTests(TestCase):
         )
         self.client.force_login(user)
         response = self.client.get(
-            reverse("dashboard:enter_module", args=["finance"]),
+            reverse("dashboard:enter_module", args=["human-resource"]),
             follow=True,
         )
         self.assertRedirects(response, reverse("dashboard:index"))
-        self.assertContains(response, "Modul Finance sudah masuk roadmap")
+        self.assertContains(response, "Modul Human Resource sudah masuk roadmap")
 
     def test_all_operational_modules_render_for_superadmin(self):
         user = get_user_model().objects.create_superuser(

@@ -3,6 +3,7 @@ MODULES = (
     ("operation", "Operation"),
     ("rnd", "RnD"),
     ("marketing", "Marketing"),
+    ("finance", "Finance"),
     ("master_data", "Master Data"),
     ("reconciliation", "Reconciliation"),
     ("guide", "Panduan & UAT"),
@@ -229,6 +230,19 @@ MODULE_TABS = {
             ),
         ),
     ),
+    "finance": (
+        ("dashboard", "Dashboard", "Finance", ("finance:dashboard",)),
+        ("accounts", "Chart of Accounts", "General Ledger", ("finance:accounts",)),
+        (
+            "journals",
+            "Jurnal Voucher",
+            "General Ledger",
+            ("finance:journals", "finance:journal_create", "finance:journal_detail", "finance:journal_approve"),
+        ),
+        ("trial_balance", "Trial Balance", "Report", ("finance:trial_balance",)),
+        ("balance_sheet", "Balance Sheet", "Report", ("finance:balance_sheet",)),
+        ("profit_loss", "Profit & Loss", "Report", ("finance:profit_loss",)),
+    ),
     "master_data": (
         (
             "master_data",
@@ -292,6 +306,14 @@ TAB_ENTRY_ROUTES = {
         "partnerships": "dashboard:partnership_list",
         "upcoming_collections": "dashboard:upcoming_collection_list",
     },
+    "finance": {
+        "dashboard": "finance:dashboard",
+        "accounts": "finance:accounts",
+        "journals": "finance:journals",
+        "trial_balance": "finance:trial_balance",
+        "balance_sheet": "finance:balance_sheet",
+        "profit_loss": "finance:profit_loss",
+    },
     "master_data": {"master_data": "master_data:overview"},
     "reconciliation": {"reconciliation": "reconciliation:overview"},
     "guide": {"guide": "dashboard:guide"},
@@ -309,7 +331,7 @@ for module, tabs in MODULE_TABS.items():
 
 
 def module_level(user, module):
-    default_level = "none" if module == "rnd" else "approve"
+    default_level = "none" if module in {"rnd", "finance"} else "approve"
     return (getattr(user, "module_access", {}) or {}).get(module, default_level)
 
 
@@ -337,6 +359,7 @@ def first_allowed_route(user, module):
         "operation": "merchandising_dashboard",
         "rnd": "collections",
         "marketing": "dashboard",
+        "finance": "dashboard",
     }
     default_tab = default_tabs.get(module)
     if default_tab in allowed:

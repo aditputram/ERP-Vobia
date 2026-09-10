@@ -321,6 +321,13 @@ tbody tr:last-child td { border-bottom: 0; }
 .ratio-alert { min-width: 54px; display: inline-flex; justify-content: center; padding: 6px 8px; border: 1px solid #e2b4b1; border-radius: 7px; color: var(--danger); background: #fde3e1; font-weight: 900; }
 .danger-button { color: var(--danger); border-color: #e2b4b1; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
+.finance-opening-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: end; gap: 12px; }
+.finance-opening-grid > div { display: grid; gap: 5px; }
+.finance-opening-grid span, .finance-journal-form label { color: var(--muted); font-size: 9px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+.finance-journal-form select, .finance-journal-form input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: white; }
+.finance-journal-form td { min-width: 150px; vertical-align: top; }
+.finance-journal-form td:first-child { min-width: 260px; }
+.finance-control-note { margin: 0; color: var(--muted); }
 .guide-list { display: grid; gap: 10px; margin: 0; padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .guide-flow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
 .guide-step { display: grid; grid-template-columns: 42px 1fr; gap: 14px; }
@@ -897,6 +904,7 @@ tbody tr:last-child td { border-bottom: 0; }
     .user-list-header { grid-template-columns: 42px minmax(0, 1fr); }
     .user-list-header .primary-button { grid-column: 2; justify-self: start; }
     .metric-grid, .metric-grid.five, .metric-grid.six, .dashboard-grid { grid-template-columns: 1fr 1fr; }
+    .finance-opening-grid { grid-template-columns: 1fr 1fr; }
     .rnd-product-grid { grid-template-columns: 1fr; }
     .rnd-design-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .panel.span-two, .panel.span-three { grid-column: 1 / -1; }
@@ -951,6 +959,7 @@ tbody tr:last-child td { border-bottom: 0; }
 
 @media (max-width: 480px) {
     .metric-grid, .metric-grid.five, .metric-grid.six, .dashboard-grid { grid-template-columns: 1fr; }
+    .finance-opening-grid { grid-template-columns: 1fr; }
     .panel.span-two, .panel.span-three { grid-column: auto; }
     .rnd-document-link { align-items: flex-start; flex-direction: column; }
 }

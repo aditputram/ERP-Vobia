@@ -14,6 +14,8 @@ def tab_permissions(request):
     namespace = getattr(getattr(request, "resolver_match", None), "namespace", "")
     if namespace == "rnd":
         current_module = "rnd"
+    elif namespace == "finance":
+        current_module = "finance"
     elif request.path.startswith("/marketing/"):
         current_module = "marketing"
     elif namespace in {"merchandising", "purchasing", "production", "inventory"}:

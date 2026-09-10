@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Buat Jurnal · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">GENERAL LEDGER</p><h1>Buat Jurnal Voucher</h1></div></header>
+<form method="post" class="panel finance-journal-form">{% csrf_token %}{{ form.non_field_errors }}<div class="form-grid">{% for field in form %}<label>{{ field.label }}{{ field }}{{ field.errors }}</label>{% endfor %}</div>
+<div class="panel-header section-gap"><div><h2>Baris jurnal</h2></div><button class="secondary-button compact" type="button" data-add-journal-line>+ Tambah Baris</button></div>{{ formset.management_form }}{{ formset.non_form_errors }}
+<div class="table-wrap"><table><thead><tr><th>Akun</th><th>Keterangan</th><th>Debit</th><th>Kredit</th><th></th></tr></thead><tbody data-journal-lines>{% for line_form in formset %}<tr data-journal-line>{{ line_form.id }}<td>{{ line_form.account }}{{ line_form.account.errors }}</td><td>{{ line_form.description }}</td><td>{{ line_form.debit }}</td><td>{{ line_form.credit }}</td><td>{{ line_form.DELETE }} <span>Hapus</span></td></tr>{% endfor %}</tbody></table></div>
+<template data-empty-journal-line><tr data-journal-line>{{ formset.empty_form.id }}<td>{{ formset.empty_form.account }}</td><td>{{ formset.empty_form.description }}</td><td>{{ formset.empty_form.debit }}</td><td>{{ formset.empty_form.credit }}</td><td>{{ formset.empty_form.DELETE }} <span>Hapus</span></td></tr></template>
+<button class="primary-button section-gap" type="submit">Simpan Draft</button></form>
+<script>document.querySelector('[data-add-journal-line]').addEventListener('click',()=>{const total=document.querySelector('[name="lines-TOTAL_FORMS"]');const html=document.querySelector('[data-empty-journal-line]').innerHTML.replaceAll('__prefix__',total.value);document.querySelector('[data-journal-lines]').insertAdjacentHTML('beforeend',html);total.value=Number(total.value)+1;});</script>
+{% endblock %}

@@ -7,7 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.http import HttpResponse, HttpResponseNotAllowed
+from django.http import Http404, HttpResponse, HttpResponseNotAllowed
 from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -24,6 +24,7 @@ from sales.models import SalesOrder
 from imports.services.storage import DuplicateRawFile
 
 from .forms import AdjustmentForm, DeliveryReceiveForm, FIFOOpeningImportUploadForm, InboundForm, OpeningForm, QCForm, ReturnForm, WarehouseForm
+from .documents import build_inbound_receipt_pdf
 from .models import (
     FIFOLayer,
     FIFOOpeningImportBatch,
@@ -733,6 +734,29 @@ def inbound(request):
             "receipts": receipts,
         },
     )
+
+
+@login_required
+def inbound_po_receipt_pdf(request, po_id):
+    po = get_object_or_404(
+        PurchaseOrder.objects.select_related("supplier").prefetch_related("lines"),
+        pk=po_id,
+    )
+    receipts = InboundReceipt.objects.filter(po_line__po=po).select_related(
+        "po_line__sku__product_variant__product",
+        "warehouse",
+        "recorded_by",
+        "delivery_activity__delivery_order",
+    ).order_by("inbound_date", "created_at")
+    if not receipts.exists():
+        raise Http404("PO belum memiliki actual inbound.")
+    response = HttpResponse(
+        build_inbound_receipt_pdf(po=po, receipts=receipts),
+        content_type="application/pdf",
+    )
+    safe_number = po.po_number.replace("/", "-")
+    response["Content-Disposition"] = f'attachment; filename="VOBIA-Inbound-{safe_number}.pdf"'
+    return response
 
 
 @login_required

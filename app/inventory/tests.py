@@ -11,6 +11,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
+from pypdf import PdfReader
 
 from accounts.models import User
 from audit.models import AuditEvent
@@ -124,6 +125,44 @@ class InventoryWorkflowTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 workbook = load_workbook(io.BytesIO(response.content), read_only=True)
                 self.assertEqual(workbook.sheetnames, sheets)
+
+    def test_inbound_receipt_pdf_is_grouped_by_po(self):
+        self.client.force_login(self.user)
+        record_qc(
+            po_line=self.po_line,
+            inspected_at=timezone.make_aware(datetime(2026, 9, 5, 10, 0)),
+            qty_inspected=10,
+            qty_passed=10,
+            qty_failed=0,
+            actor=self.user,
+        )
+        record_inbound(
+            po_line=self.po_line,
+            inbound_date=date(2026, 9, 6),
+            received_qty=4,
+            warehouse=self.warehouse,
+            reference="GRN-PDF-001",
+            actor=self.user,
+        )
+        record_inbound(
+            po_line=self.po_line,
+            inbound_date=date(2026, 9, 8),
+            received_qty=6,
+            warehouse=self.warehouse,
+            reference="GRN-PDF-002",
+            actor=self.user,
+        )
+
+        response = self.client.get(reverse("inventory:inbound_po_receipt_pdf", args=[self.po.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("VOBIA-Inbound-PO-VOB-09-26-001.pdf", response["Content-Disposition"])
+        pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(response.content)).pages)
+        self.assertIn(self.po.po_number, pdf_text)
+        self.assertIn("06/09/2026", pdf_text)
+        self.assertIn("08/09/2026", pdf_text)
+        self.assertIn("10 pcs", pdf_text)
 
     def test_qc_then_partial_inbound_creates_actual_layer_only_after_receipt(self):
         inspected_at = timezone.make_aware(datetime(2026, 9, 5, 10, 0))

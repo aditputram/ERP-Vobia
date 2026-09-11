@@ -120,7 +120,7 @@ def _export_turnover(rows, *, sku_type):
     append_table(
         sheet,
         (
-            "Date", "Warehouse", "Parent SKU" if sku_type == "parent" else "SKU", "Movement",
+            "Date", "Warehouse", "Parent SKU" if sku_type == "parent" else "SKU", "Product", "Movement",
             "Direction", "Qty", "Signed Qty", "Allocated Cost", "Balance Qty", "Balance Value",
             "Reference", "Ledger Key",
         ),
@@ -129,6 +129,7 @@ def _export_turnover(rows, *, sku_type):
                 row["date"],
                 row["warehouse_name"],
                 row["parent_sku"] if sku_type == "parent" else row["sku"].sku,
+                row["product_name"] if sku_type == "parent" else row["sku"].product_variant.product.name,
                 row["type_label"],
                 row["direction"],
                 row["quantity"],
@@ -141,7 +142,7 @@ def _export_turnover(rows, *, sku_type):
             )
             for row in rows
         ),
-        number_formats={6: "#,##0", 7: "#,##0", 8: "Rp #,##0", 9: "#,##0", 10: "Rp #,##0"},
+        number_formats={7: "#,##0", 8: "#,##0", 9: "Rp #,##0", 10: "#,##0", 11: "Rp #,##0"},
     )
     return workbook_response(workbook, f"VOBIA-Inventory-Turnover-{timezone.localdate():%Y-%m-%d}.xlsx")
 
@@ -172,7 +173,7 @@ def _export_inbound(delivery_orders, completed_delivery_orders, outstanding, rec
     completed_sheet = workbook.create_sheet("Completed Delivery")
     append_table(
         completed_sheet,
-        ("No. DO", "Jenis", "Tanggal Kirim", "Tanggal Diterima", "PO", "Vendor", "Qty Dikirim", "Qty Received", "Status"),
+        ("No. DO", "Jenis", "Tanggal Kirim", "Tanggal Diterima", "PO", "Vendor", "Product", "Qty Dikirim", "Qty Received", "Status"),
         (
             (
                 shipment["delivery_order"].number,
@@ -181,13 +182,14 @@ def _export_inbound(delivery_orders, completed_delivery_orders, outstanding, rec
                 shipment["received_date"],
                 shipment["production_order"].po.po_number,
                 shipment["production_order"].po.supplier.name,
+                ", ".join(shipment["product_names"]),
                 shipment["shipped"],
                 shipment["received"],
                 "Received",
             )
             for shipment in completed_delivery_orders
         ),
-        number_formats={7: "#,##0", 8: "#,##0"},
+        number_formats={8: "#,##0", 9: "#,##0"},
     )
     outstanding_sheet = workbook.create_sheet("Outstanding PO")
     append_table(
@@ -673,6 +675,7 @@ def inbound(request):
                 "received_date": None,
                 "actor": delivery.actor,
                 "kind_label": row["kind_label"],
+                "product_names": set(),
                 "rows": [],
                 "shipped": 0,
                 "received": 0,
@@ -681,6 +684,7 @@ def inbound(request):
             },
         )
         group["rows"].append(row)
+        group["product_names"].add(delivery.po_line.sku.product_variant.product.name)
         group["shipped"] += row["shipped"]
         group["received"] += row["received"]
         group["remaining"] += row["remaining"]
@@ -691,6 +695,8 @@ def inbound(request):
             group["received_date"] = row["received_date"]
         if selected_delivery and delivery.id == selected_delivery["delivery"].id:
             group["open"] = True
+    for group in delivery_order_map.values():
+        group["product_names"] = sorted(group["product_names"], key=str.casefold)
     delivery_orders = [group for group in delivery_order_map.values() if group["remaining"]]
     completed_delivery_orders = [
         group for group in delivery_order_map.values() if not group["remaining"] and group["received"]

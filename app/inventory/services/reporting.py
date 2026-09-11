@@ -283,6 +283,7 @@ def parent_movement_ledger_rows(rows):
             "type_label": row["type_label"],
             "product_id": product.id,
             "parent_sku": parent_sku,
+            "product_name": product.name,
             "quantity": ZERO,
             "signed_quantity": ZERO,
             "allocated_cost": ZERO,

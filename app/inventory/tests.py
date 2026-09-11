@@ -126,6 +126,68 @@ class InventoryWorkflowTests(TestCase):
                 workbook = load_workbook(io.BytesIO(response.content), read_only=True)
                 self.assertEqual(workbook.sheetnames, sheets)
 
+    def test_completed_delivery_and_turnover_show_product_name(self):
+        self.client.force_login(self.user)
+        record_qc(
+            po_line=self.po_line,
+            inspected_at=timezone.make_aware(datetime(2026, 9, 5, 10, 0)),
+            qty_inspected=10,
+            qty_passed=10,
+            qty_failed=0,
+            actor=self.user,
+        )
+        delivery_order = ProductionDeliveryOrder.objects.create(
+            number="DOP.VOB-09/26-001",
+            issue_month=date(2026, 9, 1),
+            sequence=1,
+            delivery_date=date(2026, 9, 6),
+            production_order=self.production_order,
+            created_by=self.user,
+        )
+        delivery = ProductionActivity.objects.create(
+            production_order=self.production_order,
+            action="warehouse_delivery",
+            entry_kind=ProductionActivity.EntryKind.ACTIVITY,
+            activity_type=ProductionActivity.ActivityType.WAREHOUSE_DELIVERY,
+            activity_date=date(2026, 9, 6),
+            quantity=Decimal("10"),
+            po_line=self.po_line,
+            delivery_order=delivery_order,
+            description="Deliver to warehouse",
+            actor=self.user,
+        )
+        record_inbound(
+            po_line=self.po_line,
+            delivery_activity=delivery,
+            inbound_date=date(2026, 9, 6),
+            received_qty=10,
+            warehouse=self.warehouse,
+            reference="GRN-PRODUCT-NAME",
+            actor=self.user,
+        )
+
+        inbound_page = self.client.get(reverse("inventory:inbound"))
+        self.assertEqual(inbound_page.context["completed_delivery_orders"][0]["product_names"], ["Product"])
+        self.assertContains(inbound_page, "<th>Product</th>", html=True)
+
+        turnover_page = self.client.get(reverse("inventory:turnover"), {"movement_type": "INCOMING"})
+        self.assertContains(turnover_page, "<th>Product</th>", html=True)
+        self.assertContains(turnover_page, "<td>Product</td>", html=True)
+
+        export = self.client.get(reverse("inventory:turnover"), {"movement_type": "INCOMING", "export": "xlsx"})
+        workbook = load_workbook(io.BytesIO(export.content), read_only=True)
+        sheet = workbook["Inventory Turnover"]
+        self.assertEqual(sheet["D1"].value, "Product")
+        self.assertEqual(sheet["D2"].value, "Product")
+        workbook.close()
+
+        export = self.client.get(reverse("inventory:inbound"), {"export": "xlsx"})
+        workbook = load_workbook(io.BytesIO(export.content), read_only=True)
+        sheet = workbook["Completed Delivery"]
+        self.assertEqual(sheet["G1"].value, "Product")
+        self.assertEqual(sheet["G2"].value, "Product")
+        workbook.close()
+
     def test_inbound_receipt_pdf_is_grouped_by_po(self):
         self.client.force_login(self.user)
         record_qc(

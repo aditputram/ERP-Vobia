@@ -819,6 +819,11 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(denied.status_code, 403)
 
         self.client.force_login(self.admin)
+        submitted_page = self.client.get(reverse("rnd:product_detail", args=[product.id]))
+        self.assertContains(submitted_page, "Approve Dokumen")
+        self.assertContains(submitted_page, "Reject Dokumen")
+        self.assertContains(submitted_page, "Minta Revisi")
+        self.assertContains(submitted_page, "Notes revisi")
         missing_note = self.client.post(
             reverse("rnd:product_request_revision", args=[product.id]),
             {"revision_target": DevelopmentProductDocumentRevision.RevisionTarget.MOCKUP},

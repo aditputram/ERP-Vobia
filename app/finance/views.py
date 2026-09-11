@@ -18,7 +18,13 @@ from accounts.access import can_access_tab, module_level
 from .catalog import FEATURES, FINANCE_NAV_SECTIONS
 from .forms import AccountForm, JournalEntryForm, JournalLineFormSet
 from .models import Account, FINANCE_CUTOVER_DATE, FINANCE_OPENING_DATE, JournalEntry
-from .services import account_balances, next_journal_number, post_journal
+from .services import (
+    account_balances,
+    account_opening_balance,
+    next_journal_number,
+    post_journal,
+    set_account_opening_balance,
+)
 
 
 def _selected_date(request, key, fallback):
@@ -60,6 +66,7 @@ def account_list(request):
             return HttpResponseForbidden("Akun ini hanya memiliki akses lihat.")
         before_values = None
         if editing_account:
+            opening_before = account_opening_balance(editing_account)
             before_values = {
                 "code": editing_account.code,
                 "name": editing_account.name,
@@ -68,33 +75,49 @@ def account_list(request):
                 "currency": editing_account.currency,
                 "is_postable": editing_account.is_postable,
                 "is_active": editing_account.is_active,
+                "opening_balance": str(opening_before["opening_balance"]),
+                "opening_side": opening_before["opening_side"],
             }
         account_form = AccountForm(request.POST, instance=editing_account)
         if account_form.is_valid():
-            account = account_form.save()
-            action = "finance_account_updated" if editing_account else "finance_account_created"
-            after_values = {
-                "code": account.code,
-                "name": account.name,
-                "account_type": account.account_type,
-                "parent": account.parent.code if account.parent else "",
-                "currency": account.currency,
-                "is_postable": account.is_postable,
-                "is_active": account.is_active,
-            }
-            record_audit(
-                actor=request.user,
-                action=action,
-                entity_type="finance.account",
-                entity_id=account.id,
-                before_values=before_values,
-                after_values=after_values,
-            )
-            verb = "diperbarui" if editing_account else "ditambahkan"
-            messages.success(request, f"COA {account.code} · {account.name} berhasil {verb}.")
-            return redirect("finance:accounts")
+            try:
+                with transaction.atomic():
+                    account = account_form.save()
+                    set_account_opening_balance(
+                        account=account,
+                        amount=account_form.cleaned_data["opening_balance"],
+                        side=account_form.cleaned_data["opening_side"],
+                        actor=request.user,
+                    )
+                    action = "finance_account_updated" if editing_account else "finance_account_created"
+                    after_values = {
+                        "code": account.code,
+                        "name": account.name,
+                        "account_type": account.account_type,
+                        "parent": account.parent.code if account.parent else "",
+                        "currency": account.currency,
+                        "is_postable": account.is_postable,
+                        "is_active": account.is_active,
+                        "opening_balance": str(account_form.cleaned_data["opening_balance"] or Decimal("0")),
+                        "opening_side": account_form.cleaned_data["opening_side"],
+                    }
+                    record_audit(
+                        actor=request.user,
+                        action=action,
+                        entity_type="finance.account",
+                        entity_id=account.id,
+                        before_values=before_values,
+                        after_values=after_values,
+                    )
+            except (ValidationError, Account.DoesNotExist) as exc:
+                message = "; ".join(exc.messages) if isinstance(exc, ValidationError) else "Akun Equitas Saldo Awal tidak ditemukan."
+                account_form.add_error("opening_balance", message)
+            else:
+                verb = "diperbarui" if editing_account else "ditambahkan"
+                messages.success(request, f"COA {account.code} · {account.name} berhasil {verb}.")
+                return redirect("finance:accounts")
     else:
-        account_form = AccountForm(instance=editing_account)
+        account_form = AccountForm(instance=editing_account, initial=account_opening_balance(editing_account))
     query = request.GET.get("q", "").strip()
     accounts = Account.objects.select_related("parent")
     if query:

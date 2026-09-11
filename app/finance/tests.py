@@ -223,6 +223,8 @@ class FinanceJournalTests(TestCase):
                 "currency": "IDR",
                 "is_postable": "on",
                 "is_active": "on",
+                "opening_balance": "15181",
+                "opening_side": "DEBIT",
             },
         )
 
@@ -232,6 +234,47 @@ class FinanceJournalTests(TestCase):
         audit = AuditEvent.objects.get(action="finance_account_updated", entity_id=self.cash.id)
         self.assertEqual(audit.before_values["name"], previous_name)
         self.assertEqual(audit.after_values["name"], "Petty Cash UAT")
+
+    def test_new_coa_can_set_balanced_opening_balance(self):
+        self.client.force_login(self.user)
+        form_page = self.client.get(reverse("finance:accounts"), {"add": "1"})
+        self.assertContains(form_page, 'name="opening_balance"')
+        self.assertContains(form_page, 'name="opening_side"')
+
+        response = self.client.post(
+            reverse("finance:accounts"),
+            {
+                "code": "990002",
+                "name": "UAT Opening Account",
+                "account_type": "OASS",
+                "currency": "IDR",
+                "is_postable": "on",
+                "is_active": "on",
+                "opening_balance": "250000",
+                "opening_side": "DEBIT",
+            },
+        )
+
+        self.assertRedirects(response, reverse("finance:accounts"))
+        account = Account.objects.get(code="990002")
+        opening = JournalEntry.objects.get(number="OPENING-20260831")
+        line = opening.lines.get(account=account)
+        offset = opening.lines.get(account__code="300001")
+        self.assertEqual(line.debit, Decimal("250000"))
+        self.assertEqual(offset.credit, Decimal("250000"))
+        self.assertEqual(opening.debit_total, opening.credit_total)
+        self.assertEqual(opening.status, JournalEntry.Status.DRAFT)
+        self.assertTrue(
+            AuditEvent.objects.filter(action="finance_opening_balance_updated", entity_id=account.id).exists()
+        )
+
+    def test_edit_coa_prefills_its_direct_opening_balance(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("finance:accounts"), {"edit": self.cash.id})
+
+        self.assertEqual(response.context["account_form"]["opening_balance"].value(), Decimal("15181.000000"))
+        self.assertEqual(response.context["account_form"]["opening_side"].value(), "DEBIT")
 
     def test_used_account_cannot_be_changed_into_parent(self):
         self.client.force_login(self.user)

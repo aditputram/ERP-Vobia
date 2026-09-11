@@ -28,6 +28,21 @@ ACCOUNT_TYPE_CHOICES = (
 
 class AccountForm(forms.ModelForm):
     account_type = forms.ChoiceField(label="Tipe akun", choices=ACCOUNT_TYPE_CHOICES)
+    opening_balance = forms.DecimalField(
+        label="Saldo awal",
+        required=False,
+        min_value=0,
+        max_digits=22,
+        decimal_places=6,
+        initial=0,
+        help_text="Masuk ke opening Draft per 1 September 2026.",
+    )
+    opening_side = forms.ChoiceField(
+        label="Posisi saldo awal",
+        choices=(("DEBIT", "Debit"), ("CREDIT", "Kredit")),
+        required=False,
+        initial="DEBIT",
+    )
 
     class Meta:
         model = Account
@@ -68,6 +83,15 @@ class AccountForm(forms.ModelForm):
         if self.instance.pk and is_postable and self.instance.children.exists():
             raise forms.ValidationError("Akun yang memiliki akun turunan harus tetap menjadi akun induk.")
         return is_postable
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("opening_balance") and not cleaned.get("is_postable"):
+            self.add_error("opening_balance", "Saldo awal hanya dapat diisi pada akun transaksi.")
+        if cleaned.get("opening_balance") and not cleaned.get("is_active"):
+            self.add_error("opening_balance", "Akun dengan saldo awal harus berstatus aktif.")
+        cleaned["opening_side"] = cleaned.get("opening_side") or "DEBIT"
+        return cleaned
 
 
 class JournalEntryForm(forms.ModelForm):

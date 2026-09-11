@@ -4,15 +4,92 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Max, Sum
 from django.utils import timezone
 
 from audit.services import record_audit
 
-from .models import Account, JournalEntry, JournalNumberSequence
+from .models import Account, JournalEntry, JournalLine, JournalNumberSequence
 
 
 MONEY_QUANTUM = Decimal("0.000001")
+OPENING_ENTRY_NUMBER = "OPENING-20260831"
+OPENING_OFFSET_ACCOUNT_CODE = "300001"
+
+
+def account_opening_balance(account):
+    if not account:
+        return {"opening_balance": Decimal("0"), "opening_side": "DEBIT"}
+    line = JournalLine.objects.filter(entry__number=OPENING_ENTRY_NUMBER, account=account).first()
+    if not line:
+        return {"opening_balance": Decimal("0"), "opening_side": "DEBIT"}
+    return {
+        "opening_balance": line.debit or line.credit,
+        "opening_side": "DEBIT" if line.debit else "CREDIT",
+    }
+
+
+def _write_opening_line(entry, account, net, line=None):
+    if not net:
+        if line:
+            line.delete()
+        return
+    line = line or JournalLine(
+        entry=entry,
+        account=account,
+        line_number=(entry.lines.aggregate(value=Max("line_number"))["value"] or 0) + 1,
+    )
+    line.description = "Opening 1 September 2026"
+    line.debit = max(net, Decimal("0"))
+    line.credit = max(-net, Decimal("0"))
+    line.full_clean()
+    line.save()
+
+
+@transaction.atomic
+def set_account_opening_balance(*, account, amount, side, actor):
+    amount = (amount or Decimal("0")).quantize(MONEY_QUANTUM)
+    entry = JournalEntry.objects.select_for_update().filter(number=OPENING_ENTRY_NUMBER).first()
+    if not entry:
+        if amount:
+            raise ValidationError("Opening journal Finance belum tersedia.")
+        return
+    if entry.status != JournalEntry.Status.DRAFT:
+        raise ValidationError("Saldo awal tidak dapat diubah karena opening journal sudah Posted.")
+
+    direct_lines = list(entry.lines.select_for_update().filter(account=account))
+    if len(direct_lines) > 1:
+        raise ValidationError("Akun ini memiliki lebih dari satu baris opening dan harus direkonsiliasi.")
+    direct_line = direct_lines[0] if direct_lines else None
+    old_net = (direct_line.debit - direct_line.credit) if direct_line else Decimal("0")
+    new_net = amount if side == "DEBIT" else -amount
+    if account.code == OPENING_OFFSET_ACCOUNT_CODE:
+        if old_net != new_net:
+            raise ValidationError("Saldo akun Equitas Saldo Awal dikelola otomatis oleh sistem.")
+        return
+    if old_net == new_net:
+        return
+
+    offset = Account.objects.select_for_update().get(code=OPENING_OFFSET_ACCOUNT_CODE)
+    if not offset.is_active or not offset.is_postable:
+        raise ValidationError("Akun Equitas Saldo Awal harus aktif dan dapat dipakai transaksi.")
+    offset_lines = list(entry.lines.select_for_update().filter(account=offset))
+    if len(offset_lines) > 1:
+        raise ValidationError("Akun Equitas Saldo Awal memiliki baris ganda dan harus direkonsiliasi.")
+    offset_line = offset_lines[0] if offset_lines else None
+    offset_net = (offset_line.debit - offset_line.credit) if offset_line else Decimal("0")
+
+    _write_opening_line(entry, account, new_net, direct_line)
+    _write_opening_line(entry, offset, offset_net - (new_net - old_net), offset_line)
+    record_audit(
+        actor=actor,
+        action="finance_opening_balance_updated",
+        entity_type="finance.account",
+        entity_id=account.id,
+        before_values={"amount": str(abs(old_net)), "side": "DEBIT" if old_net >= 0 else "CREDIT"},
+        after_values={"amount": str(amount), "side": side},
+        metadata={"journal_number": entry.number, "offset_account": offset.code},
+    )
 
 
 @transaction.atomic

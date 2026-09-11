@@ -289,7 +289,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .rnd-current-file.must-replace { border-color: #dfb6b2; color: #8a3530; background: #fff0ee; }
 .rnd-current-cover img { width: 58px; height: 58px; flex: 0 0 auto; object-fit: contain; border-radius: 7px; background: white; }
 .rnd-current-cover > span { min-width: 0; display: grid; gap: 4px; }
-.rnd-design-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; }
+.rnd-design-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 13px; }
 .rnd-design-card { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: #fafaf7; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
 .rnd-design-card:hover { transform: translateY(-3px); border-color: #c6d78e; box-shadow: 0 14px 30px rgba(30,31,25,.08); }
 .rnd-design-image { aspect-ratio: 1 / 1; overflow: hidden; background: #efeee9; }

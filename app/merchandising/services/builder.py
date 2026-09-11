@@ -23,6 +23,7 @@ from .calculations import (
     apply_product_guardrail,
     current_month_projection,
     future_projection,
+    incoming_calculation,
     planning_buffer_incoming,
     select_effective_rule,
 )
@@ -339,7 +340,7 @@ def build_draft_matrix(
             else Decimal("0")
         )
         plan = plans_by_projection.get(projection.id)
-        bucket["incoming"] += max(plan.proposed_incoming, minimum_incoming) if plan else minimum_incoming
+        bucket["incoming"] += plan.proposed_incoming if plan else minimum_incoming
         bucket["minimum_incoming"] += minimum_incoming
         bucket["projections"].append(projection)
 
@@ -361,7 +362,6 @@ def build_draft_matrix(
             else Decimal("0")
         )
         incoming = plan.proposed_incoming if plan else minimum_incoming
-        incoming = max(incoming, minimum_incoming)
         beginning = base_beginning + incoming if base_beginning is not None else None
         return {
             "baseline": projection.baseline_qty,
@@ -1088,21 +1088,16 @@ def apply_rule(*, scenario, target_month, scope_type, method, parameter, actor, 
             defaults=projection_defaults,
         )
         if incoming_adjustments is not None:
-            minimum_incoming = planning_buffer_incoming(
+            minimum_incoming = incoming_calculation(
                 adjusted_qty,
                 row["beginning_qty"],
-                incoming_allowed=row["incoming_allowed"],
-            )
+            )["minimum"] if row["incoming_allowed"] else Decimal("0")
             chosen_incoming = Decimal(
-                incoming_adjustments.get(str(row["sku"].id), minimum_incoming)
+                incoming_adjustments.get(str(row["sku"].id), row["incoming_gap"])
             )
             if chosen_incoming < 0 or chosen_incoming != chosen_incoming.to_integral_value():
                 raise ValidationError(
                     f"{row['sku'].sku}: Incoming Recommendation harus bilangan bulat dan tidak boleh negatif."
-                )
-            if chosen_incoming < minimum_incoming:
-                raise ValidationError(
-                    f"{row['sku'].sku}: Incoming Recommendation tidak boleh di bawah minimum {minimum_incoming:.0f}."
                 )
             product_master = row["sku"].product_variant.product
             no_incoming = (

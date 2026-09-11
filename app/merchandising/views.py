@@ -959,10 +959,6 @@ def planning_builder(request):
                             raise ValidationError(
                                 f"{row['sku'].sku}: Incoming Recommendation harus bilangan bulat dan tidak boleh negatif."
                             )
-                        if adjusted_incoming < minimum_incoming:
-                            raise ValidationError(
-                                f"{row['sku'].sku}: Incoming Recommendation tidak boleh di bawah minimum {minimum_incoming:.0f}."
-                            )
                         incoming_adjustments[str(row["sku"].id)] = adjusted_incoming
                     counts = {"applied": 0, "overridden": 0, "rules": 0}
                     with transaction.atomic():

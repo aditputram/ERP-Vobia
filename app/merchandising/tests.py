@@ -580,7 +580,7 @@ class MerchandisingWorkflowTests(TestCase):
         projection.refresh_from_db()
         plan = IncomingPlan.objects.get(sales_projection=projection)
         self.assertEqual(projection.proposed_qty, Decimal("100"))
-        self.assertEqual(plan.minimum_incoming, Decimal("120"))
+        self.assertEqual(plan.minimum_incoming, Decimal("70"))
         self.assertEqual(plan.recommended_incoming, Decimal("120"))
         self.assertEqual(plan.proposed_incoming, Decimal("130"))
         self.assertEqual(plan.approval_status, IncomingPlan.ApprovalStatus.DRAFT)
@@ -594,6 +594,23 @@ class MerchandisingWorkflowTests(TestCase):
         self.assertEqual(projection.final_approved_qty, Decimal("100"))
         self.assertEqual(plan.final_approved_incoming, Decimal("130"))
         self.assertEqual(requirement.approved_qty, Decimal("130"))
+
+    def test_scenario_draft_allows_incoming_below_ratio_recommendation(self):
+        projection = self._projection()
+        projection.beginning_qty = Decimal("30")
+        projection.save(update_fields=["beginning_qty"])
+
+        save_scenario_draft(
+            self.scenario.id,
+            self.user,
+            sales_values={str(projection.id): "100"},
+            incoming_values={str(projection.id): "20"},
+        )
+
+        plan = IncomingPlan.objects.get(sales_projection=projection)
+        self.assertEqual(plan.recommended_incoming, Decimal("120"))
+        self.assertEqual(plan.proposed_incoming, Decimal("20"))
+        self.assertEqual(plan.approval_status, IncomingPlan.ApprovalStatus.DRAFT)
 
     def test_superadmin_can_revise_and_reapprove_approved_scenario_with_audit(self):
         superadmin = User.objects.create_superuser(
@@ -2322,8 +2339,8 @@ class MerchandisingReportViewTests(TestCase):
         projection_fields = {
             f"projection_qty_{self.sku.id}": "7",
             f"projection_qty_{second_product.variants.get().skus.get().id}": "9",
-            f"incoming_qty_{self.sku.id}": "11",
-            f"incoming_qty_{second_product.variants.get().skus.get().id}": "14",
+            f"incoming_qty_{self.sku.id}": "1",
+            f"incoming_qty_{second_product.variants.get().skus.get().id}": "2",
         }
         response = self.client.post(
             "/merchandising/planning-builder/",
@@ -2346,8 +2363,8 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(second_projection.adit_adjustment, Decimal("9") - second_projection.system_recommendation)
         first_incoming = IncomingPlan.objects.get(sales_projection=first_projection)
         second_incoming = IncomingPlan.objects.get(sales_projection=second_projection)
-        self.assertEqual(first_incoming.proposed_incoming, Decimal("11"))
-        self.assertEqual(second_incoming.proposed_incoming, Decimal("14"))
+        self.assertEqual(first_incoming.proposed_incoming, Decimal("1"))
+        self.assertEqual(second_incoming.proposed_incoming, Decimal("2"))
 
         sales_scenario = SalesPlanningScenario.objects.create(
             name="Sales Target Reference",
@@ -2492,11 +2509,11 @@ class MerchandisingReportViewTests(TestCase):
             stock_rows[first_projection.sku.sku],
             [
                 Decimal("2"), Decimal("2"), Decimal("2"),
-                first_projection.beginning_qty + Decimal("11"),
+                first_projection.beginning_qty + Decimal("1"),
                 Decimal("70"),
                 Decimal("7"),
-                first_projection.beginning_qty + Decimal("11") - Decimal("7"),
-                Decimal("11"),
+                first_projection.beginning_qty + Decimal("1") - Decimal("7"),
+                Decimal("1"),
             ],
         )
 

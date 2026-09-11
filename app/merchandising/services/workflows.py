@@ -287,16 +287,16 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
             raise ValidationError(
                 f"{projection.sku.sku}: Sales Projection melampaui stock untuk Product yang tidak boleh Incoming."
             )
-        buffer_minimum = planning_buffer_incoming(
+        buffer_recommendation = planning_buffer_incoming(
             final_sales,
             prior_ending,
             incoming_allowed=not no_incoming,
         )
-        minimum_incoming = Decimal("0") if no_incoming else buffer_minimum
+        minimum_incoming = Decimal("0") if no_incoming else values["minimum"]
         recommended = (
             Decimal("0")
             if no_incoming
-            else max(values["recommended"], buffer_minimum)
+            else max(values["recommended"], buffer_recommendation)
         )
         if no_incoming:
             chosen_incoming = Decimal("0")
@@ -306,13 +306,9 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
                 f"{projection.sku.sku}: Incoming Plan",
             )
         elif existing_plan:
-            chosen_incoming = max(existing_plan.proposed_incoming, minimum_incoming)
+            chosen_incoming = existing_plan.proposed_incoming
         else:
             chosen_incoming = recommended
-        if chosen_incoming < minimum_incoming:
-            raise ValidationError(
-                f"{projection.sku.sku}: Incoming Plan tidak boleh di bawah minimum {minimum_incoming:.0f}."
-            )
         plan, _ = IncomingPlan.objects.update_or_create(
             scenario=scenario,
             month=projection.month,

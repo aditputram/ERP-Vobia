@@ -435,19 +435,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const baseline = Number(input.dataset.baseline);
     const formatQty = value => Math.round(value).toLocaleString('id-ID');
     const formatRatio = value => value.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const updatePreview = (syncMinimum = false) => {
+    const updatePreview = () => {
       const projection = Number(input.value);
       if (!Number.isFinite(projection) || projection < 0) return;
-      const currentRatio = projection ? baseBeginning / projection : null;
-      const minimumIncoming = (
-        !incomingInput.disabled && currentRatio !== null && currentRatio < 1.5
-          ? Math.max(Math.ceil((projection * 1.5) - baseBeginning), 0)
-          : 0
-      );
-      incomingInput.min = String(minimumIncoming);
-      if (syncMinimum && !incomingInput.disabled && (Number(incomingInput.value) || 0) < minimumIncoming) {
-        incomingInput.value = String(minimumIncoming);
-      }
       const incoming = incomingInput.disabled ? 0 : Number(incomingInput.value);
       if (!Number.isFinite(incoming) || incoming < 0) return;
       const beginning = baseBeginning + incoming;
@@ -473,9 +463,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     };
 
-    input.addEventListener('input', () => updatePreview(true));
-    incomingInput.addEventListener('input', () => updatePreview(false));
-    updatePreview(true);
+    input.addEventListener('input', updatePreview);
+    incomingInput.addEventListener('input', updatePreview);
+    updatePreview();
   });
 
   const formatPreviewQty = value => Math.round(value).toLocaleString('id-ID');
@@ -700,32 +690,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const incomingInput = document.querySelector(
       `[data-scenario-incoming-input][data-projection-id="${projectionId}"]`,
     );
-    const syncIncomingMinimum = () => {
-      const sales = Number(salesInput.value);
-      const beginning = Number(salesInput.dataset.beginning) || 0;
-      if (!Number.isFinite(sales)) return;
-      if (salesInput.dataset.incomingAllowed === 'false') {
-        if (incomingInput) {
-          incomingInput.min = '0';
-          incomingInput.value = '0';
-          incomingInput.disabled = true;
-        }
-        return;
-      }
-      const currentRatio = sales ? beginning / sales : null;
-      const minimum = (
-        currentRatio !== null && currentRatio < 1.5
-          ? Math.max(Math.ceil((sales * 1.5) - beginning), 0)
-          : 0
-      );
+    const syncIncomingAvailability = () => {
       if (!incomingInput) return;
-      incomingInput.min = String(minimum);
-      if ((Number(incomingInput.value) || 0) < minimum) {
-        incomingInput.value = String(minimum);
+      incomingInput.min = '0';
+      if (salesInput.dataset.incomingAllowed === 'false') {
+        incomingInput.value = '0';
+        incomingInput.disabled = true;
       }
     };
-    salesInput.addEventListener('input', syncIncomingMinimum);
-    syncIncomingMinimum();
+    syncIncomingAvailability();
   });
 
   const setDraftGrowth = (element, growth) => {

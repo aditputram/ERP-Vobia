@@ -16,7 +16,7 @@ from sales.models import SalesOrder, SalesOrderLine
 from ..models import SalesImportBatch, SalesImportIssue, StagedSalesRow
 
 
-PARSER_VERSION = "sales-v6"
+PARSER_VERSION = "sales-v7"
 SALES_CUTOVER_DATE = date(2026, 8, 1)
 SHOPEE_CANCEL_REASON_HEADERS = ("Alasan Pembatalan",)
 SHOPEE_RETURN_STATUS_HEADERS = (
@@ -219,10 +219,11 @@ def _normalize_status(
         if lowered == "selesai":
             return "Selesai", True, False
         return status, False, False
+    tiktok_return_status = return_status.casefold()
     if (
         source == SalesImportBatch.Source.TIKTOK
         and lowered == "selesai"
-        and "".join(return_status.casefold().split()) in {"return/refund", "retur/refund"}
+        and any(marker in tiktok_return_status for marker in ("cancel", "refund", "retur", "return"))
     ):
         return "Retur", True, False
     if cancelled:

@@ -411,6 +411,26 @@ class SalesImportWorkflowTests(TestCase):
         self.assertEqual(order.current_status, "Retur")
         self.assertTrue(order.lines.get().expected_return)
 
+    def test_tiktok_completed_cancel_type_is_normalized_to_return(self):
+        row = [
+            "TIKTOK-COMPLETED-CANCEL-001",
+            "Selesai",
+            "SKU-001",
+            "1",
+            "299000",
+            "0",
+            "18/08/2026 23:12:43",
+            "19/08/2026 09:00:00",
+            "Cancel by platform",
+        ]
+        batch = create_sales_import(
+            make_csv(TIKTOK_HEADERS, [row], "tiktok-completed-cancel.csv"),
+            SalesImportBatch.Source.TIKTOK,
+            self.user,
+        )
+
+        self.assertEqual(batch.staged_rows.get().normalized_status, "Retur")
+
     def test_live_marketplace_cancel_override_preserves_raw_and_prevents_sales_commit(self):
         row = [
             "TIKTOK-LIVE-CANCEL-001",
@@ -611,7 +631,7 @@ class SalesImportWorkflowTests(TestCase):
         self.assertRedirects(response, reverse("imports:sales_detail", args=[batch.id]))
         batch.refresh_from_db()
         self.assertEqual(batch.status, SalesImportBatch.Status.READY)
-        self.assertEqual(batch.parser_version, "sales-v6")
+        self.assertEqual(batch.parser_version, "sales-v7")
         self.assertFalse(batch.issues.filter(code="ORDER_HEADER_CONFLICT").exists())
         approve_sales_import(batch.id, self.user)
 

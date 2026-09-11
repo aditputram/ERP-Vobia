@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Prefetch, Q, Value, When
-from django.http import FileResponse, Http404, HttpResponseForbidden
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -229,6 +229,8 @@ def design_recommend(request, design_id):
             after_values={"recommended_at": design.recommended_at.isoformat()},
         )
     messages.success(request, "Design direkomendasikan untuk Collection baru.")
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return HttpResponse(status=204)
     return redirect("rnd:design_detail", design_id=design.id)
 
 
@@ -250,6 +252,8 @@ def design_unrecommend(request, design_id):
             entity_id=design.id,
         )
     messages.success(request, "Rekomendasi Design dibatalkan.")
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return HttpResponse(status=204)
     return redirect("rnd:design_detail", design_id=design.id)
 
 

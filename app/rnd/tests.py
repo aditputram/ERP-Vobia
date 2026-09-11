@@ -207,8 +207,15 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(denied.status_code, 403)
 
         self.client.force_login(self.rnd_approver)
-        recommended = self.client.post(reverse("rnd:design_recommend", args=[design.id]))
-        self.assertRedirects(recommended, reverse("rnd:design_detail", args=[design.id]))
+        detail = self.client.get(reverse("rnd:design_detail", args=[design.id]))
+        self.assertContains(detail, "data-design-recommendation-form")
+        self.assertContains(detail, 'headers: {"X-Requested-With": "XMLHttpRequest"}')
+        self.assertContains(detail, "location.reload()")
+        recommended = self.client.post(
+            reverse("rnd:design_recommend", args=[design.id]),
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(recommended.status_code, 204)
         design.refresh_from_db()
         self.assertIsNotNone(design.recommended_at)
         self.assertEqual(design.recommended_by, self.rnd_approver)
@@ -217,8 +224,11 @@ class RndWorkflowTests(TestCase):
         page = self.client.get(reverse("rnd:designing"))
         self.assertContains(page, "Direkomendasikan")
 
-        cancelled = self.client.post(reverse("rnd:design_unrecommend", args=[design.id]))
-        self.assertRedirects(cancelled, reverse("rnd:design_detail", args=[design.id]))
+        cancelled = self.client.post(
+            reverse("rnd:design_unrecommend", args=[design.id]),
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(cancelled.status_code, 204)
         design.refresh_from_db()
         self.assertIsNone(design.recommended_at)
 

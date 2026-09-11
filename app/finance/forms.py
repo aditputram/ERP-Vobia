@@ -47,7 +47,27 @@ class AccountForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["parent"].queryset = Account.objects.filter(is_active=True, is_postable=False)
+        parents = Account.objects.filter(is_active=True, is_postable=False)
+        if self.instance.pk:
+            parents = parents.exclude(pk=self.instance.pk)
+        self.fields["parent"].queryset = parents
+
+    def clean_parent(self):
+        parent = self.cleaned_data.get("parent")
+        current = parent
+        while current:
+            if self.instance.pk and current.pk == self.instance.pk:
+                raise forms.ValidationError("Akun induk tidak boleh membentuk siklus.")
+            current = current.parent
+        return parent
+
+    def clean_is_postable(self):
+        is_postable = self.cleaned_data.get("is_postable")
+        if self.instance.pk and not is_postable and self.instance.journal_lines.exists():
+            raise forms.ValidationError("Akun yang sudah dipakai jurnal harus tetap menjadi akun transaksi.")
+        if self.instance.pk and is_postable and self.instance.children.exists():
+            raise forms.ValidationError("Akun yang memiliki akun turunan harus tetap menjadi akun induk.")
+        return is_postable
 
 
 class JournalEntryForm(forms.ModelForm):

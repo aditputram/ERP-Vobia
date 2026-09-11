@@ -57,12 +57,21 @@ def post_journal(entry_id, actor):
     return entry
 
 
-def account_balances(*, start_date=None, end_date=None, include_draft=False, exclude_opening=False):
+def account_balances(
+    *,
+    start_date=None,
+    end_date=None,
+    include_draft=False,
+    exclude_opening=False,
+    source=None,
+):
     entries = JournalEntry.objects.all()
     if not include_draft:
         entries = entries.filter(status=JournalEntry.Status.POSTED)
     if exclude_opening:
         entries = entries.exclude(source=JournalEntry.Source.OPENING)
+    if source:
+        entries = entries.filter(source=source)
     if start_date:
         entries = entries.filter(entry_date__gte=start_date)
     if end_date:

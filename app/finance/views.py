@@ -17,7 +17,7 @@ from accounts.access import can_access_tab, module_level
 
 from .catalog import FEATURES, FINANCE_NAV_SECTIONS
 from .forms import AccountForm, JournalEntryForm, JournalLineFormSet
-from .models import Account, FINANCE_CUTOVER_DATE, JournalEntry
+from .models import Account, FINANCE_CUTOVER_DATE, FINANCE_OPENING_DATE, JournalEntry
 from .services import account_balances, next_journal_number, post_journal
 
 
@@ -51,34 +51,67 @@ def dashboard(request):
 @login_required
 def account_list(request):
     can_edit = request.user.is_superuser or module_level(request.user, "finance") in {"edit", "approve"}
+    edit_id = (request.POST.get("account_id") if request.method == "POST" else request.GET.get("edit")) or ""
+    editing_account = None
+    if edit_id and can_edit:
+        editing_account = get_object_or_404(Account.objects.select_related("parent"), pk=edit_id)
     if request.method == "POST":
         if not can_edit:
             return HttpResponseForbidden("Akun ini hanya memiliki akses lihat.")
-        account_form = AccountForm(request.POST)
+        before_values = None
+        if editing_account:
+            before_values = {
+                "code": editing_account.code,
+                "name": editing_account.name,
+                "account_type": editing_account.account_type,
+                "parent": editing_account.parent.code if editing_account.parent else "",
+                "currency": editing_account.currency,
+                "is_postable": editing_account.is_postable,
+                "is_active": editing_account.is_active,
+            }
+        account_form = AccountForm(request.POST, instance=editing_account)
         if account_form.is_valid():
             account = account_form.save()
+            action = "finance_account_updated" if editing_account else "finance_account_created"
+            after_values = {
+                "code": account.code,
+                "name": account.name,
+                "account_type": account.account_type,
+                "parent": account.parent.code if account.parent else "",
+                "currency": account.currency,
+                "is_postable": account.is_postable,
+                "is_active": account.is_active,
+            }
             record_audit(
                 actor=request.user,
-                action="finance_account_created",
+                action=action,
                 entity_type="finance.account",
                 entity_id=account.id,
-                after_values={
-                    "code": account.code,
-                    "name": account.name,
-                    "account_type": account.account_type,
-                    "parent": account.parent.code if account.parent else "",
-                    "currency": account.currency,
-                    "is_postable": account.is_postable,
-                },
+                before_values=before_values,
+                after_values=after_values,
             )
-            messages.success(request, f"COA {account.code} · {account.name} berhasil ditambahkan.")
+            verb = "diperbarui" if editing_account else "ditambahkan"
+            messages.success(request, f"COA {account.code} · {account.name} berhasil {verb}.")
             return redirect("finance:accounts")
     else:
-        account_form = AccountForm()
+        account_form = AccountForm(instance=editing_account)
     query = request.GET.get("q", "").strip()
     accounts = Account.objects.select_related("parent")
     if query:
         accounts = accounts.filter(Q(code__icontains=query) | Q(name__icontains=query))
+    accounts = list(accounts)
+    opening_by_account = {
+        row["account"].id: row
+        for row in account_balances(
+            end_date=FINANCE_OPENING_DATE,
+            include_draft=True,
+            source=JournalEntry.Source.OPENING,
+        )
+    }
+    for account in accounts:
+        opening = opening_by_account.get(account.id, {})
+        account.opening_debit = opening.get("debit_balance", Decimal("0"))
+        account.opening_credit = opening.get("credit_balance", Decimal("0"))
     return render(
         request,
         "finance/accounts.html",
@@ -87,7 +120,8 @@ def account_list(request):
             "query": query,
             "can_edit": can_edit,
             "account_form": account_form,
-            "show_account_form": account_form.is_bound or request.GET.get("add") == "1",
+            "editing_account": editing_account,
+            "show_account_form": account_form.is_bound or request.GET.get("add") == "1" or editing_account,
         },
     )
 

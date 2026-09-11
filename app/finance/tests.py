@@ -61,7 +61,7 @@ class FinanceJournalTests(TestCase):
         self.entry.status = JournalEntry.Status.POSTED
         self.entry.save(update_fields=("status",))
         opening = JournalEntry.objects.create(
-            number="OPENING-20260831",
+            number="OPENING-TEST",
             entry_date=date(2026, 9, 1),
             description="Opening",
             source=JournalEntry.Source.OPENING,
@@ -195,12 +195,92 @@ class FinanceJournalTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 302)
-        created = JournalEntry.objects.exclude(pk=self.entry.pk).get()
+        created = JournalEntry.objects.filter(source=JournalEntry.Source.MANUAL).exclude(pk=self.entry.pk).get()
         self.assertEqual(created.source_metadata["environment"], "UAT")
+
+    def test_account_page_shows_opening_balance_for_leaf_and_parent(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("finance:accounts"), {"q": "1101"})
+
+        rows = {account.code: account for account in response.context["accounts"]}
+        self.assertEqual(rows["110101"].opening_debit, Decimal("15181"))
+        self.assertGreater(rows["1101"].opening_debit, rows["110101"].opening_debit)
+        self.assertContains(response, "Saldo Awal")
+
+    def test_superadmin_can_edit_coa_with_audit_history(self):
+        self.client.force_login(self.user)
+        previous_name = self.cash.name
+
+        response = self.client.post(
+            reverse("finance:accounts"),
+            {
+                "account_id": str(self.cash.id),
+                "code": self.cash.code,
+                "name": "Petty Cash UAT",
+                "account_type": self.cash.account_type,
+                "parent": str(self.cash.parent_id),
+                "currency": "IDR",
+                "is_postable": "on",
+                "is_active": "on",
+            },
+        )
+
+        self.assertRedirects(response, reverse("finance:accounts"))
+        self.cash.refresh_from_db()
+        self.assertEqual(self.cash.name, "Petty Cash UAT")
+        audit = AuditEvent.objects.get(action="finance_account_updated", entity_id=self.cash.id)
+        self.assertEqual(audit.before_values["name"], previous_name)
+        self.assertEqual(audit.after_values["name"], "Petty Cash UAT")
+
+    def test_used_account_cannot_be_changed_into_parent(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("finance:accounts"),
+            {
+                "account_id": str(self.cash.id),
+                "code": self.cash.code,
+                "name": self.cash.name,
+                "account_type": self.cash.account_type,
+                "parent": str(self.cash.parent_id),
+                "currency": "IDR",
+                "is_active": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "sudah dipakai jurnal")
+        self.cash.refresh_from_db()
+        self.assertTrue(self.cash.is_postable)
+
+    def test_parent_account_cannot_be_changed_into_transaction_account(self):
+        self.client.force_login(self.user)
+        parent = self.cash.parent
+
+        response = self.client.post(
+            reverse("finance:accounts"),
+            {
+                "account_id": str(parent.id),
+                "code": parent.code,
+                "name": parent.name,
+                "account_type": parent.account_type,
+                "currency": "IDR",
+                "is_postable": "on",
+                "is_active": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "memiliki akun turunan")
+        parent.refresh_from_db()
+        self.assertFalse(parent.is_postable)
 
 
 class FinanceCutoverImportTests(TestCase):
     def setUp(self):
+        JournalLine.objects.all().delete()
+        JournalEntry.objects.all().delete()
         Account.objects.update(parent=None)
         Account.objects.all().delete()
 

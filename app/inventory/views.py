@@ -329,7 +329,7 @@ def _export_outbound(rows):
                 row.sku.sku,
                 row.quantity,
                 row.allocated_cost,
-                row.sales_line.order.current_status,
+                row.sales_line.current_status,
                 row.movement_key,
                 row.posted_by.username,
             )
@@ -859,7 +859,7 @@ def inbound_completed_report_pdf(request):
 @login_required
 def return_log(request):
     return_orders = SalesOrder.objects.filter(
-        current_status="Retur",
+        lines__current_status="Retur",
         lines__sku__isnull=False,
     ).distinct()
     source_options = sorted(
@@ -883,7 +883,7 @@ def return_log(request):
     )
     return_rows = []
     if selected_order:
-        lines = selected_order.lines.filter(sku__isnull=False).select_related(
+        lines = selected_order.lines.filter(current_status="Retur", sku__isnull=False).select_related(
             "sku__product_variant__product",
             "expected_return",
         ).annotate(returned_qty=Sum("physical_returns__quantity"))

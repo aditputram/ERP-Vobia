@@ -415,7 +415,7 @@ def feature(request, slug):
     elif slug in {"sales-return", "sales-return-per-item"}:
         from sales.models import SalesOrderLine
 
-        lines = SalesOrderLine.objects.filter(order__current_status__iexact="Retur").select_related("order")[:300]
+        lines = SalesOrderLine.objects.filter(current_status__iexact="Retur").select_related("order")[:300]
         context.update(
             columns=("Tanggal", "Source", "No. Pesanan", "SKU", "Product", "Qty", "Net"),
             rows=[
@@ -430,7 +430,7 @@ def feature(request, slug):
                 )
                 for row in lines
             ],
-            metrics=(("Baris return", SalesOrderLine.objects.filter(order__current_status__iexact="Retur").count()),),
+            metrics=(("Baris return", SalesOrderLine.objects.filter(current_status__iexact="Retur").count()),),
             data_note="Return mengikuti status canonical Sales; pengakuan kas/piutang menunggu workflow Finance.",
         )
     elif slug in {"purchase-invoice", "purchase-invoice-list"}:

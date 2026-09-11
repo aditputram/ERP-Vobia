@@ -49,7 +49,7 @@ def planning_activity_snapshot(as_of_date=None, target_month=None):
             order__order_date__gte=window_start,
             order__order_date__lte=as_of_date,
         )
-        .exclude(order__current_status="Retur")
+        .exclude(current_status="Retur")
         .values("sku_id")
         .annotate(qty=Sum("quantity"))
     }

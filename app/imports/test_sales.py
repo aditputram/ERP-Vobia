@@ -569,6 +569,50 @@ class SalesImportWorkflowTests(TestCase):
         self.assertEqual(order.current_status, "Retur")
         self.assertTrue(order.lines.get().expected_return)
 
+    def test_one_order_accepts_completed_and_returned_skus_independently(self):
+        second_sku = SKU.objects.create(
+            sku="SKU-002",
+            product_variant=self.sku.product_variant,
+            size="M",
+            current_retail_price="299000",
+            current_master_cogs="99500",
+        )
+        completed_row = self.shopee_row()
+        returned_row = self.shopee_row(
+            **{
+                "Nomor Referensi SKU": second_sku.sku,
+                "Status Pembatalan/ Pengembalian": "Permintaan Disetujui",
+            }
+        )
+
+        batch = create_sales_import(
+            make_csv(SHOPEE_HEADERS, [completed_row, returned_row], "mixed-line-status.csv"),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+
+        self.assertEqual(batch.status, SalesImportBatch.Status.READY)
+        self.assertFalse(batch.issues.filter(code="ORDER_HEADER_CONFLICT").exists())
+        approve_sales_import(batch.id, self.user)
+
+        order = SalesOrder.objects.get(order_number="SHOPEE-ORDER-001")
+        completed_line = order.lines.get(sku=self.sku)
+        returned_line = order.lines.get(sku=second_sku)
+        self.assertEqual(order.current_status, "Campuran")
+        self.assertTrue(order.is_final)
+        self.assertEqual(completed_line.current_status, "Selesai")
+        self.assertEqual(returned_line.current_status, "Retur")
+        self.assertFalse(hasattr(completed_line, "expected_return"))
+        self.assertTrue(hasattr(returned_line, "expected_return"))
+
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("inventory:return_log"),
+            {"source": "Shopee", "order_number": order.order_number},
+        )
+        self.assertEqual(response.context["selected_order"], order)
+        self.assertEqual([row["line"].sku_id for row in response.context["return_rows"]], [second_sku.id])
+
     def test_approved_return_flag_does_not_override_non_completed_order(self):
         row = self.shopee_row(
             **{

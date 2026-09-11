@@ -208,9 +208,9 @@ def _export_transactions(lines, start, end):
             _excel_datetime(order.shipped_datetime),
             _excel_text(order.display_source),
             _excel_text(order.order_number),
-            _excel_text(order.current_status),
-            _excel_text(order.source_status),
-            order.is_final,
+            _excel_text(line.current_status),
+            _excel_text(line.source_status),
+            line.is_final,
             _excel_text(order.get_import_origin_display()),
             "Inventory" if order.affects_inventory else "Report only",
             _excel_text(line.sku_code_snapshot),
@@ -1260,7 +1260,7 @@ def dashboard(request):
     filtered_all_lines = _apply_source_filters(all_lines, sources, source_groups)
     lines = filtered_all_lines.filter(order__order_date__range=(start, end))
     totals = _totals(lines)
-    status_rows = list(lines.values("order__current_status").annotate(orders=Count("order_id", distinct=True)).order_by("-orders"))
+    status_rows = list(lines.values("current_status").annotate(orders=Count("order_id", distinct=True)).order_by("-orders"))
     source_rows = []
     for row in lines.values("order__source", "order__source_label").annotate(qty=Sum("quantity"), net=Sum("total_net_sales"), orders=Count("order_id", distinct=True)).order_by("-net"):
         row["source_group"] = _source_group(row["order__source"])
@@ -1492,7 +1492,7 @@ def transactions(request):
     status = request.GET.get("status", "")
     query = request.GET.get("q", "").strip()
     if status:
-        lines = lines.filter(order__current_status=status)
+        lines = lines.filter(current_status=status)
     if query:
         lines = lines.filter(Q(order__order_number__icontains=query) | Q(sku_code_snapshot__icontains=query) | Q(product_name_snapshot__icontains=query))
     if request.GET.get("export") == "xlsx":
@@ -1503,7 +1503,7 @@ def transactions(request):
         "date_from": start,
         "date_to": end,
         "totals": _totals(lines),
-        "statuses": SalesOrderLine.objects.order_by().values_list("order__current_status", flat=True).distinct(),
+        "statuses": SalesOrderLine.objects.exclude(current_status="").order_by().values_list("current_status", flat=True).distinct(),
         **_filter_options(),
     })
 

@@ -79,6 +79,10 @@ class SalesOrderLine(models.Model):
     subcategory_snapshot = models.CharField(max_length=100, blank=True)
     product_name_snapshot = models.CharField(max_length=255, blank=True, db_index=True)
     variant_name_snapshot = models.CharField(max_length=150, blank=True)
+    current_status = models.CharField(max_length=180, blank=True, db_index=True)
+    source_status = models.CharField(max_length=255, blank=True)
+    is_final = models.BooleanField(default=False)
+    is_pure_cancelled = models.BooleanField(default=False)
     quantity = models.PositiveIntegerField()
     net_unit_price = models.DecimalField(max_digits=18, decimal_places=4)
     retail_price_snapshot = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
@@ -114,6 +118,11 @@ class SalesOrderLine(models.Model):
     def save(self, *args, **kwargs):
         if not self.sku_code_snapshot and self.sku_id:
             self.sku_code_snapshot = self.sku.sku
+        if not self.current_status and self.order_id:
+            self.current_status = self.order.current_status
+            self.source_status = self.source_status or self.order.source_status
+            self.is_final = self.order.is_final
+            self.is_pure_cancelled = self.order.is_pure_cancelled
         super().save(*args, **kwargs)
 
     def __str__(self):

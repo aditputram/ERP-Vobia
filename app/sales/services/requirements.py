@@ -7,9 +7,6 @@ from imports.models import SalesImportBatch
 from sales.models import SalesOrder
 
 
-FINAL_STATUSES = {"Selesai", "Retur"}
-
-
 def summarize_import_requirements(requirements, as_of_date=None):
     """Collapse detail into an exact oldest-required-date through yesterday range."""
     yesterday = (as_of_date or date.today()) - timedelta(days=1)
@@ -53,7 +50,7 @@ def import_requirements(as_of_date=None):
                 "last_successful_import": last_batch.committed_at if last_batch else None,
                 "last_cutoff": last_cutoff,
             }
-    nonfinal = SalesOrder.objects.exclude(current_status__in=FINAL_STATUSES).filter(
+    nonfinal = SalesOrder.objects.filter(is_final=False).filter(
         source__in=[SalesOrder.Source.SHOPEE, SalesOrder.Source.TIKTOK]
     )
     for order in nonfinal:

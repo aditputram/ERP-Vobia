@@ -103,7 +103,7 @@ def historical_sales_qty_for_skus(
                 order__order_date__gte=min(closed_months),
                 order__order_date__lt=next_month(max(closed_months)),
             )
-            .exclude(order__current_status="Retur")
+            .exclude(current_status="Retur")
             .values("sku_id", "order__order_date__year", "order__order_date__month")
             .annotate(total=Sum("quantity"))
         )
@@ -795,7 +795,7 @@ def projected_beginning(
             is_counted=True,
             order__order_date__gte=target_month,
             order__order_date__lte=today,
-        ).exclude(order__current_status="Retur").aggregate(total=Sum("quantity"))["total"] or Decimal("0")
+        ).exclude(current_status="Retur").aggregate(total=Sum("quantity"))["total"] or Decimal("0")
         # Ledger balance is after sales through cutoff; adding actual sales back
         # reconstructs Ending prior month + Incoming current month.
         return balance + actual
@@ -875,14 +875,14 @@ def recommendation_for(
             is_counted=True,
             order__order_date__gte=current_month,
             order__order_date__lte=today,
-        ).exclude(order__current_status="Retur")
+        ).exclude(current_status="Retur")
         data_cutoff = current_lines.aggregate(value=Max("order__order_date"))["value"]
         actual = SalesOrderLine.objects.filter(
             sku=sku,
             is_counted=True,
             order__order_date__gte=current_month,
             order__order_date__lte=data_cutoff or today,
-        ).exclude(order__current_status="Retur").aggregate(total=Sum("quantity"))["total"] or Decimal("0")
+        ).exclude(current_status="Retur").aggregate(total=Sum("quantity"))["total"] or Decimal("0")
         beginning = projected_beginning(sku, target_month, today=data_cutoff or today)
         recommendation = current_month_projection(
             actual,

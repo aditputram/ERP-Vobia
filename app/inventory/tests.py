@@ -746,6 +746,10 @@ class InventoryWorkflowTests(TestCase):
         first_line.order.current_status = "Retur"
         first_line.order.source_label = "Shopee Vobia"
         first_line.order.save(update_fields=["current_status", "source_label"])
+        first_line.current_status = "Retur"
+        first_line.source_status = "Retur"
+        first_line.is_final = True
+        first_line.save(update_fields=["current_status", "source_status", "is_final"])
         create_expected_return(first_line)
 
         second_sku = SKU.objects.create(
@@ -775,6 +779,10 @@ class InventoryWorkflowTests(TestCase):
         other_line.order.source = SalesOrder.Source.TIKTOK
         other_line.order.source_label = "TikTok Vobia"
         other_line.order.save(update_fields=["current_status", "source", "source_label"])
+        other_line.current_status = "Retur"
+        other_line.source_status = "Retur"
+        other_line.is_final = True
+        other_line.save(update_fields=["current_status", "source_status", "is_final"])
         create_expected_return(other_line)
 
         self.client.force_login(self.user)

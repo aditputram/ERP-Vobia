@@ -16,7 +16,7 @@ from sales.models import SalesOrder, SalesOrderLine
 from ..models import SalesImportBatch, SalesImportIssue, StagedSalesRow
 
 
-PARSER_VERSION = "sales-v5"
+PARSER_VERSION = "sales-v6"
 SALES_CUTOVER_DATE = date(2026, 8, 1)
 SHOPEE_CANCEL_REASON_HEADERS = ("Alasan Pembatalan",)
 SHOPEE_RETURN_STATUS_HEADERS = (
@@ -421,6 +421,16 @@ def parse_sales_batch(batch):
         historical_line = None
         if historical_status_audit:
             historical_line = existing_lines.get((order_number, sku_text)) or historical_fallback_lines.get(order_number)
+            historical_current_status = (
+                historical_line.current_status if historical_line else historical_order.current_status
+            )
+            historical_source_status = (
+                historical_line.source_status if historical_line else historical_order.source_status
+            )
+            historical_is_final = historical_line.is_final if historical_line else historical_order.is_final
+            historical_is_pure_cancelled = (
+                historical_line.is_pure_cancelled if historical_line else historical_order.is_pure_cancelled
+            )
             quality["historical_status_audit_rows"] += 1
             historical_audit_order_numbers.add(order_number)
             if not source_status:
@@ -433,9 +443,10 @@ def parse_sales_batch(batch):
                         False,
                     )
                 )
-                normalized_status = historical_order.current_status
-                is_final = historical_order.is_final
-                is_pure_cancelled = historical_order.is_pure_cancelled
+                normalized_status = historical_current_status
+                source_status = historical_source_status
+                is_final = historical_is_final
+                is_pure_cancelled = historical_is_pure_cancelled
                 historical_status_update_allowed = False
                 quality["historical_status_ignored_rows"] += 1
             elif is_pure_cancelled:
@@ -449,29 +460,31 @@ def parse_sales_batch(batch):
                         False,
                     )
                 )
-                normalized_status = historical_order.current_status
-                is_final = historical_order.is_final
-                is_pure_cancelled = historical_order.is_pure_cancelled
+                normalized_status = historical_current_status
+                source_status = historical_source_status
+                is_final = historical_is_final
+                is_pure_cancelled = historical_is_pure_cancelled
                 historical_status_update_allowed = False
                 quality["historical_status_ignored_rows"] += 1
             elif (
-                historical_order.current_status == "Retur" and normalized_status != "Retur"
+                historical_current_status == "Retur" and normalized_status != "Retur"
             ) or (
-                historical_order.is_final and not is_final
+                historical_is_final and not is_final
             ):
                 row_issues.append(
                     (
                         "WARNING",
                         "HISTORICAL_FINAL_STATUS_REGRESSION_IGNORED",
                         "status",
-                        f"Status final {historical_order.current_status} tidak boleh turun menjadi {source_status}; "
+                        f"Status final {historical_current_status} tidak boleh turun menjadi {source_status}; "
                         "status canonical tidak diubah.",
                         False,
                     )
                 )
-                normalized_status = historical_order.current_status
-                is_final = historical_order.is_final
-                is_pure_cancelled = historical_order.is_pure_cancelled
+                normalized_status = historical_current_status
+                source_status = historical_source_status
+                is_final = historical_is_final
+                is_pure_cancelled = historical_is_pure_cancelled
                 historical_status_update_allowed = False
                 quality["historical_status_ignored_rows"] += 1
         master_sku = historical_line.sku if historical_line else (None if is_out_of_scope else master_skus.get(sku_text))
@@ -625,9 +638,8 @@ def parse_sales_batch(batch):
     for row in in_scope_rows:
         by_order[row.order_number].append(row)
     for order_number, order_rows in by_order.items():
-        statuses = {(row.normalized_status, row.is_pure_cancelled) for row in order_rows}
         datetimes = {row.order_datetime for row in order_rows}
-        if len(statuses) > 1 or len(datetimes) > 1:
+        if len(datetimes) > 1:
             for row in order_rows:
                 pending_issues.append(
                     (
@@ -635,7 +647,7 @@ def parse_sales_batch(batch):
                         "ERROR",
                         "ORDER_HEADER_CONFLICT",
                         "order",
-                        f"Order {order_number} memiliki status/tanggal yang tidak konsisten antar-SKU.",
+                        f"Order {order_number} memiliki tanggal order yang tidak konsisten antar-SKU.",
                         True,
                     )
                 )
@@ -660,8 +672,10 @@ def parse_sales_batch(batch):
         elif row.existing_line is None:
             action = StagedSalesRow.ProposedAction.NEW
         elif (
-            row.existing_line.order.current_status != row.normalized_status
-            or row.existing_line.order.source_status != row.source_status
+            row.existing_line.current_status != row.normalized_status
+            or row.existing_line.source_status != row.source_status
+            or row.existing_line.is_final != row.is_final
+            or row.existing_line.is_pure_cancelled != row.is_pure_cancelled
         ):
             action = StagedSalesRow.ProposedAction.STATUS_UPDATE
         else:

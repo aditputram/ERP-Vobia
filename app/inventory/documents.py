@@ -101,3 +101,63 @@ def build_inbound_checklist_pdf(*, po, deliveries):
 
     document.build(story, onFirstPage=footer, onLaterPages=footer)
     return output.getvalue()
+
+
+def build_inbound_queue_pdf(*, deliveries):
+    output = BytesIO()
+    page_size = landscape(A4)
+    styles = getSampleStyleSheet()
+    body = ParagraphStyle("QueueBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=7, leading=9)
+    title = ParagraphStyle("QueueTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=19, leading=22)
+    right = ParagraphStyle("QueueRight", parent=body, alignment=TA_RIGHT)
+    rows = [["PO", "VENDOR", "NO. DO", "JENIS", "TGL KIRIM", "SKU", "ARTICLE", "SIZE", "QTY MENUNGGU", "QTY DICEK", "CATATAN"]]
+    total = 0
+    for shipment in deliveries:
+        for row in shipment["rows"]:
+            if not row["remaining"]:
+                continue
+            delivery = row["delivery"]
+            sku = delivery.po_line.sku
+            total += row["remaining"]
+            rows.append([Paragraph(delivery.production_order.po.po_number, body), Paragraph(delivery.production_order.po.supplier.name, body), delivery.delivery_order.number, row["kind_label"], delivery.activity_date.strftime("%d/%m/%Y"), Paragraph(sku.sku, body), Paragraph(sku.product_variant.product.name, body), sku.size or "-", _qty(row["remaining"]), "", ""])
+    rows.append(["", "", "", "", "", "", "", "TOTAL", _qty(total), "", ""])
+    document = SimpleDocTemplate(output, pagesize=page_size, leftMargin=10 * mm, rightMargin=10 * mm, topMargin=14 * mm, bottomMargin=14 * mm, title="Checklist Pengiriman Menunggu Penerimaan", author="Vobia Space")
+    story = [Table([[Paragraph("VOBIA SPACE", body), Paragraph("WAREHOUSE", right)], [Paragraph("PENGIRIMAN MENUNGGU PENERIMAAN", title), ""]], colWidths=(190 * mm, 85 * mm)), Spacer(1, 6 * mm)]
+    detail = Table(rows, colWidths=(31 * mm, 31 * mm, 27 * mm, 23 * mm, 20 * mm, 25 * mm, 38 * mm, 12 * mm, 23 * mm, 20 * mm, 30 * mm), repeatRows=1)
+    detail.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#171717")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 6.5), ("GRID", (0, 0), (-1, -2), 0.4, colors.HexColor("#c8c8c3")), ("ROWBACKGROUNDS", (0, 1), (-1, -2), (colors.white, colors.HexColor("#f4f4f1"))), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (7, 1), (9, -1), "RIGHT"), ("SPAN", (0, -1), (6, -1)), ("SPAN", (9, -1), (10, -1)), ("LINEABOVE", (7, -1), (8, -1), 1, colors.HexColor("#171717")), ("FONTNAME", (7, -1), (8, -1), "Helvetica-Bold"), ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+    story.extend([detail, Spacer(1, 8 * mm), Table([["Tanggal pengecekan: ____ / ____ / ______", "Diperiksa oleh: ____________________________", "Mengetahui: ____________________________"]], colWidths=(90 * mm, 95 * mm, 90 * mm))])
+
+    def footer(pdf, doc):
+        pdf.saveState(); pdf.setFont("Helvetica", 7); pdf.setFillColor(colors.HexColor("#666666")); pdf.drawString(10 * mm, 7 * mm, "Vobia Space - Warehouse Inbound"); pdf.drawRightString(page_size[0] - 10 * mm, 7 * mm, f"Halaman {doc.page}"); pdf.restoreState()
+
+    document.build(story, onFirstPage=footer, onLaterPages=footer)
+    return output.getvalue()
+
+
+def build_inbound_filtered_receipts_pdf(*, receipts, query=""):
+    receipts = list(receipts)
+    output = BytesIO()
+    page_size = landscape(A4)
+    styles = getSampleStyleSheet()
+    body = ParagraphStyle("ReceiptListBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=7, leading=9)
+    title = ParagraphStyle("ReceiptListTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=19, leading=22)
+    right = ParagraphStyle("ReceiptListRight", parent=body, alignment=TA_RIGHT)
+    rows = [["PO", "VENDOR", "TGL DITERIMA", "NO. DO", "SKU", "ARTICLE", "SIZE", "QTY", "WAREHOUSE", "DITERIMA OLEH"]]
+    total = 0
+    for receipt in receipts:
+        sku = receipt.po_line.sku
+        total += receipt.received_qty
+        rows.append([Paragraph(receipt.po_line.po.po_number, body), Paragraph(receipt.po_line.po.supplier.name, body), receipt.inbound_date.strftime("%d/%m/%Y"), receipt.delivery_activity.delivery_order.number if receipt.delivery_activity_id and receipt.delivery_activity.delivery_order_id else "-", Paragraph(sku.sku, body), Paragraph(sku.product_variant.product.name, body), sku.size or "-", _qty(receipt.received_qty), Paragraph(receipt.warehouse.name, body), Paragraph(receipt.recorded_by.get_full_name() or receipt.recorded_by.username, body)])
+    rows.append(["", "", "", "", "", "", "TOTAL", _qty(total), "", ""])
+    document = SimpleDocTemplate(output, pagesize=page_size, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=16 * mm, bottomMargin=14 * mm, title="Pengiriman Sudah Diterima", author="Vobia Space")
+    filter_label = query or "Semua PO dan artikel"
+    story = [Table([[Paragraph("VOBIA SPACE", body), Paragraph("WAREHOUSE", right)], [Paragraph("PENGIRIMAN SUDAH DITERIMA", title), ""]], colWidths=(185 * mm, 80 * mm)), Paragraph(f"Filter: {filter_label}", body), Spacer(1, 6 * mm)]
+    detail = Table(rows, colWidths=(33 * mm, 37 * mm, 23 * mm, 30 * mm, 30 * mm, 47 * mm, 14 * mm, 17 * mm, 30 * mm, 29 * mm), repeatRows=1)
+    detail.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#171717")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 6.5), ("GRID", (0, 0), (-1, -2), 0.4, colors.HexColor("#c8c8c3")), ("ROWBACKGROUNDS", (0, 1), (-1, -2), (colors.white, colors.HexColor("#f4f4f1"))), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (6, 1), (7, -1), "RIGHT"), ("SPAN", (0, -1), (5, -1)), ("SPAN", (8, -1), (9, -1)), ("LINEABOVE", (6, -1), (7, -1), 1, colors.HexColor("#171717")), ("FONTNAME", (6, -1), (7, -1), "Helvetica-Bold"), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
+    story.append(detail)
+
+    def footer(pdf, doc):
+        pdf.saveState(); pdf.setFont("Helvetica", 7); pdf.setFillColor(colors.HexColor("#666666")); pdf.drawString(12 * mm, 7 * mm, "Vobia Space - Warehouse Inbound"); pdf.drawRightString(page_size[0] - 12 * mm, 7 * mm, f"Halaman {doc.page}"); pdf.restoreState()
+
+    document.build(story, onFirstPage=footer, onLaterPages=footer)
+    return output.getvalue()

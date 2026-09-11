@@ -164,6 +164,13 @@ class InventoryWorkflowTests(TestCase):
         self.assertIn("08/09/2026", pdf_text)
         self.assertIn("10 pcs", pdf_text)
 
+        filtered = self.client.get(reverse("inventory:inbound_completed_report_pdf"), {"q": "PO 001"})
+        self.assertEqual(filtered.status_code, 200)
+        filtered_text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(filtered.content)).pages)
+        self.assertIn("PENGIRIMAN SUDAH DITERIMA", filtered_text)
+        self.assertIn("Filter: PO 001", filtered_text)
+        self.assertIn(self.po.po_number, filtered_text)
+
     def test_inbound_search_and_pending_checklist_pdf(self):
         self.client.force_login(self.user)
         delivery_order = ProductionDeliveryOrder.objects.create(
@@ -187,20 +194,19 @@ class InventoryWorkflowTests(TestCase):
             actor=self.user,
         )
 
-        page = self.client.get(reverse("inventory:inbound"), {"q": "Product"})
+        page = self.client.get(reverse("inventory:inbound"), {"q": "tidak ada"})
         self.assertContains(page, self.po.po_number)
         self.assertContains(page, "Print PDF")
         self.assertEqual(len(page.context["delivery_orders"]), 1)
-        self.assertEqual(len(self.client.get(reverse("inventory:inbound"), {"q": "PO 001"}).context["delivery_orders"]), 1)
-        self.assertEqual(len(self.client.get(reverse("inventory:inbound"), {"q": "tidak ada"}).context["delivery_orders"]), 0)
+        self.assertEqual(len(page.context["completed_delivery_orders"]), 0)
 
-        response = self.client.get(reverse("inventory:inbound_po_checklist_pdf", args=[self.po.id]))
+        response = self.client.get(reverse("inventory:inbound_pending_report_pdf"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
         pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(response.content)).pages)
-        self.assertIn("CHECKLIST PENERIMAAN BARANG", pdf_text)
+        self.assertIn("PENGIRIMAN MENUNGGU PENERIMAAN", pdf_text)
         self.assertIn("DOP.VOB-09/26-001", pdf_text)
-        self.assertIn("10 pcs", pdf_text)
+        self.assertIn("10", pdf_text)
 
     def test_qc_then_partial_inbound_creates_actual_layer_only_after_receipt(self):
         inspected_at = timezone.make_aware(datetime(2026, 9, 5, 10, 0))

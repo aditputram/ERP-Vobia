@@ -24,7 +24,12 @@ from sales.models import SalesOrder
 from imports.services.storage import DuplicateRawFile
 
 from .forms import AdjustmentForm, DeliveryReceiveForm, FIFOOpeningImportUploadForm, InboundForm, OpeningForm, QCForm, ReturnForm, WarehouseForm
-from .documents import build_inbound_checklist_pdf, build_inbound_receipt_pdf
+from .documents import (
+    build_inbound_checklist_pdf,
+    build_inbound_filtered_receipts_pdf,
+    build_inbound_queue_pdf,
+    build_inbound_receipt_pdf,
+)
 from .models import (
     FIFOLayer,
     FIFOOpeningImportBatch,
@@ -703,7 +708,6 @@ def inbound(request):
             )
             return all(term in haystack.casefold() for term in terms)
 
-        delivery_orders = [group for group in delivery_orders if matches(group)]
         completed_delivery_orders = [group for group in completed_delivery_orders if matches(group)]
 
     form = InboundForm(request.POST if request.method == "POST" and not is_delivery_receive else None)
@@ -796,6 +800,50 @@ def inbound_po_checklist_pdf(request, po_id):
     response = HttpResponse(build_inbound_checklist_pdf(po=po, deliveries=deliveries), content_type="application/pdf")
     safe_number = po.po_number.replace("/", "-")
     response["Content-Disposition"] = f'attachment; filename="VOBIA-Checklist-Inbound-{safe_number}.pdf"'
+    return response
+
+
+@login_required
+def inbound_pending_report_pdf(request):
+    activities = ProductionActivity.objects.filter(
+        entry_kind=ProductionActivity.EntryKind.ACTIVITY,
+        activity_type__in=(ProductionActivity.ActivityType.WAREHOUSE_DELIVERY, ProductionActivity.ActivityType.REJECTED_WAREHOUSE_DELIVERY),
+    ).select_related("production_order__po__supplier", "po_line__sku__product_variant__product", "delivery_order").prefetch_related("correction_entries", "inbound_receipts", "rejected_follow_ups").order_by("activity_date", "occurred_at")
+    groups = {}
+    for delivery in activities:
+        effective = max(delivery.correction_entries.all(), key=lambda row: row.occurred_at, default=delivery)
+        shipped = effective.quantity or 0
+        is_rejected = delivery.activity_type == ProductionActivity.ActivityType.REJECTED_WAREHOUSE_DELIVERY
+        received = sum((row.open_qty for row in delivery.rejected_follow_ups.all() if row.delivery_status == "INBOUND"), Decimal("0")) if is_rejected else sum((row.received_qty for row in delivery.inbound_receipts.all()), 0)
+        remaining = max(shipped - received, 0)
+        if not remaining:
+            continue
+        group = groups.setdefault(str(delivery.delivery_order_id), {"rows": []})
+        group["rows"].append({"delivery": delivery, "kind_label": "Rejected Goods" if is_rejected else "QC Passed", "remaining": remaining})
+    deliveries = list(groups.values())
+    if not deliveries:
+        raise Http404("Tidak ada pengiriman yang menunggu penerimaan.")
+    response = HttpResponse(build_inbound_queue_pdf(deliveries=deliveries), content_type="application/pdf")
+    response["Content-Disposition"] = 'attachment; filename="VOBIA-Pengiriman-Menunggu-Penerimaan.pdf"'
+    return response
+
+
+@login_required
+def inbound_completed_report_pdf(request):
+    query = request.GET.get("q", "").strip()
+    terms = query.casefold().split()
+    receipts = InboundReceipt.objects.select_related(
+        "po_line__po__supplier", "po_line__sku__product_variant__product", "warehouse", "recorded_by", "delivery_activity__delivery_order"
+    ).order_by("inbound_date", "created_at")
+    if terms:
+        receipts = [
+            row for row in receipts
+            if all(term in f"{row.po_line.po.po_number} {row.po_line.sku.sku} {row.po_line.sku.product_variant.product.name}".casefold() for term in terms)
+        ]
+    if not receipts:
+        raise Http404("Tidak ada pengiriman diterima yang sesuai filter.")
+    response = HttpResponse(build_inbound_filtered_receipts_pdf(receipts=receipts, query=query), content_type="application/pdf")
+    response["Content-Disposition"] = 'attachment; filename="VOBIA-Pengiriman-Sudah-Diterima.pdf"'
     return response
 
 

@@ -30,6 +30,24 @@ from .calculations import (
 from .official_projection import official_current_month_values, official_planning_state
 
 
+SIZE_ORDER = {
+    size: index
+    for index, size in enumerate(("XS", "S", "M", "L", "XL", "XXL", "XXXL"))
+}
+
+
+def sku_size_sort_key(sku):
+    product = sku.product_variant.product
+    size = sku.size.strip().upper()
+    return (
+        product.name.casefold(),
+        sku.product_variant.name.casefold(),
+        SIZE_ORDER.get(size, len(SIZE_ORDER)),
+        size.casefold(),
+        sku.sku.casefold(),
+    )
+
+
 def previous_month(month):
     return date(month.year - (1 if month.month == 1 else 0), 12 if month.month == 1 else month.month - 1, 1)
 
@@ -294,6 +312,7 @@ def build_draft_matrix(
             key,
             {
                 "identity": identity,
+                "sort_key": sku_size_sort_key(sku) if grain == "sku" else None,
                 "selection_value": str(sku.id) if grain == "sku" else identity,
                 "parent_identity": product.parent_sku or product.code or sku.sku,
                 "product_names": set(),
@@ -551,7 +570,13 @@ def build_draft_matrix(
         row.pop("sku_ids")
         row.pop("months")
         rows.append(row)
-    rows.sort(key=lambda row: (row["product_name"], row["identity"]))
+    rows.sort(
+        key=lambda row: row["sort_key"]
+        if grain == "sku"
+        else (row["product_name"].casefold(), row["identity"].casefold())
+    )
+    for row in rows:
+        row.pop("sort_key")
 
     total_buckets = {}
     for projection in projections:
@@ -996,6 +1021,7 @@ def preview_rule(*, scenario, target_month, scope_type, method, parameter, produ
         category=category,
         product=product,
     ).exclude(product_variant__product_id__in=drafted_product_ids(target_month)))
+    skus.sort(key=sku_size_sort_key)
     if not skus:
         return [], ["Tidak ada Product yang tersedia. Product untuk Target Month ini mungkin sudah masuk Draft Projection."]
     official_values = official_values_for_skus(skus, date.today()) if target_month > date.today().replace(day=1) else {}

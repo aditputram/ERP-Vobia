@@ -2271,6 +2271,74 @@ class MerchandisingReportViewTests(TestCase):
         self.assertContains(response, "data-scenario-edit-form")
         self.assertContains(response, "data-scenario-edit-submit disabled aria-disabled=\"true\"")
 
+    def test_planning_builder_orders_skus_by_size_in_preview_and_draft(self):
+        self.sku.sku = "ZZZ-M"
+        self.sku.size = "M"
+        self.sku.save(update_fields=["sku", "size", "updated_at"])
+        l_sku = SKU.objects.create(
+            sku="AAA-L",
+            product_variant=self.sku.product_variant,
+            size="L",
+            current_retail_price=Decimal("200000"),
+            current_master_cogs=Decimal("100000"),
+        )
+        xl_sku = SKU.objects.create(
+            sku="BBB-XL",
+            product_variant=self.sku.product_variant,
+            size="XL",
+            current_retail_price=Decimal("200000"),
+            current_master_cogs=Decimal("100000"),
+        )
+        current_month = timezone.localdate().replace(day=1)
+        scenario = ProjectionScenario.objects.create(
+            name="Natural Size Order",
+            start_month=current_month,
+            end_month=current_month,
+            created_by=self.user,
+        )
+        payload = {
+            "form_name": "builder",
+            "scenario": scenario.id,
+            "target_month": current_month.strftime("%Y-%m"),
+            "scope_type": ProjectionRule.ScopeType.PRODUCT,
+            "product_status": self.product.status_id,
+            "category": self.product.category_id,
+            "product": [self.product.id],
+            "planning_activity": "ALL",
+            "method": ProjectionRule.Method.SAME_AS_LAST_MONTH,
+        }
+
+        preview = self.client.post(
+            "/merchandising/planning-builder/",
+            {**payload, "action": "preview"},
+        )
+        self.assertEqual(
+            [row["sku"].size for row in preview.context["preview_rows"]],
+            ["M", "L", "XL"],
+        )
+
+        draft = self.client.post(
+            "/merchandising/planning-builder/",
+            {
+                **payload,
+                "action": "draft",
+                **{
+                    key: "0"
+                    for sku in (self.sku, l_sku, xl_sku)
+                    for key in (f"projection_qty_{sku.id}", f"incoming_qty_{sku.id}")
+                },
+            },
+        )
+        self.assertEqual(draft.status_code, 302)
+        reopened = self.client.get(
+            "/merchandising/planning-builder/",
+            {"view_draft": scenario.id},
+        )
+        self.assertEqual(
+            [row["identity"] for row in reopened.context["draft_sku_matrix_rows"]],
+            ["ZZZ-M", "AAA-L", "BBB-XL"],
+        )
+
     def test_planning_builder_applies_one_product_rule_to_multiple_selected_products(self):
         second_product = Product.objects.create(
             code="REPORT-PRODUCT-SECOND",

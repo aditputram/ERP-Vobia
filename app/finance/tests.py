@@ -240,15 +240,18 @@ class FinanceJournalTests(TestCase):
         form_page = self.client.get(reverse("finance:accounts"), {"add": "1"})
         self.assertContains(form_page, 'name="opening_balance"')
         self.assertContains(form_page, 'name="opening_side"')
+        self.assertContains(form_page, 'name="is_subaccount"')
+        self.assertNotContains(form_page, 'name="is_postable"')
 
         response = self.client.post(
             reverse("finance:accounts"),
             {
                 "code": "990002",
                 "name": "UAT Opening Account",
-                "account_type": "OASS",
+                "account_type": "BANK",
+                "is_subaccount": "on",
+                "parent": str(self.cash.parent_id),
                 "currency": "IDR",
-                "is_postable": "on",
                 "is_active": "on",
                 "opening_balance": "250000",
                 "opening_side": "DEBIT",
@@ -264,9 +267,54 @@ class FinanceJournalTests(TestCase):
         self.assertEqual(offset.credit, Decimal("250000"))
         self.assertEqual(opening.debit_total, opening.credit_total)
         self.assertEqual(opening.status, JournalEntry.Status.DRAFT)
+        self.assertTrue(account.is_postable)
+        self.assertEqual(account.parent_id, self.cash.parent_id)
         self.assertTrue(
             AuditEvent.objects.filter(action="finance_opening_balance_updated", entity_id=account.id).exists()
         )
+
+    def test_new_coa_without_subaccount_is_created_as_parent(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("finance:accounts"),
+            {
+                "code": "990003",
+                "name": "UAT Parent Account",
+                "account_type": "OASS",
+                "parent": str(self.cash.parent_id),
+                "currency": "IDR",
+                "is_active": "on",
+                "opening_balance": "0",
+                "opening_side": "DEBIT",
+            },
+        )
+
+        self.assertRedirects(response, reverse("finance:accounts"))
+        account = Account.objects.get(code="990003")
+        self.assertFalse(account.is_postable)
+        self.assertIsNone(account.parent_id)
+
+    def test_new_subaccount_requires_parent(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("finance:accounts"),
+            {
+                "code": "990004",
+                "name": "UAT Child Without Parent",
+                "account_type": "OASS",
+                "is_subaccount": "on",
+                "currency": "IDR",
+                "is_active": "on",
+                "opening_balance": "0",
+                "opening_side": "DEBIT",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Pilih akun induk untuk membuat Sub-account.")
+        self.assertFalse(Account.objects.filter(code="990004").exists())
 
     def test_edit_coa_prefills_its_direct_opening_balance(self):
         self.client.force_login(self.user)

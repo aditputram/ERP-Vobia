@@ -28,6 +28,11 @@ ACCOUNT_TYPE_CHOICES = (
 
 class AccountForm(forms.ModelForm):
     account_type = forms.ChoiceField(label="Tipe akun", choices=ACCOUNT_TYPE_CHOICES)
+    is_subaccount = forms.BooleanField(
+        label="Sub-account",
+        required=False,
+        help_text="Centang untuk membuat akun anak.",
+    )
     opening_balance = forms.DecimalField(
         label="Saldo awal",
         required=False,
@@ -62,31 +67,58 @@ class AccountForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.is_edit = not self.instance._state.adding
         parents = Account.objects.filter(is_active=True, is_postable=False)
-        if self.instance.pk:
+        if self.is_edit:
             parents = parents.exclude(pk=self.instance.pk)
+            self.fields.pop("is_subaccount")
+        else:
+            self.fields.pop("is_postable")
+            self.order_fields(
+                (
+                    "code",
+                    "name",
+                    "account_type",
+                    "is_subaccount",
+                    "parent",
+                    "currency",
+                    "is_active",
+                    "opening_balance",
+                    "opening_side",
+                )
+            )
         self.fields["parent"].queryset = parents
+        self.fields["parent"].help_text = "Wajib dipilih jika Sub-account dicentang."
 
     def clean_parent(self):
         parent = self.cleaned_data.get("parent")
         current = parent
         while current:
-            if self.instance.pk and current.pk == self.instance.pk:
+            if self.is_edit and current.pk == self.instance.pk:
                 raise forms.ValidationError("Akun induk tidak boleh membentuk siklus.")
             current = current.parent
         return parent
 
     def clean_is_postable(self):
         is_postable = self.cleaned_data.get("is_postable")
-        if self.instance.pk and not is_postable and self.instance.journal_lines.exists():
+        if self.is_edit and not is_postable and self.instance.journal_lines.exists():
             raise forms.ValidationError("Akun yang sudah dipakai jurnal harus tetap menjadi akun transaksi.")
-        if self.instance.pk and is_postable and self.instance.children.exists():
+        if self.is_edit and is_postable and self.instance.children.exists():
             raise forms.ValidationError("Akun yang memiliki akun turunan harus tetap menjadi akun induk.")
         return is_postable
 
     def clean(self):
         cleaned = super().clean()
-        if cleaned.get("opening_balance") and not cleaned.get("is_postable"):
+        if not self.is_edit:
+            is_subaccount = cleaned.get("is_subaccount", False)
+            if is_subaccount and not cleaned.get("parent"):
+                self.add_error("parent", "Pilih akun induk untuk membuat Sub-account.")
+            if not is_subaccount:
+                cleaned["parent"] = None
+                self.instance.parent = None
+            self.instance.is_postable = is_subaccount
+        is_postable = cleaned.get("is_postable", self.instance.is_postable)
+        if cleaned.get("opening_balance") and not is_postable:
             self.add_error("opening_balance", "Saldo awal hanya dapat diisi pada akun transaksi.")
         if cleaned.get("opening_balance") and not cleaned.get("is_active"):
             self.add_error("opening_balance", "Akun dengan saldo awal harus berstatus aktif.")

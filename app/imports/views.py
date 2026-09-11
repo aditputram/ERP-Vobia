@@ -212,8 +212,8 @@ def sales_import_reparse(request, batch_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     batch = get_object_or_404(SalesImportBatch, pk=batch_id)
-    if batch.status != SalesImportBatch.Status.BLOCKED:
-        messages.error(request, "Hanya batch yang masih Blocked yang dapat dicek ulang.")
+    if batch.status not in {SalesImportBatch.Status.BLOCKED, SalesImportBatch.Status.READY}:
+        messages.error(request, "Hanya batch yang belum di-commit yang dapat dicek ulang.")
         return redirect("imports:sales_detail", batch_id=batch.id)
     batch = parse_sales_batch(batch)
     if batch.status == SalesImportBatch.Status.READY:

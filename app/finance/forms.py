@@ -6,6 +6,50 @@ from django.forms import BaseInlineFormSet, inlineformset_factory
 from .models import Account, FINANCE_OPENING_DATE, JournalEntry, JournalLine
 
 
+ACCOUNT_TYPE_CHOICES = (
+    ("BANK", "BANK · Kas & Bank"),
+    ("AREC", "AREC · Piutang Usaha"),
+    ("INTR", "INTR · Persediaan"),
+    ("OASS", "OASS · Aset Lancar Lainnya"),
+    ("OCAS", "OCAS · Aset Lainnya"),
+    ("FASS", "FASS · Aset Tetap"),
+    ("DEPR", "DEPR · Akumulasi Penyusutan"),
+    ("APAY", "APAY · Utang Usaha"),
+    ("OCLY", "OCLY · Liabilitas Lancar Lainnya"),
+    ("LTLY", "LTLY · Liabilitas Jangka Panjang"),
+    ("EQTY", "EQTY · Ekuitas"),
+    ("REVE", "REVE · Pendapatan"),
+    ("COGS", "COGS · Beban Pokok Penjualan"),
+    ("EXPS", "EXPS · Beban"),
+    ("OINC", "OINC · Pendapatan Lainnya"),
+    ("OEXP", "OEXP · Beban Lainnya"),
+)
+
+
+class AccountForm(forms.ModelForm):
+    account_type = forms.ChoiceField(label="Tipe akun", choices=ACCOUNT_TYPE_CHOICES)
+
+    class Meta:
+        model = Account
+        fields = ("code", "name", "account_type", "parent", "currency", "is_postable", "is_active")
+        labels = {
+            "code": "Kode akun",
+            "name": "Nama akun",
+            "parent": "Akun induk",
+            "currency": "Mata uang",
+            "is_postable": "Akun transaksi",
+            "is_active": "Aktif",
+        }
+        help_texts = {
+            "parent": "Pilih akun induk bila akun ini merupakan turunan.",
+            "is_postable": "Matikan untuk membuat akun induk yang tidak dapat dipakai pada jurnal.",
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["parent"].queryset = Account.objects.filter(is_active=True, is_postable=False)
+
+
 class JournalEntryForm(forms.ModelForm):
     class Meta:
         model = JournalEntry

@@ -20,8 +20,12 @@ from .services import account_balances, post_journal
 class FinanceJournalTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_superuser(username="finance-admin", password="test")
-        self.cash = Account.objects.create(code="110101", name="Cash", account_type="BANK")
-        self.capital = Account.objects.create(code="300001", name="Capital", account_type="EQTY")
+        self.cash, _ = Account.objects.update_or_create(
+            code="110101", defaults={"name": "Cash", "account_type": "BANK", "is_postable": True}
+        )
+        self.capital, _ = Account.objects.update_or_create(
+            code="300001", defaults={"name": "Capital", "account_type": "EQTY", "is_postable": True}
+        )
         self.entry = JournalEntry.objects.create(
             number="JV-202609-0001",
             entry_date=date(2026, 9, 1),
@@ -84,8 +88,44 @@ class FinanceJournalTests(TestCase):
 
         self.assertContains(self.client.get(reverse("finance:dashboard")), "Finance UAT")
 
+    def test_superadmin_can_add_coa_from_account_page(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("finance:accounts"),
+            {
+                "code": "990001",
+                "name": "UAT Finance Account",
+                "account_type": "OEXP",
+                "currency": "IDR",
+                "is_postable": "on",
+                "is_active": "on",
+            },
+        )
+
+        self.assertRedirects(response, reverse("finance:accounts"))
+        self.assertTrue(Account.objects.filter(code="990001", name="UAT Finance Account").exists())
+        self.assertTrue(AuditEvent.objects.filter(action="finance_account_created").exists())
+
+    def test_view_only_user_cannot_add_coa(self):
+        user = get_user_model().objects.create_user(
+            username="finance-viewer",
+            password="test",
+            module_access={"finance": "view"},
+            tab_access={"finance": ["accounts"]},
+        )
+        self.client.force_login(user)
+
+        page = self.client.get(reverse("finance:accounts"))
+
+        self.assertEqual(page.status_code, 200)
+        self.assertNotContains(page, "Tambah COA")
+        self.assertEqual(self.client.post(reverse("finance:accounts"), {}).status_code, 403)
+
     def test_inventory_account_is_included_as_balance_sheet_asset(self):
-        inventory = Account.objects.create(code="110401", name="Inventory", account_type="INTR")
+        inventory, _ = Account.objects.update_or_create(
+            code="110401", defaults={"name": "Inventory", "account_type": "INTR", "is_postable": True}
+        )
         entry = JournalEntry.objects.create(
             number="JV-202609-0002",
             entry_date=date(2026, 9, 1),
@@ -160,6 +200,10 @@ class FinanceJournalTests(TestCase):
 
 
 class FinanceCutoverImportTests(TestCase):
+    def setUp(self):
+        Account.objects.update(parent=None)
+        Account.objects.all().delete()
+
     def _write_sources(self, directory):
         coa_path = Path(directory) / "coa.xlsx"
         coa = Workbook()

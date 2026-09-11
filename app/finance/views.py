@@ -16,7 +16,7 @@ from audit.services import record_audit
 from accounts.access import can_access_tab, module_level
 
 from .catalog import FEATURES, FINANCE_NAV_SECTIONS
-from .forms import JournalEntryForm, JournalLineFormSet
+from .forms import AccountForm, JournalEntryForm, JournalLineFormSet
 from .models import Account, FINANCE_CUTOVER_DATE, JournalEntry
 from .services import account_balances, next_journal_number, post_journal
 
@@ -50,11 +50,46 @@ def dashboard(request):
 
 @login_required
 def account_list(request):
+    can_edit = request.user.is_superuser or module_level(request.user, "finance") in {"edit", "approve"}
+    if request.method == "POST":
+        if not can_edit:
+            return HttpResponseForbidden("Akun ini hanya memiliki akses lihat.")
+        account_form = AccountForm(request.POST)
+        if account_form.is_valid():
+            account = account_form.save()
+            record_audit(
+                actor=request.user,
+                action="finance_account_created",
+                entity_type="finance.account",
+                entity_id=account.id,
+                after_values={
+                    "code": account.code,
+                    "name": account.name,
+                    "account_type": account.account_type,
+                    "parent": account.parent.code if account.parent else "",
+                    "currency": account.currency,
+                    "is_postable": account.is_postable,
+                },
+            )
+            messages.success(request, f"COA {account.code} · {account.name} berhasil ditambahkan.")
+            return redirect("finance:accounts")
+    else:
+        account_form = AccountForm()
     query = request.GET.get("q", "").strip()
     accounts = Account.objects.select_related("parent")
     if query:
         accounts = accounts.filter(Q(code__icontains=query) | Q(name__icontains=query))
-    return render(request, "finance/accounts.html", {"accounts": accounts, "query": query})
+    return render(
+        request,
+        "finance/accounts.html",
+        {
+            "accounts": accounts,
+            "query": query,
+            "can_edit": can_edit,
+            "account_form": account_form,
+            "show_account_form": account_form.is_bound or request.GET.get("add") == "1",
+        },
+    )
 
 
 @login_required

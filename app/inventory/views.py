@@ -147,7 +147,7 @@ def _export_turnover(rows, *, sku_type):
     return workbook_response(workbook, f"VOBIA-Inventory-Turnover-{timezone.localdate():%Y-%m-%d}.xlsx")
 
 
-def _export_inbound(delivery_orders, completed_delivery_orders, outstanding, receipts):
+def _export_inbound(delivery_orders, completed_delivery_rows, outstanding, receipts):
     workbook = Workbook()
     queue_sheet = workbook.active
     queue_sheet.title = "Delivery Queue"
@@ -173,23 +173,24 @@ def _export_inbound(delivery_orders, completed_delivery_orders, outstanding, rec
     completed_sheet = workbook.create_sheet("Completed Delivery")
     append_table(
         completed_sheet,
-        ("No. DO", "Jenis", "Tanggal Kirim", "Tanggal Diterima", "PO", "Vendor", "Product", "Qty Dikirim", "Qty Received", "Status"),
+        ("No. DO", "Jenis", "Tanggal Kirim", "Tanggal Diterima", "PO", "Vendor", "SKU", "Product", "Qty Dikirim", "Qty Received", "Status"),
         (
             (
-                shipment["delivery_order"].number,
-                shipment["kind_label"],
-                shipment["delivery_date"],
-                shipment["received_date"],
-                shipment["production_order"].po.po_number,
-                shipment["production_order"].po.supplier.name,
-                ", ".join(shipment["product_names"]),
-                shipment["shipped"],
-                shipment["received"],
+                row["delivery"].delivery_order.number,
+                row["kind_label"],
+                row["delivery"].activity_date,
+                row["received_date"],
+                row["delivery"].production_order.po.po_number,
+                row["delivery"].production_order.po.supplier.name,
+                row["delivery"].po_line.sku.sku,
+                row["delivery"].po_line.sku.product_variant.product.name,
+                row["shipped"],
+                row["received"],
                 "Received",
             )
-            for shipment in completed_delivery_orders
+            for row in completed_delivery_rows
         ),
-        number_formats={8: "#,##0", 9: "#,##0"},
+        number_formats={9: "#,##0", 10: "#,##0"},
     )
     outstanding_sheet = workbook.create_sheet("Outstanding PO")
     append_table(
@@ -698,23 +699,25 @@ def inbound(request):
     for group in delivery_order_map.values():
         group["product_names"] = sorted(group["product_names"], key=str.casefold)
     delivery_orders = [group for group in delivery_order_map.values() if group["remaining"]]
-    completed_delivery_orders = [
-        group for group in delivery_order_map.values() if not group["remaining"] and group["received"]
+    completed_delivery_rows = [
+        row for row in delivery_rows if not row["remaining"] and row["received"]
     ]
     if query:
         terms = query.casefold().split()
 
-        def matches(group):
+        def matches(row):
+            delivery = row["delivery"]
             haystack = " ".join(
-                [group["production_order"].po.po_number]
-                + [
-                    f'{row["delivery"].po_line.sku.sku} {row["delivery"].po_line.sku.product_variant.product.name}'
-                    for row in group["rows"]
-                ]
+                (
+                    delivery.delivery_order.number,
+                    delivery.production_order.po.po_number,
+                    delivery.po_line.sku.sku,
+                    delivery.po_line.sku.product_variant.product.name,
+                )
             )
             return all(term in haystack.casefold() for term in terms)
 
-        completed_delivery_orders = [group for group in completed_delivery_orders if matches(group)]
+        completed_delivery_rows = [row for row in completed_delivery_rows if matches(row)]
 
     form = InboundForm(request.POST if request.method == "POST" and not is_delivery_receive else None)
     if request.method == "POST" and not is_delivery_receive and form.is_valid():
@@ -744,7 +747,7 @@ def inbound(request):
         "delivery_activity__delivery_order",
     ).order_by("-inbound_date", "-created_at")
     if request.method == "GET" and request.GET.get("export") == "xlsx":
-        return _export_inbound(delivery_orders, completed_delivery_orders, outstanding, receipt_rows)
+        return _export_inbound(delivery_orders, completed_delivery_rows, outstanding, receipt_rows)
     receipts = receipt_rows[:300]
     return render(
         request,
@@ -753,7 +756,7 @@ def inbound(request):
             "form": form,
             "delivery_rows": delivery_rows,
             "delivery_orders": delivery_orders,
-            "completed_delivery_orders": completed_delivery_orders,
+            "completed_delivery_rows": completed_delivery_rows,
             "selected_delivery": selected_delivery,
             "delivery_form": delivery_form,
             "outstanding": outstanding,

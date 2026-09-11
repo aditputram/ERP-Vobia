@@ -1463,7 +1463,7 @@ class ProductionWorkflowTests(TestCase):
             {"delivery_order": delivery_order.id},
         )
         self.assertEqual(completed_inbound_page.context["delivery_orders"], [])
-        self.assertEqual(len(completed_inbound_page.context["completed_delivery_orders"]), 1)
+        self.assertEqual(len(completed_inbound_page.context["completed_delivery_rows"]), 1)
         self.assertContains(completed_inbound_page, "Pengiriman sudah diterima")
         self.assertContains(completed_inbound_page, delivery_order.number)
         self.assertContains(completed_inbound_page, "Received")

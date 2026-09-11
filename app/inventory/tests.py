@@ -166,8 +166,63 @@ class InventoryWorkflowTests(TestCase):
             actor=self.user,
         )
 
+        base_product = self.sku.product_variant.product
+        second_product = Product.objects.create(
+            code="P-2",
+            parent_sku="PARENT-2",
+            name="Second Product",
+            status=base_product.status,
+            category=base_product.category,
+        )
+        second_variant = ProductVariant.objects.create(
+            product=second_product,
+            name="Blue",
+            color="Blue",
+        )
+        second_sku = SKU.objects.create(
+            sku="SKU-2",
+            product_variant=second_variant,
+            current_retail_price=Decimal("210000"),
+            current_master_cogs=Decimal("110000"),
+        )
+        second_line = PurchaseOrderLine.objects.create(
+            po=self.po,
+            sku=second_sku,
+            ordered_qty=Decimal("5"),
+            cogs_snapshot=Decimal("125000"),
+        )
+        second_delivery = ProductionActivity.objects.create(
+            production_order=self.production_order,
+            action="warehouse_delivery",
+            entry_kind=ProductionActivity.EntryKind.ACTIVITY,
+            activity_type=ProductionActivity.ActivityType.WAREHOUSE_DELIVERY,
+            activity_date=date(2026, 9, 6),
+            quantity=Decimal("5"),
+            po_line=second_line,
+            delivery_order=delivery_order,
+            description="Deliver second SKU to warehouse",
+            actor=self.user,
+        )
+        InboundReceipt.objects.create(
+            po_line=second_line,
+            delivery_activity=second_delivery,
+            inbound_date=date(2026, 9, 6),
+            received_qty=Decimal("5"),
+            warehouse=self.warehouse,
+            reference="GRN-PRODUCT-NAME-2",
+            retail_price_snapshot=Decimal("210000"),
+            recorded_by=self.user,
+        )
+
         inbound_page = self.client.get(reverse("inventory:inbound"))
-        self.assertEqual(inbound_page.context["completed_delivery_orders"][0]["product_names"], ["Product"])
+        completed_rows = inbound_page.context["completed_delivery_rows"]
+        self.assertEqual(len(completed_rows), 2)
+        self.assertSetEqual(
+            {row["delivery"].po_line.sku.sku for row in completed_rows},
+            {"SKU-1", "SKU-2"},
+        )
+        self.assertContains(inbound_page, 'id="delivery-', count=2)
+        self.assertContains(inbound_page, "<th>SKU</th>", html=True)
         self.assertContains(inbound_page, "<th>Product</th>", html=True)
 
         turnover_page = self.client.get(reverse("inventory:turnover"), {"movement_type": "INCOMING"})
@@ -184,8 +239,10 @@ class InventoryWorkflowTests(TestCase):
         export = self.client.get(reverse("inventory:inbound"), {"export": "xlsx"})
         workbook = load_workbook(io.BytesIO(export.content), read_only=True)
         sheet = workbook["Completed Delivery"]
-        self.assertEqual(sheet["G1"].value, "Product")
-        self.assertEqual(sheet["G2"].value, "Product")
+        self.assertEqual(sheet["G1"].value, "SKU")
+        self.assertEqual(sheet["H1"].value, "Product")
+        self.assertSetEqual({sheet["G2"].value, sheet["G3"].value}, {"SKU-1", "SKU-2"})
+        self.assertSetEqual({sheet["H2"].value, sheet["H3"].value}, {"Product", "Second Product"})
         workbook.close()
 
     def test_inbound_receipt_pdf_is_grouped_by_po(self):
@@ -260,7 +317,7 @@ class InventoryWorkflowTests(TestCase):
         self.assertContains(page, self.po.po_number)
         self.assertContains(page, "Print PDF")
         self.assertEqual(len(page.context["delivery_orders"]), 1)
-        self.assertEqual(len(page.context["completed_delivery_orders"]), 0)
+        self.assertEqual(len(page.context["completed_delivery_rows"]), 0)
 
         response = self.client.get(reverse("inventory:inbound_pending_report_pdf"))
         self.assertEqual(response.status_code, 200)

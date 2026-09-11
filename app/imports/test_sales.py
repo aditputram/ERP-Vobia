@@ -16,7 +16,7 @@ from openpyxl import Workbook
 from master_data.models import Category, MarketplaceSKUMapping, Product, ProductStatus, ProductVariant, SKU
 from inventory.models import FIFOOpeningImportBatch, InventoryMovement
 from audit.models import AuditEvent
-from .models import RawFile
+from .models import RawFile, SalesImportIssue
 from sales.models import SalesOrder, SalesOrderLine
 
 from .models import SalesImportBatch
@@ -593,6 +593,26 @@ class SalesImportWorkflowTests(TestCase):
 
         self.assertEqual(batch.status, SalesImportBatch.Status.READY)
         self.assertFalse(batch.issues.filter(code="ORDER_HEADER_CONFLICT").exists())
+        batch.status = SalesImportBatch.Status.BLOCKED
+        batch.parser_version = "sales-v5"
+        batch.blocking_issue_count = 2
+        batch.save(update_fields=["status", "parser_version", "blocking_issue_count"])
+        SalesImportIssue.objects.create(
+            batch=batch,
+            staged_row=batch.staged_rows.first(),
+            severity=SalesImportIssue.Severity.ERROR,
+            code="ORDER_HEADER_CONFLICT",
+            field_name="order",
+            message="Status lama dipaksa seragam per order.",
+            is_blocking=True,
+        )
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("imports:sales_reparse", args=[batch.id]))
+        self.assertRedirects(response, reverse("imports:sales_detail", args=[batch.id]))
+        batch.refresh_from_db()
+        self.assertEqual(batch.status, SalesImportBatch.Status.READY)
+        self.assertEqual(batch.parser_version, "sales-v6")
+        self.assertFalse(batch.issues.filter(code="ORDER_HEADER_CONFLICT").exists())
         approve_sales_import(batch.id, self.user)
 
         order = SalesOrder.objects.get(order_number="SHOPEE-ORDER-001")
@@ -605,7 +625,6 @@ class SalesImportWorkflowTests(TestCase):
         self.assertFalse(hasattr(completed_line, "expected_return"))
         self.assertTrue(hasattr(returned_line, "expected_return"))
 
-        self.client.force_login(self.user)
         response = self.client.get(
             reverse("inventory:return_log"),
             {"source": "Shopee", "order_number": order.order_number},

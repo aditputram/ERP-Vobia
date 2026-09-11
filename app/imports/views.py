@@ -16,6 +16,7 @@ from .models import (
 )
 from .services.master_commit import approve_master_import, cancel_master_import
 from .services.sales_commit import approve_sales_import
+from .services.sales_parser import parse_sales_batch
 from .services.storage import DuplicateRawFile, create_master_import, create_sales_import
 from sales.services.requirements import import_requirements, summarize_import_requirements
 from inventory.models import FIFOOpeningImportBatch
@@ -203,4 +204,20 @@ def sales_import_approve(request, batch_id):
             f"Sales committed: {counts['orders_created']} order baru, "
             f"{counts['lines_created']} line baru, {counts['status_updates']} status berubah.",
         )
+    return redirect("imports:sales_detail", batch_id=batch.id)
+
+
+@login_required
+def sales_import_reparse(request, batch_id):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    batch = get_object_or_404(SalesImportBatch, pk=batch_id)
+    if batch.status != SalesImportBatch.Status.BLOCKED:
+        messages.error(request, "Hanya batch yang masih Blocked yang dapat dicek ulang.")
+        return redirect("imports:sales_detail", batch_id=batch.id)
+    batch = parse_sales_batch(batch)
+    if batch.status == SalesImportBatch.Status.READY:
+        messages.success(request, "File lama berhasil dicek ulang dan sekarang siap direview.")
+    else:
+        messages.warning(request, "File sudah dicek ulang, tetapi masih memiliki blocking issue lain.")
     return redirect("imports:sales_detail", batch_id=batch.id)

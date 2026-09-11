@@ -229,6 +229,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .stack-form input, .stack-form select, .stack-form textarea, .auth-card input, .upload-form select { width: 100%; min-height: 44px; padding: 9px 12px; border: 1px solid #d9d8d1; border-radius: 9px; outline: none; background: white; }
 .stack-form textarea { resize: vertical; }
 .stack-form input[type="checkbox"] { width: auto; min-height: 0; justify-self: start; }
+#coa-form .stack-form:has(#id_is_subaccount):not(:has(#id_is_subaccount:checked)) p:has(#id_parent) { display: none; }
 .stack-form input:focus, .stack-form select:focus, .stack-form textarea:focus, .auth-card input:focus, .upload-form select:focus { border-color: #768f21; box-shadow: 0 0 0 3px rgba(118,143,33,.12); }
 .stack-form .errorlist { margin: 0; padding-left: 18px; color: var(--danger); font-size: 9px; }
 .rnd-bom { display: grid; gap: 10px; margin-top: 10px; }

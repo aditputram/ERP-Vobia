@@ -793,6 +793,17 @@ class InventoryWorkflowTests(TestCase):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
+        summary = {row["label"]: row for row in response.context["return_summary"]}
+        self.assertEqual(summary["Shopee"]["total_orders"], 1)
+        self.assertEqual(summary["Shopee"]["total_qty"], Decimal("6"))
+        self.assertEqual(summary["Shopee"]["pending_orders"], 1)
+        self.assertEqual(summary["Shopee"]["pending_qty"], Decimal("6"))
+        self.assertEqual(summary["TikTok"]["total_orders"], 1)
+        self.assertEqual(summary["TikTok"]["total_qty"], Decimal("1"))
+        self.assertContains(response, "Order Fully Received")
+        self.assertContains(response, "Qty Menggantung")
+        august = self.client.get(f"{url}&summary_month=2026-08")
+        self.assertEqual(august.context["return_summary_total"]["total_orders"], 0)
         self.assertEqual(response.context["selected_order"], first_line.order)
         self.assertEqual(len(response.context["return_rows"]), 2)
         self.assertContains(response, "RETURN-ORDER-1")
@@ -824,6 +835,12 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(first_line.expected_return.status, ExpectedReturn.Status.PARTIALLY_RECEIVED)
         self.assertEqual(second_line.expected_return.status, ExpectedReturn.Status.RECEIVED)
         self.assertFalse(InventoryMovement.objects.filter(movement_type=InventoryMovement.MovementType.RETURN_IN).exists())
+
+        response = self.client.get(url)
+        summary = {row["label"]: row for row in response.context["return_summary"]}
+        self.assertEqual(summary["Shopee"]["received_qty"], Decimal("4"))
+        self.assertEqual(summary["Shopee"]["pending_orders"], 1)
+        self.assertEqual(summary["Shopee"]["pending_qty"], Decimal("2"))
 
         receipt = PhysicalReturnReceipt.objects.filter(sales_line=first_line).get()
         response = self.client.post(

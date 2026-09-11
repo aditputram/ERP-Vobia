@@ -10,7 +10,28 @@
   <a class="secondary-button" href="?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=xlsx">Export Excel</a>
 </header>
 
+<section class="panel">
+  <div class="panel-header">
+    <div><p class="eyebrow">RETURN SUMMARY</p><h2>{{ summary_month|date:"F Y" }}</h2></div>
+    <form method="get" class="inventory-filter-grid" data-auto-submit>
+      {% if selected_source %}<input type="hidden" name="source" value="{{ selected_source }}">{% endif %}
+      {% if selected_order %}<input type="hidden" name="order_number" value="{{ selected_order.order_number }}">{% endif %}
+      <label>Bulan Pesanan Retur<input type="month" name="summary_month" value="{{ summary_month_value }}"></label>
+    </form>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Source</th><th>Total Order</th><th>Total Qty</th><th>Order Fully Received</th><th>Qty Received</th><th>Order Menggantung</th><th>Qty Menggantung</th></tr></thead>
+      <tbody>
+        {% for row in return_summary %}<tr><td><strong>{{ row.label }}</strong></td><td>{{ row.total_orders|floatformat:"0g" }}</td><td>{{ row.total_qty|floatformat:"0g" }} pcs</td><td>{{ row.received_orders|floatformat:"0g" }}</td><td>{{ row.received_qty|floatformat:"0g" }} pcs</td><td>{{ row.pending_orders|floatformat:"0g" }}</td><td>{{ row.pending_qty|floatformat:"0g" }} pcs</td></tr>{% endfor %}
+      </tbody>
+      <tfoot><tr><td><strong>TOTAL</strong></td><td>{{ return_summary_total.total_orders|floatformat:"0g" }}</td><td>{{ return_summary_total.total_qty|floatformat:"0g" }} pcs</td><td>{{ return_summary_total.received_orders|floatformat:"0g" }}</td><td>{{ return_summary_total.received_qty|floatformat:"0g" }} pcs</td><td>{{ return_summary_total.pending_orders|floatformat:"0g" }}</td><td>{{ return_summary_total.pending_qty|floatformat:"0g" }} pcs</td></tr></tfoot>
+    </table>
+  </div>
+</section>
+
 <form method="get" class="panel inventory-filter" data-auto-submit>
+  <input type="hidden" name="summary_month" value="{{ summary_month_value }}">
   <div class="inventory-filter-grid">
     <label>Source
       <select name="source">

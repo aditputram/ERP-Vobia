@@ -19,7 +19,7 @@ from openpyxl.utils import get_column_letter
 
 from master_data.models import Category, Product, ProductStatus, SKU, Warehouse
 from purchasing.models import PurchaseOrder, PurchaseOrderLine
-from sales.models import SalesOrder
+from sales.models import SalesOrder, SalesOrderLine
 
 from imports.services.storage import DuplicateRawFile
 
@@ -858,6 +858,71 @@ def inbound_completed_report_pdf(request):
 
 @login_required
 def return_log(request):
+    summary_month_value = request.GET.get(
+        "summary_month", timezone.localdate().strftime("%Y-%m")
+    )
+    summary_month = (
+        parse_date(f"{summary_month_value}-01")
+        if len(summary_month_value) == 7
+        else None
+    ) or timezone.localdate().replace(day=1)
+    summary_month_value = summary_month.strftime("%Y-%m")
+    summary_orders = {
+        SalesOrder.Source.TIKTOK: {},
+        SalesOrder.Source.SHOPEE: {},
+    }
+    summary_lines = (
+        SalesOrderLine.objects.filter(
+            current_status="Retur",
+            sku__isnull=False,
+            order__source__in=summary_orders,
+            order__order_date__year=summary_month.year,
+            order__order_date__month=summary_month.month,
+        )
+        .select_related("order", "expected_return")
+        .annotate(received_qty=Sum("physical_returns__quantity"))
+    )
+    for line in summary_lines:
+        expected = getattr(line, "expected_return", None)
+        expected_qty = expected.expected_qty if expected else Decimal(line.quantity)
+        received_qty = min(line.received_qty or Decimal("0"), expected_qty)
+        order = summary_orders[line.order.source].setdefault(
+            line.order_id,
+            {"expected_qty": Decimal("0"), "received_qty": Decimal("0")},
+        )
+        order["expected_qty"] += expected_qty
+        order["received_qty"] += received_qty
+
+    return_summary = []
+    for source, label in (
+        (SalesOrder.Source.TIKTOK, "TikTok"),
+        (SalesOrder.Source.SHOPEE, "Shopee"),
+    ):
+        orders = summary_orders[source].values()
+        total_qty = sum((row["expected_qty"] for row in orders), Decimal("0"))
+        received_qty = sum((row["received_qty"] for row in orders), Decimal("0"))
+        pending_orders = sum(
+            row["received_qty"] < row["expected_qty"] for row in orders
+        )
+        return_summary.append(
+            {
+                "label": label,
+                "total_orders": len(summary_orders[source]),
+                "total_qty": total_qty,
+                "received_orders": len(summary_orders[source]) - pending_orders,
+                "received_qty": received_qty,
+                "pending_orders": pending_orders,
+                "pending_qty": total_qty - received_qty,
+            }
+        )
+    return_summary_total = {
+        key: sum((row[key] for row in return_summary), Decimal("0"))
+        for key in (
+            "total_orders", "total_qty", "received_orders", "received_qty",
+            "pending_orders", "pending_qty",
+        )
+    }
+
     return_orders = SalesOrder.objects.filter(
         lines__current_status="Retur",
         lines__sku__isnull=False,
@@ -970,7 +1035,11 @@ def return_log(request):
                     f"Sales Return diterima untuk {len(entries)} SKU; "
                     f"{restored_count} SKU memulihkan stock/FIFO.",
                 )
-                query = urlencode({"source": selected_source, "order_number": selected_order.order_number})
+                query = urlencode({
+                    "summary_month": summary_month_value,
+                    "source": selected_source,
+                    "order_number": selected_order.order_number,
+                })
                 return redirect(f"{reverse('inventory:return_log')}?{query}")
 
     receipt_rows = PhysicalReturnReceipt.objects.select_related(
@@ -994,6 +1063,10 @@ def return_log(request):
         "inventory/returns.html",
         {
             "form": form,
+            "summary_month": summary_month,
+            "summary_month_value": summary_month_value,
+            "return_summary": return_summary,
+            "return_summary_total": return_summary_total,
             "source_options": source_options,
             "selected_source": selected_source,
             "order_options": filtered_orders,

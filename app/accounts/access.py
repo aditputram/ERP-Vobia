@@ -125,7 +125,7 @@ MODULE_TABS = {
             ),
         ),
         ("inventory_turnover", "Inventory Turnover", "Warehouse", ("inventory:turnover",)),
-        ("inbound", "Inbound", "Warehouse", ("inventory:inbound", "inventory:inbound_po_receipt_pdf")),
+        ("inbound", "Inbound", "Warehouse", ("inventory:inbound", "inventory:inbound_po_receipt_pdf", "inventory:inbound_po_checklist_pdf")),
         ("return_log", "Return Log", "Warehouse", ("inventory:return_log",)),
         ("outbound", "Outbound", "Warehouse", ("inventory:outbound",)),
     ),

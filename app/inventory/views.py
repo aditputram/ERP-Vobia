@@ -24,7 +24,7 @@ from sales.models import SalesOrder
 from imports.services.storage import DuplicateRawFile
 
 from .forms import AdjustmentForm, DeliveryReceiveForm, FIFOOpeningImportUploadForm, InboundForm, OpeningForm, QCForm, ReturnForm, WarehouseForm
-from .documents import build_inbound_receipt_pdf
+from .documents import build_inbound_checklist_pdf, build_inbound_receipt_pdf
 from .models import (
     FIFOLayer,
     FIFOOpeningImportBatch,
@@ -518,6 +518,7 @@ def turnover(request):
 
 @login_required
 def inbound(request):
+    query = request.GET.get("q", "").strip()
     requested_inbound_date = parse_date(
         request.POST.get("inbound_date", "")
         if request.method == "POST" and request.POST.get("form_name") == "delivery_receive"
@@ -689,6 +690,21 @@ def inbound(request):
     completed_delivery_orders = [
         group for group in delivery_order_map.values() if not group["remaining"] and group["received"]
     ]
+    if query:
+        terms = query.casefold().split()
+
+        def matches(group):
+            haystack = " ".join(
+                [group["production_order"].po.po_number]
+                + [
+                    f'{row["delivery"].po_line.sku.sku} {row["delivery"].po_line.sku.product_variant.product.name}'
+                    for row in group["rows"]
+                ]
+            )
+            return all(term in haystack.casefold() for term in terms)
+
+        delivery_orders = [group for group in delivery_orders if matches(group)]
+        completed_delivery_orders = [group for group in completed_delivery_orders if matches(group)]
 
     form = InboundForm(request.POST if request.method == "POST" and not is_delivery_receive else None)
     if request.method == "POST" and not is_delivery_receive and form.is_valid():
@@ -732,6 +748,7 @@ def inbound(request):
             "delivery_form": delivery_form,
             "outstanding": outstanding,
             "receipts": receipts,
+            "query": query,
         },
     )
 
@@ -756,6 +773,29 @@ def inbound_po_receipt_pdf(request, po_id):
     )
     safe_number = po.po_number.replace("/", "-")
     response["Content-Disposition"] = f'attachment; filename="VOBIA-Inbound-{safe_number}.pdf"'
+    return response
+
+
+@login_required
+def inbound_po_checklist_pdf(request, po_id):
+    po = get_object_or_404(PurchaseOrder.objects.select_related("supplier"), pk=po_id)
+    activities = ProductionActivity.objects.filter(
+        po_line__po=po,
+        entry_kind=ProductionActivity.EntryKind.ACTIVITY,
+        activity_type=ProductionActivity.ActivityType.WAREHOUSE_DELIVERY,
+    ).select_related("po_line__sku__product_variant__product", "delivery_order").prefetch_related("correction_entries", "inbound_receipts").order_by("activity_date", "occurred_at")
+    deliveries = []
+    for delivery in activities:
+        effective = max(delivery.correction_entries.all(), key=lambda row: row.occurred_at, default=delivery)
+        shipped = effective.quantity or 0
+        received = sum((receipt.received_qty for receipt in delivery.inbound_receipts.all()), 0)
+        if shipped > received:
+            deliveries.append({"delivery": delivery, "shipped": shipped, "received": received, "remaining": shipped - received})
+    if not deliveries:
+        raise Http404("PO tidak memiliki pengiriman yang menunggu penerimaan.")
+    response = HttpResponse(build_inbound_checklist_pdf(po=po, deliveries=deliveries), content_type="application/pdf")
+    safe_number = po.po_number.replace("/", "-")
+    response["Content-Disposition"] = f'attachment; filename="VOBIA-Checklist-Inbound-{safe_number}.pdf"'
     return response
 
 

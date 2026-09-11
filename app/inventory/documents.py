@@ -64,3 +64,40 @@ def build_inbound_receipt_pdf(*, po, receipts):
 
     document.build(story, onFirstPage=footer, onLaterPages=footer)
     return output.getvalue()
+
+
+def build_inbound_checklist_pdf(*, po, deliveries):
+    deliveries = list(deliveries)
+    output = BytesIO()
+    page_size = landscape(A4)
+    styles = getSampleStyleSheet()
+    body = ParagraphStyle("ChecklistBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=8, leading=10)
+    small = ParagraphStyle("ChecklistSmall", parent=body, fontSize=7, leading=9)
+    title = ParagraphStyle("ChecklistTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=19, leading=22)
+    right = ParagraphStyle("ChecklistRight", parent=body, alignment=TA_RIGHT)
+    document = SimpleDocTemplate(output, pagesize=page_size, leftMargin=14 * mm, rightMargin=14 * mm, topMargin=18 * mm, bottomMargin=16 * mm, title=f"Checklist Penerimaan {po.po_number}", author="Vobia Space")
+    total_remaining = sum((row["remaining"] for row in deliveries), 0)
+    story = [Table([[Paragraph("VOBIA SPACE", body), Paragraph("WAREHOUSE", right)], [Paragraph("CHECKLIST PENERIMAAN BARANG", title), ""]], colWidths=(180 * mm, 80 * mm)), Spacer(1, 7 * mm)]
+    meta = Table([["NO. PURCHASE ORDER", "VENDOR", "TOTAL MENUNGGU", "TANGGAL PENGECEKAN"], [Paragraph(po.po_number, body), Paragraph(po.supplier.name, body), f"{_qty(total_remaining)} pcs", "____ / ____ / ______"]], colWidths=(60 * mm, 95 * mm, 50 * mm, 55 * mm))
+    meta.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#171717")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#bdbdb8")), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (2, 1), (-1, 1), "CENTER"), ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+    story.extend([meta, Spacer(1, 7 * mm)])
+    rows = [["NO. DO", "TGL KIRIM", "SKU", "ARTICLE", "VARIANT", "SIZE", "QTY DIKIRIM", "SUDAH DITERIMA", "QTY DICEK", "CATATAN"]]
+    for row in deliveries:
+        delivery = row["delivery"]
+        sku = delivery.po_line.sku
+        rows.append([delivery.delivery_order.number, delivery.activity_date.strftime("%d/%m/%Y"), Paragraph(sku.sku, small), Paragraph(sku.product_variant.product.name, small), Paragraph(sku.product_variant.name, small), sku.size or "-", _qty(row["shipped"]), _qty(row["received"]), "", ""])
+    rows.append(["", "", "", "", "", "TOTAL", _qty(sum((row["shipped"] for row in deliveries), 0)), _qty(sum((row["received"] for row in deliveries), 0)), "", ""])
+    detail = Table(rows, colWidths=(30 * mm, 22 * mm, 28 * mm, 44 * mm, 31 * mm, 14 * mm, 21 * mm, 24 * mm, 21 * mm, 35 * mm), repeatRows=1)
+    detail.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#171717")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 7), ("GRID", (0, 0), (-1, -2), 0.4, colors.HexColor("#c8c8c3")), ("ROWBACKGROUNDS", (0, 1), (-1, -2), (colors.white, colors.HexColor("#f4f4f1"))), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (5, 1), (8, -1), "RIGHT"), ("SPAN", (0, -1), (4, -1)), ("SPAN", (8, -1), (9, -1)), ("LINEABOVE", (5, -1), (7, -1), 1, colors.HexColor("#171717")), ("FONTNAME", (5, -1), (7, -1), "Helvetica-Bold"), ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7)]))
+    story.extend([detail, Spacer(1, 10 * mm), Table([["Diperiksa oleh:", "Mengetahui:"], ["\n\n____________________________", "\n\n____________________________"]], colWidths=(130 * mm, 130 * mm))])
+
+    def footer(pdf, doc):
+        pdf.saveState()
+        pdf.setFont("Helvetica", 7)
+        pdf.setFillColor(colors.HexColor("#666666"))
+        pdf.drawString(14 * mm, 9 * mm, f"Vobia Space - {po.po_number}")
+        pdf.drawRightString(page_size[0] - 14 * mm, 9 * mm, f"Halaman {doc.page}")
+        pdf.restoreState()
+
+    document.build(story, onFirstPage=footer, onLaterPages=footer)
+    return output.getvalue()

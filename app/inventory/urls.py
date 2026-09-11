@@ -10,6 +10,7 @@ urlpatterns = [
     path("turnover/", views.turnover, name="turnover"),
     path("inbound/", views.inbound, name="inbound"),
     path("inbound/po/<uuid:po_id>/receipt-report.pdf", views.inbound_po_receipt_pdf, name="inbound_po_receipt_pdf"),
+    path("inbound/po/<uuid:po_id>/checklist.pdf", views.inbound_po_checklist_pdf, name="inbound_po_checklist_pdf"),
     path("returns/", views.return_log, name="return_log"),
     path("outbound/", views.outbound, name="outbound"),
     path("production/", views.production, name="production"),

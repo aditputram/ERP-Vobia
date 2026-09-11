@@ -17,7 +17,7 @@ from accounts.models import User
 from audit.models import AuditEvent
 from master_data.models import Category, Product, ProductStatus, ProductVariant, SKU, Supplier, Warehouse
 from purchasing.models import PurchaseOrder, PurchaseOrderLine
-from production.models import ProductionStage
+from production.models import ProductionActivity, ProductionDeliveryOrder, ProductionStage
 from production.services import ensure_production_order
 from sales.models import SalesOrder, SalesOrderLine
 
@@ -162,6 +162,44 @@ class InventoryWorkflowTests(TestCase):
         self.assertIn(self.po.po_number, pdf_text)
         self.assertIn("06/09/2026", pdf_text)
         self.assertIn("08/09/2026", pdf_text)
+        self.assertIn("10 pcs", pdf_text)
+
+    def test_inbound_search_and_pending_checklist_pdf(self):
+        self.client.force_login(self.user)
+        delivery_order = ProductionDeliveryOrder.objects.create(
+            number="DOP.VOB-09/26-001",
+            issue_month=date(2026, 9, 1),
+            sequence=1,
+            delivery_date=date(2026, 9, 6),
+            production_order=self.production_order,
+            created_by=self.user,
+        )
+        ProductionActivity.objects.create(
+            production_order=self.production_order,
+            action="warehouse_delivery",
+            entry_kind=ProductionActivity.EntryKind.ACTIVITY,
+            activity_type=ProductionActivity.ActivityType.WAREHOUSE_DELIVERY,
+            activity_date=date(2026, 9, 6),
+            quantity=Decimal("10"),
+            po_line=self.po_line,
+            delivery_order=delivery_order,
+            description="Deliver to warehouse",
+            actor=self.user,
+        )
+
+        page = self.client.get(reverse("inventory:inbound"), {"q": "Product"})
+        self.assertContains(page, self.po.po_number)
+        self.assertContains(page, "Print PDF")
+        self.assertEqual(len(page.context["delivery_orders"]), 1)
+        self.assertEqual(len(self.client.get(reverse("inventory:inbound"), {"q": "PO 001"}).context["delivery_orders"]), 1)
+        self.assertEqual(len(self.client.get(reverse("inventory:inbound"), {"q": "tidak ada"}).context["delivery_orders"]), 0)
+
+        response = self.client.get(reverse("inventory:inbound_po_checklist_pdf", args=[self.po.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(response.content)).pages)
+        self.assertIn("CHECKLIST PENERIMAAN BARANG", pdf_text)
+        self.assertIn("DOP.VOB-09/26-001", pdf_text)
         self.assertIn("10 pcs", pdf_text)
 
     def test_qc_then_partial_inbound_creates_actual_layer_only_after_receipt(self):

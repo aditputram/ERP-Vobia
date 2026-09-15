@@ -2236,6 +2236,11 @@ class MerchandisingReportViewTests(TestCase):
         )
         self.assertContains(reopened_response, "SCENARIO DRAFT")
         self.assertContains(reopened_response, "Save And Close Draft Matrix")
+        self.assertContains(reopened_response, "data-scenario-cell")
+        self.assertContains(reopened_response, "data-scenario-sales-input")
+        self.assertContains(reopened_response, "data-scenario-incoming-input")
+        self.assertContains(reopened_response, "data-incoming=")
+        self.assertContains(reopened_response, "data-sales=")
 
     def test_save_draft_ignores_unchanged_invalid_legacy_row(self):
         scenario = ProjectionScenario.objects.create(

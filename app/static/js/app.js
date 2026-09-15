@@ -768,6 +768,106 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   refreshDraftGrowth();
 
+  const refreshDraftStockChain = () => {
+    const parentMonths = new Map();
+    const totalMonths = new Map();
+    const addTotals = (map, key, values) => {
+      const total = map.get(key) || {};
+      Object.entries(values).forEach(([name, value]) => {
+        total[name] = (total[name] || 0) + value;
+      });
+      map.set(key, total);
+    };
+    const metricValues = state => ({
+      'beginning:qty': state.beginning,
+      'beginning:cogs': state.beginning * state.cogs,
+      'beginning:gross': state.beginning * state.retail,
+      'sales:qty': state.sales,
+      'sales:cogs': state.sales * state.cogs,
+      'sales:gross': state.sales * state.retail,
+      'sales:net': state.sales * state.retail * state.netRate,
+      'ending:qty': state.ending,
+      'ending:cogs': state.ending * state.cogs,
+      'ending:gross': state.ending * state.retail,
+      'incoming_recommendation:qty': state.incoming,
+      'incoming_recommendation:cogs': state.incoming * state.cogs,
+      'incoming_recommendation:gross': state.incoming * state.retail,
+      beginningGross: state.beginning * state.retail,
+      salesGross: state.sales * state.retail,
+    });
+    const isNextMonth = (previous, current) => {
+      const [year, month] = previous.split('-').map(Number);
+      const next = new Date(Date.UTC(year, month, 1));
+      return next.toISOString().slice(0, 7) === current;
+    };
+    const renderCell = (cell, values) => {
+      if (!cell || cell.querySelector('input')) return;
+      const metric = cell.dataset.metric;
+      const submetric = cell.dataset.submetric;
+      let value = metric === 'stock_ratio'
+        ? (values.salesGross ? values.beginningGross / values.salesGross : null)
+        : values[`${metric}:${submetric}`];
+      if (value === undefined) return;
+      const target = metric === 'sales' && submetric === 'qty'
+        ? cell.querySelector('strong') || cell
+        : cell.querySelector('span') || cell;
+      if (value === null) {
+        target.textContent = '—';
+        return;
+      }
+      target.textContent = metric === 'stock_ratio'
+        ? formatPreviewRatio(value)
+        : (submetric === 'qty' ? formatPreviewQty(value) : `Rp ${formatPreviewQty(value)}`);
+      if (metric === 'stock_ratio') target.classList.toggle('ratio-alert', value > 2);
+      if (metric === 'ending') cell.classList.toggle('metric-negative', value < 0);
+    };
+
+    document.querySelectorAll('[data-draft-sku-row]').forEach(row => {
+      const states = new Map();
+      row.querySelectorAll('[data-scenario-sales-input], [data-scenario-incoming-input]').forEach(input => {
+        const id = input.dataset.projectionId;
+        const state = states.get(id) || {
+          month: input.dataset.month,
+          priorEnding: Number(input.dataset.beginning) || 0,
+          sales: Number(input.dataset.sales ?? input.value) || 0,
+          incoming: Number(input.dataset.incoming ?? input.value) || 0,
+          cogs: Number(input.dataset.cogs) || 0,
+          retail: Number(input.dataset.retail) || 0,
+          netRate: Number(input.dataset.netRate) || 0,
+        };
+        if (input.matches('[data-scenario-sales-input]')) state.sales = Number(input.value) || 0;
+        if (input.matches('[data-scenario-incoming-input]')) state.incoming = input.disabled ? 0 : (Number(input.value) || 0);
+        states.set(id, state);
+      });
+      const ordered = [...states.values()].sort((left, right) => left.month.localeCompare(right.month));
+      let priorEnding = ordered[0]?.priorEnding || 0;
+      let previousMonth = null;
+      ordered.forEach(state => {
+        if (previousMonth && !isNextMonth(previousMonth, state.month)) priorEnding = state.priorEnding;
+        state.beginning = priorEnding + state.incoming;
+        state.ending = state.beginning - state.sales;
+        const values = metricValues(state);
+        row.querySelectorAll(`[data-scenario-cell][data-month="${state.month}"]`).forEach(cell => renderCell(cell, values));
+        addTotals(parentMonths, `${row.dataset.parentSku}::${state.month}`, values);
+        addTotals(totalMonths, state.month, values);
+        priorEnding = state.ending;
+        previousMonth = state.month;
+      });
+    });
+    document.querySelectorAll('[data-draft-parent-cell]').forEach(cell => {
+      const values = parentMonths.get(`${cell.closest('[data-draft-parent-row]').dataset.parentSku}::${cell.dataset.month}`);
+      if (values) renderCell(cell, values);
+    });
+    document.querySelectorAll('[data-draft-total-cell]').forEach(cell => {
+      const values = totalMonths.get(cell.dataset.month);
+      if (values) renderCell(cell, values);
+    });
+  };
+  document.querySelectorAll('[data-scenario-sales-input], [data-scenario-incoming-input]').forEach(input => {
+    input.addEventListener('input', refreshDraftStockChain);
+  });
+  refreshDraftStockChain();
+
   const poCogsInputs = [...document.querySelectorAll('[data-po-cogs-input]')];
   const syncPoCogsReview = () => {
     let grandTotal = 0;

@@ -528,8 +528,14 @@ def build_draft_matrix(
             if grain == "sku" and bucket and len(bucket["projections"]) == 1:
                 projection = bucket["projections"][0]
                 product = projection.sku.product_variant.product
+                quantities = projection_quantities(projection)
                 cell["projection_id"] = projection.id
                 cell["beginning"] = projection.beginning_qty or Decimal("0")
+                cell["sales_qty"] = quantities["sales"]
+                cell["incoming_qty"] = quantities["incoming_recommendation"]
+                cell["cogs"] = projection.cogs_snapshot
+                cell["retail"] = projection.retail_price_snapshot
+                cell["net_rate"] = projection.net_rate_snapshot
                 cell["incoming_allowed"] = (
                     product.status.name not in NO_INCOMING_STATUSES
                     and product.category.name not in NO_INCOMING_CATEGORIES
@@ -848,7 +854,7 @@ def projected_beginning(
 
 
 def refresh_scenario_stock_chain(projections, incoming_plans, *, today=None):
-    """Refresh Beginning from prior Ending and the current month's Incoming."""
+    """Keep the canonical chain: Beginning = prior Ending + current Incoming."""
     projections = list(projections)
     if not projections:
         return projections

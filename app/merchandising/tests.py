@@ -50,7 +50,9 @@ from .services.workflows import (
 from .services.builder import (
     aggregate_preview_by_parent,
     build_draft_matrix,
+    historical_sales_qty_for_skus,
     recommendation_for,
+    refresh_scenario_stock_chain,
     summarize_preview,
 )
 from inventory.services.fifo import post_opening
@@ -227,6 +229,71 @@ class MerchandisingWorkflowTests(TestCase):
             sku=self.sku,
             system_recommendation=Decimal("100"),
         )
+
+    def test_scenario_stock_chain_follows_prior_ending_and_monthly_incoming(self):
+        post_opening(
+            sku=self.sku,
+            quantity=100,
+            unit_cost=100000,
+            actor=self.user,
+        )
+        self.scenario.end_month = date(2026, 10, 1)
+        self.scenario.save(update_fields=["end_month"])
+        september = SalesProjection.objects.create(
+            scenario=self.scenario,
+            month=date(2026, 9, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("999"),
+            system_recommendation=Decimal("10"),
+        )
+        october = SalesProjection.objects.create(
+            scenario=self.scenario,
+            month=date(2026, 10, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("999"),
+            system_recommendation=Decimal("20"),
+        )
+        september_incoming = IncomingPlan.objects.create(
+            scenario=self.scenario,
+            month=september.month,
+            sku=self.sku,
+            sales_projection=september,
+            prior_ending_qty=Decimal("999"),
+            minimum_incoming=Decimal("0"),
+            recommended_incoming=Decimal("20"),
+        )
+        october_incoming = IncomingPlan.objects.create(
+            scenario=self.scenario,
+            month=october.month,
+            sku=self.sku,
+            sales_projection=october,
+            prior_ending_qty=Decimal("999"),
+            minimum_incoming=Decimal("0"),
+            recommended_incoming=Decimal("30"),
+        )
+
+        refresh_scenario_stock_chain(
+            [september, october],
+            [september_incoming, october_incoming],
+            today=date(2026, 9, 15),
+        )
+
+        self.assertEqual(september.beginning_qty, Decimal("100"))
+        self.assertEqual(october.beginning_qty, Decimal("110"))
+        self.assertEqual(september_incoming.prior_ending_qty, Decimal("100"))
+        self.assertEqual(october_incoming.prior_ending_qty, Decimal("110"))
+
+        save_scenario_draft(
+            self.scenario.id,
+            self.user,
+            sales_values={str(september.id): Decimal("15")},
+        )
+        september.refresh_from_db()
+        october.refresh_from_db()
+        october_incoming.refresh_from_db()
+        self.assertEqual(september.beginning_qty, Decimal("100"))
+        self.assertEqual(october.beginning_qty, Decimal("105"))
+        self.assertEqual(october_incoming.prior_ending_qty, Decimal("105"))
 
     def test_parent_preview_aggregates_children_and_recomputes_metrics(self):
         second_variant = ProductVariant.objects.create(product=self.product, name="White", color="White")
@@ -987,6 +1054,56 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(
             values["sales_net"],
             values["sales_gross"] - values["sales_discount"] - values["sales_return"],
+        )
+
+    def test_planning_history_uses_canonical_sales_instead_of_snapshot_or_saved_baseline(self):
+        for month, quantity, status in (
+            (6, 3, "Selesai"),
+            (7, 4, "Selesai"),
+            (8, 5, "Retur"),
+        ):
+            order = SalesOrder.objects.create(
+                source=SalesOrder.Source.OTHER,
+                source_label="Offline",
+                order_number=f"HISTORY-{month}",
+                order_datetime=timezone.make_aware(datetime(2026, month, 5, 10, 0)),
+                order_date=date(2026, month, 5),
+                current_status=status,
+                source_status=status,
+                is_final=True,
+                import_origin=SalesOrder.ImportOrigin.MANUAL,
+                affects_inventory=True,
+                first_seen_batch_id="00000000-0000-0000-0000-000000000000",
+                latest_batch_id="00000000-0000-0000-0000-000000000000",
+            )
+            SalesOrderLine.objects.create(
+                order=order,
+                sku=self.sku,
+                sku_code_snapshot=self.sku.sku,
+                current_status=status,
+                source_status=status,
+                quantity=quantity,
+                net_unit_price=Decimal("180000"),
+                retail_price_snapshot=Decimal("200000"),
+                sales_cogs_snapshot=Decimal("100000"),
+                total_gross_sales=Decimal(quantity) * Decimal("200000"),
+                total_net_sales=Decimal(quantity) * Decimal("180000"),
+                total_cogs=Decimal(quantity) * Decimal("100000"),
+                gpm=Decimal(quantity) * Decimal("80000"),
+                is_counted=True,
+            )
+
+        months, values = historical_sales_qty_for_skus(
+            [self.sku],
+            date(2026, 9, 1),
+            today=date(2026, 9, 15),
+            baseline_by_sku={self.sku.id: Decimal("99")},
+        )
+
+        self.assertEqual(months, [date(2026, 6, 1), date(2026, 7, 1), date(2026, 8, 1)])
+        self.assertEqual(
+            [values[self.sku.id][month] for month in months],
+            [Decimal("3"), Decimal("4"), Decimal("5")],
         )
 
     def test_incoming_month_close_freezes_actual_and_po_backed_carryover(self):
@@ -2547,7 +2664,7 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(
             [cell["value"] for cell in first_financial_row["cells"]],
             [
-                Decimal("2"), Decimal("2"), Decimal("2"), None, Decimal("7"),
+                Decimal("0"), Decimal("0"), Decimal("0"), None, Decimal("7"),
                 Decimal("700000"), Decimal("1400000"), Decimal("1358000"),
             ],
         )
@@ -2576,7 +2693,7 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(
             stock_rows[first_projection.sku.sku],
             [
-                Decimal("2"), Decimal("2"), Decimal("2"),
+                Decimal("0"), Decimal("0"), Decimal("0"),
                 first_projection.beginning_qty + Decimal("1"),
                 None,
                 Decimal("7"),
@@ -2633,7 +2750,7 @@ class MerchandisingReportViewTests(TestCase):
         preview_row = preview.context["preview_rows"][0]
         self.assertEqual(
             [cell["value"] for cell in preview_row["history_cells"]],
-            [Decimal("2"), Decimal("2"), preview_row["baseline_qty"]],
+            [Decimal("0"), Decimal("0"), Decimal("0")],
         )
         self.assertContains(preview, "Historical Sales QTY Juni")
         self.assertContains(preview, "Historical Sales QTY Juli")
@@ -2667,7 +2784,7 @@ class MerchandisingReportViewTests(TestCase):
         )
         self.assertEqual(
             [cell["value"] for cell in draft_view.context["draft_sku_matrix_rows"][0]["cells"][:3]],
-            [Decimal("2"), Decimal("2"), projection.baseline_qty],
+            [Decimal("0"), Decimal("0"), Decimal("0")],
         )
 
     def test_planning_activity_uses_sales_or_inbound_or_prior_ending(self):

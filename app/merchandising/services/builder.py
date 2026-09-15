@@ -76,11 +76,9 @@ def historical_sales_qty_for_skus(
 ):
     """Resolve three prior Sales QTY layers for Planning Builder display.
 
-    Closed months use the immutable MD snapshot, the running month uses the
-    official current-month projection, and future prior months use the approved
-    (or same-scenario Draft) Sales Projection.  The immediate prior month can be
-    overridden by the recommendation row's stored baseline so the displayed
-    history and the calculation baseline can never disagree.
+    Closed months always use canonical Sales transactions, the running month
+    uses the official current-month projection, and future prior months use the
+    approved (or same-scenario Draft) Sales Projection.
     """
     skus = list(skus)
     months = preceding_months(target_month)
@@ -95,46 +93,24 @@ def historical_sales_qty_for_skus(
     today = today or date.today()
     current_month = today.replace(day=1)
     closed_months = [month for month in months if month < current_month]
-    batch = MerchandisingSnapshotBatch.objects.filter(is_active=True).first()
-    snapshot_keys = set()
-    if batch and closed_months:
-        for row in MerchandisingMonthlySnapshot.objects.filter(
-            batch=batch,
-            sku_id__in=sku_ids,
-            month__in=closed_months,
-        ).values("sku_id", "month", "sales_qty"):
-            values[row["sku_id"]][row["month"]] = Decimal(row["sales_qty"] or 0)
-            snapshot_keys.add((row["sku_id"], row["month"]))
-
-    # A defensive canonical fallback keeps newly added SKUs visible even if an
-    # older MD snapshot row was absent. Returns follow the Operation convention.
-    missing_closed = {
-        (sku_id, month)
-        for sku_id in sku_ids
-        for month in closed_months
-        if (sku_id, month) not in snapshot_keys
-    }
-    if missing_closed:
-        fallback = (
+    if closed_months:
+        actuals = (
             SalesOrderLine.objects.filter(
                 is_counted=True,
                 sku_id__in=sku_ids,
                 order__order_date__gte=min(closed_months),
                 order__order_date__lt=next_month(max(closed_months)),
             )
-            .exclude(current_status="Retur")
             .values("sku_id", "order__order_date__year", "order__order_date__month")
             .annotate(total=Sum("quantity"))
         )
-        for row in fallback:
+        for row in actuals:
             month = date(
                 row["order__order_date__year"],
                 row["order__order_date__month"],
                 1,
             )
-            key = (row["sku_id"], month)
-            if key in missing_closed:
-                values[row["sku_id"]][month] = Decimal(row["total"] or 0)
+            values[row["sku_id"]][month] = Decimal(row["total"] or 0)
 
     if current_month in months:
         official = official_values_for_skus(skus, today)
@@ -167,7 +143,12 @@ def historical_sales_qty_for_skus(
 
     immediate_prior = previous_month(target_month)
     for sku_id, baseline in (baseline_by_sku or {}).items():
-        if sku_id in values and immediate_prior in values[sku_id] and baseline is not None:
+        if (
+            immediate_prior > current_month
+            and sku_id in values
+            and immediate_prior in values[sku_id]
+            and baseline is not None
+        ):
             values[sku_id][immediate_prior] = Decimal(baseline)
     return months, values
 
@@ -816,17 +797,15 @@ def projected_beginning(
 ):
     today = today or date.today()
     current_month = today.replace(day=1)
-    balance = Decimal(inventory_balance(sku, as_of_date=today if target_month <= current_month else None))
     if target_month <= current_month:
-        actual = SalesOrderLine.objects.filter(
-            sku=sku,
-            is_counted=True,
-            order__order_date__gte=target_month,
-            order__order_date__lte=today,
-        ).exclude(current_status="Retur").aggregate(total=Sum("quantity"))["total"] or Decimal("0")
-        # Ledger balance is after sales through cutoff; adding actual sales back
-        # reconstructs Ending prior month + Incoming current month.
-        return balance + actual
+        prior_month = previous_month(target_month)
+        prior_month_end = date(
+            prior_month.year,
+            prior_month.month,
+            monthrange(prior_month.year, prior_month.month)[1],
+        )
+        return Decimal(inventory_balance(sku, as_of_date=prior_month_end))
+    balance = Decimal(inventory_balance(sku))
     future_start = current_month
     if official_current_value is not None:
         balance = Decimal(official_current_value["ending_qty"])
@@ -835,7 +814,7 @@ def projected_beginning(
         sku=sku,
         approval_status=IncomingPlan.ApprovalStatus.APPROVED,
         month__gte=future_start,
-        month__lte=target_month,
+        month__lt=target_month,
     )
     incoming = approved_incoming.aggregate(total=Sum("final_approved_incoming"))["total"] or Decimal("0")
     approved_sales = SalesProjection.objects.filter(
@@ -852,7 +831,7 @@ def projected_beginning(
             sku=sku,
             approval_status=IncomingPlan.ApprovalStatus.DRAFT,
             month__gte=future_start,
-            month__lte=target_month,
+            month__lt=target_month,
         ).exclude(month__in=approved_incoming_months)
         incoming += sum((plan.proposed_incoming for plan in draft_incoming), Decimal("0"))
 
@@ -866,6 +845,57 @@ def projected_beginning(
         ).exclude(month__in=approved_sales_months)
         planned_sales += sum((projection.proposed_qty for projection in draft_sales), Decimal("0"))
     return balance + incoming - planned_sales
+
+
+def refresh_scenario_stock_chain(projections, incoming_plans, *, today=None):
+    """Refresh Beginning from prior Ending and the current month's Incoming."""
+    projections = list(projections)
+    if not projections:
+        return projections
+    today = today or date.today()
+    current_month = today.replace(day=1)
+    plans_by_projection = {
+        plan.sales_projection_id: plan for plan in incoming_plans
+    }
+    grouped = {}
+    for projection in projections:
+        grouped.setdefault(projection.sku_id, []).append(projection)
+
+    future_skus = [
+        rows[0].sku
+        for rows in grouped.values()
+        if min(row.month for row in rows) > current_month
+    ]
+    official = official_values_for_skus(future_skus, today) if future_skus else {}
+    for rows in grouped.values():
+        rows.sort(key=lambda row: row.month)
+        first = rows[0]
+        prior_ending = projected_beginning(
+            first.sku,
+            first.month,
+            today=today,
+            official_current_value=official.get(first.sku_id),
+            scenario=first.scenario,
+        )
+        for projection in rows:
+            projection.beginning_qty = prior_ending
+            plan = plans_by_projection.get(projection.id)
+            if plan:
+                plan.prior_ending_qty = prior_ending
+                incoming = plan.proposed_incoming
+            else:
+                incoming = planning_buffer_incoming(
+                    projection.proposed_qty,
+                    prior_ending,
+                    incoming_allowed=(
+                        projection.sku.product_variant.product.status.name
+                        not in NO_INCOMING_STATUSES
+                        and projection.sku.product_variant.product.category.name
+                        not in NO_INCOMING_CATEGORIES
+                    ),
+                )
+            prior_ending = prior_ending + incoming - projection.proposed_qty
+    return projections
 
 
 def recommendation_for(
@@ -926,7 +956,7 @@ def recommendation_for(
             month=target_month,
             approval_status=IncomingPlan.ApprovalStatus.APPROVED,
         ).aggregate(total=Sum("final_approved_incoming"))["total"] or Decimal("0")
-        previous_ending_qty = beginning - incoming_qty
+        previous_ending_qty = beginning
         baseline_month = previous_month(target_month)
         if baseline_month == current_month:
             if official_current_value is None:

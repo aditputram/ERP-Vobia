@@ -14,6 +14,7 @@ from .calculations import (
     incoming_calculation,
     planning_buffer_incoming,
 )
+from .builder import refresh_scenario_stock_chain
 
 
 @transaction.atomic
@@ -328,6 +329,26 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
         )
         plan.full_clean()
         incoming_total += chosen_incoming
+
+    chain_projections = list(
+        SalesProjection.objects.select_for_update()
+        .filter(scenario=scenario)
+        .select_related(
+            "scenario",
+            "sku__product_variant__product__status",
+            "sku__product_variant__product__category",
+        )
+    )
+    chain_plans = list(
+        IncomingPlan.objects.select_for_update().filter(scenario=scenario)
+    )
+    refresh_scenario_stock_chain(
+        chain_projections,
+        chain_plans,
+        today=timezone.localdate(),
+    )
+    SalesProjection.objects.bulk_update(chain_projections, ["beginning_qty"])
+    IncomingPlan.objects.bulk_update(chain_plans, ["prior_ending_qty"])
     record_audit(
         actor=actor,
         action="projection_scenario_draft_updated",

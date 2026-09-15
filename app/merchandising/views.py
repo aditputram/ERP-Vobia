@@ -42,6 +42,7 @@ from .services.builder import (
     next_month,
     preview_rule,
     previous_month,
+    refresh_scenario_stock_chain,
     summarize_preview,
     summarize_draft,
 )
@@ -1005,7 +1006,11 @@ def planning_builder(request):
         if viewed_draft_scenario:
             draft_projections = list(SalesProjection.objects.filter(
                 scenario=viewed_draft_scenario,
-            ).select_related("sku__product_variant__product").order_by(
+            ).select_related(
+                "scenario",
+                "sku__product_variant__product__status",
+                "sku__product_variant__product__category",
+            ).order_by(
                 "month", "sku__product_variant__product__name", "sku__sku"
             ))
             draft_product_count = len({
@@ -1014,6 +1019,11 @@ def planning_builder(request):
             draft_incoming_plans = list(IncomingPlan.objects.filter(
                 scenario=viewed_draft_scenario,
             ).select_related("sales_projection"))
+            refresh_scenario_stock_chain(
+                draft_projections,
+                draft_incoming_plans,
+                today=timezone.localdate(),
+            )
             draft_sales_target_qty = _latest_sales_target_qty(draft_projections)
             draft_skus = list({row.sku_id: row.sku for row in draft_projections}.values())
             draft_baseline_by_sku = {

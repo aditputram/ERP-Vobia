@@ -67,6 +67,8 @@ class SalesReportRouteTests(TestCase):
         ])
         self.assertEqual((summary["qty"], summary["gross"]), (20, Decimal("2500")))
         self.assertLess(page.content.decode().index('id="sales-plan-summary"'), page.content.decode().index('01 · SCENARIO'))
+        self.assertContains(page, '<th>Sep 2026</th>')
+        self.assertContains(page, '<th scope="row">Qty</th>')
         filtered = self.client.get(reverse("sales:planning_builder"), {
             **context, "summary_start": "2026-10", "summary_end": "2026-10", "summary_product": [str(other.id)],
         })
@@ -122,7 +124,7 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(page, "Target September 2026")
         self.assertContains(page, "Target Oktober 2026")
         self.assertNotIn('<th>Gross Sales</th>', page.content.decode().split('id="draft-projection"', 1)[1])
-        self.assertContains(page, '<tfoot>', count=2)  # Summary plus Parent SKU draft.
+        self.assertContains(page, '<tfoot>', count=1)  # Parent SKU draft only; Summary runs horizontally.
         gross_page = self.client.get(reverse("sales:planning_builder"), {**filters, "draft_metric": "gross", "draft_grain": "parent_sku"})
         self.assertNotContains(gross_page, '<th>Sales Qty</th>')
         self.assertContains(gross_page, 'type="hidden" name="parent_qty_2026-09_MATRIX-PARENT" value="10"')
@@ -411,7 +413,7 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(saved.context["rows"][0]["history"][-1]["qty"], Decimal("62"))
         self.assertEqual(saved.context["draft_parent_rows"][0]["parent_sku"], "PARENT-BUILDER")
         self.assertEqual(saved.context["draft_parent_rows"][0]["target_qty"], 15)
-        self.assertContains(saved, '<tfoot>', count=2)
+        self.assertContains(saved, '<tfoot>', count=1)
         self.assertEqual(saved.context["target_totals"]["qty"], 15)
         self.assertEqual(saved.context["target_totals"]["gross"], Decimal("1500000"))
         self.assertEqual(saved.context["target_totals"]["history"][-1]["qty"], Decimal("62"))

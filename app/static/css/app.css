@@ -477,6 +477,16 @@ tbody tr:last-child td { border-bottom: 0; }
 .sales-draft-matrix .sales-draft-product-col { overflow: hidden; text-align: left; text-overflow: ellipsis; }
 .sales-draft-matrix .sales-draft-product-col strong { display: block; overflow: hidden; text-overflow: ellipsis; }
 .sales-draft-matrix thead .sticky-col { z-index: 8; background: #f3f3ed; }
+.sales-plan-summary-filters { display: grid; grid-template-columns: 125px 125px minmax(140px, .8fr) minmax(150px, 1fr) minmax(170px, 1.1fr) minmax(150px, 1fr); gap: 8px; }
+.sales-plan-summary-filters > label, .sales-plan-summary-filters > .filter-field { min-width: 0; }
+.sales-plan-summary-filters input, .sales-plan-summary-filters .multi-select-trigger { min-width: 0; min-height: 34px; padding: 7px 8px; }
+.sales-plan-summary-table { width: 100%; min-width: max-content; }
+.sales-plan-summary-table th, .sales-plan-summary-table td { min-width: 120px; padding: 8px 9px; text-align: right; white-space: nowrap; }
+.sales-plan-summary-table th:first-child { position: sticky; left: 0; z-index: 2; min-width: 125px; text-align: left; background: white; }
+.sales-plan-summary-table thead th:first-child { z-index: 3; background: #f3f3ed; }
+.sales-plan-summary-table .summary-total { color: #27300d; background: #f0f7d8; font-weight: 850; }
+@media (max-width: 1150px) { .sales-plan-summary-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 650px) { .sales-plan-summary-filters { grid-template-columns: 1fr; } }
 
 .auth-page { background: var(--nav); }
 .auth-layout { min-height: 100vh; display: grid; grid-template-columns: minmax(420px, 1.05fr) minmax(440px, .95fr); }

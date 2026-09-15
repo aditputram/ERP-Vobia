@@ -418,6 +418,8 @@ class RndWorkflowTests(TestCase):
         self.assertContains(product_page, "Klik area PDF untuk scroll dan mengatur zoom.")
         self.assertContains(product_page, 'scrolling="yes"')
         self.assertContains(product_page, 'tabindex="0"')
+        self.assertContains(product_page, "document.referrer.startsWith(this.href)")
+        self.assertContains(product_page, "history.back()")
 
         edit_page = self.client.get(f'{reverse("rnd:product_detail", args=[product.id])}?edit=1')
         self.assertContains(edit_page, "Tutup Edit")

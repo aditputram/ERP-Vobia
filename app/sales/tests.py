@@ -123,6 +123,11 @@ class SalesReportRouteTests(TestCase):
         self.assertIsNone(page.context["rows"][1]["targets"][0]["target"])
         self.assertContains(page, "Target September 2026")
         self.assertContains(page, "Target Oktober 2026")
+        self.assertContains(page, "data-draft-status-filter")
+        self.assertContains(page, "data-draft-category-filter")
+        self.assertContains(page, "data-draft-product-search")
+        self.assertContains(page, f'data-product-statuses="{first.status_id}"')
+        self.assertContains(page, f'data-categories="{first.category_id}"')
         self.assertNotIn('<th>Gross Sales</th>', page.content.decode().split('id="draft-projection"', 1)[1])
         self.assertContains(page, '<tfoot>', count=1)  # Parent SKU draft only; Summary runs horizontally.
         gross_page = self.client.get(reverse("sales:planning_builder"), {**filters, "draft_metric": "gross", "draft_grain": "parent_sku"})

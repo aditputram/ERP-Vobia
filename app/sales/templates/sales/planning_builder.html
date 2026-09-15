@@ -87,10 +87,17 @@
       <div class="selection-group metric-selection"><span class="selection-title">Metric</span>{% for value, label in draft_metric_options %}<label class="selection-chip"><input type="checkbox" name="draft_metric" value="{{ value }}" data-chip-filter {% if value in selected_draft_metrics %}checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div>
     </div>
   </form>
-  <section class="metric-grid section-gap">
-    <article class="metric-card"><span>Gross Sales Target</span><strong class="metric-money" data-draft-matrix-summary-gross>Rp {{ target_totals.gross|floatformat:"0g" }}</strong><small>{% for month in selected_draft_months %}{{ month|date:"M Y" }}{% if not forloop.last %}, {% endif %}{% endfor %}</small></article>
-    <article class="metric-card"><span>Sales Qty Target</span><strong data-draft-matrix-summary-qty>{{ target_totals.qty|floatformat:"0g" }}</strong><small>{{ draft_parent_rows|length }} Parent SKU</small></article>
-  </section>
+  <div class="sales-draft-overview section-gap">
+    <section class="metric-grid sales-draft-targets">
+      <article class="metric-card"><span>Gross Sales Target</span><strong class="metric-money" data-draft-matrix-summary-gross>Rp {{ target_totals.gross|floatformat:"0g" }}</strong><small>{% for month in selected_draft_months %}{{ month|date:"M Y" }}{% if not forloop.last %}, {% endif %}{% endfor %}</small></article>
+      <article class="metric-card"><span>Sales Qty Target</span><strong data-draft-matrix-summary-qty>{{ target_totals.qty|floatformat:"0g" }}</strong><small>{{ draft_parent_rows|length }} Parent SKU</small></article>
+    </section>
+    <div class="sales-draft-table-filters" aria-label="Filter Scenario Draft">
+      <label>Status Product<select data-draft-status-filter><option value="">All Status</option>{% for status in product_statuses %}<option value="{{ status.id }}">{{ status.name }}</option>{% endfor %}</select></label>
+      <label>Category<select data-draft-category-filter><option value="">All Category</option>{% for category in categories %}<option value="{{ category.id }}">{{ category.name }}</option>{% endfor %}</select></label>
+      <label>Search Product<input type="search" placeholder="Nama atau Parent SKU" autocomplete="off" data-draft-product-search></label>
+    </div>
+  </div>
   {% if rows %}
   {% if viewed_scenario.status == 'DRAFT' %}<form id="sales-draft-selection-delete-form" method="post" data-draft-selection-delete-form>
     {% for name, value in plan_summary.params %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}{% csrf_token %}<input type="hidden" name="form_name" value="delete_selection"><input type="hidden" name="scenario" value="{{ viewed_scenario.id }}"><input type="hidden" name="month" value="{{ selected_month|date:'Y-m' }}">{% for month in selected_draft_months %}<input type="hidden" name="draft_month" value="{{ month|date:'Y-m' }}">{% endfor %}{% for metric in selected_draft_metrics %}<input type="hidden" name="draft_metric" value="{{ metric }}">{% endfor %}<input type="hidden" name="selection_grain" value="{{ selected_draft_grain }}" data-draft-selection-grain>
@@ -204,6 +211,23 @@
     draft.querySelector('[data-draft-matrix-summary-gross]').textContent = `Rp ${formatNumber([...months.values()].reduce((sum, total) => sum + total.gross, 0))}`;
   };
   draftInputs.forEach(input => input.addEventListener('input', refreshDraftMatrix));
+  const draftRows = [...(draft?.querySelectorAll('[data-sales-draft-parent-row]') || [])];
+  const draftStatus = draft?.querySelector('[data-draft-status-filter]');
+  const draftCategory = draft?.querySelector('[data-draft-category-filter]');
+  const draftSearch = draft?.querySelector('[data-draft-product-search]');
+  const applyDraftTableFilters = () => {
+    const query = (draftSearch?.value || '').trim().toLocaleLowerCase('id-ID');
+    draftRows.forEach(row => {
+      const statusMatch = !draftStatus?.value || row.dataset.productStatuses.split(' ').includes(draftStatus.value);
+      const categoryMatch = !draftCategory?.value || row.dataset.categories.split(' ').includes(draftCategory.value);
+      const searchMatch = !query || row.dataset.searchText.toLocaleLowerCase('id-ID').includes(query);
+      row.hidden = !(statusMatch && categoryMatch && searchMatch);
+      const selection = row.querySelector('[data-draft-row-select]');
+      if (row.hidden && selection?.checked) selection.click();
+    });
+  };
+  [draftStatus, draftCategory].forEach(control => control?.addEventListener('change', applyDraftTableFilters));
+  draftSearch?.addEventListener('input', applyDraftTableFilters);
 
 })();
 </script>

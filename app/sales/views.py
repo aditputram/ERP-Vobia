@@ -1083,6 +1083,8 @@ def planning_builder(request):
         group = draft_parent_groups.setdefault(parent_sku, {
             "parent_sku": parent_sku,
             "product_names": set(),
+            "product_status_ids": set(),
+            "category_ids": set(),
             "sku_count": 0,
             "target_qty": 0,
             "target_gross": Decimal("0"),
@@ -1095,6 +1097,10 @@ def planning_builder(request):
             "targets": [{"month": month, "qty": None, "gross": None} for month in selected_draft_months],
         })
         group["product_names"].add(row["product"].name)
+        if row["product"].status_id:
+            group["product_status_ids"].add(str(row["product"].status_id))
+        if row["product"].category_id:
+            group["category_ids"].add(str(row["product"].category_id))
         group["sku_count"] += 1
         for index, cell in enumerate(row["targets"]):
             if cell["target"] is not None:
@@ -1110,6 +1116,8 @@ def planning_builder(request):
     draft_parent_rows = []
     for group in draft_parent_groups.values():
         group["product_name"] = " / ".join(sorted(group.pop("product_names")))
+        group["product_status_ids"] = " ".join(sorted(group["product_status_ids"]))
+        group["category_ids"] = " ".join(sorted(group["category_ids"]))
         for cell in group["targets"]:
             cell["input_name"] = _parent_target_input_name(
                 group["parent_sku"], cell["month"]

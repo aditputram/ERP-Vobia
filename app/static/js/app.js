@@ -616,10 +616,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const draftDeleteTooltip = document.querySelector('[data-draft-delete-tooltip]');
   const draftRowSelections = [...document.querySelectorAll('[data-draft-row-select]')];
   const draftSelectAllControls = [...document.querySelectorAll('[data-draft-select-all]')];
+  const currentDraftGrain = () => (
+    draftGrainControls.find(control => control.checked)?.value
+    || draftSelectionGrain?.value
+    || draftRowSelections[0]?.dataset.selectionGrain
+    || 'sku'
+  );
 
   const syncDraftSelection = () => {
-    const grain = draftGrainControls.find(control => control.checked)?.value || 'sku';
-    const activeRows = draftRowSelections.filter(control => control.dataset.selectionGrain === grain);
+    const grain = currentDraftGrain();
+    const activeRows = draftRowSelections.filter(control => (
+      control.dataset.selectionGrain === grain && !control.closest('tr')?.hidden
+    ));
     const selectedRows = activeRows.filter(control => control.checked);
     draftSelectAllControls.forEach(control => {
       if (control.dataset.selectionGrain !== grain) {
@@ -642,7 +650,7 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const syncDraftGrain = () => {
-    const grain = draftGrainControls.find(control => control.checked)?.value || 'sku';
+    const grain = currentDraftGrain();
     document.querySelectorAll('[data-draft-grain-panel]').forEach(panel => {
       panel.hidden = panel.dataset.draftGrainPanel !== grain;
     });
@@ -664,7 +672,7 @@ document.addEventListener('DOMContentLoaded', () => {
     control.addEventListener('change', () => {
       const grain = control.dataset.selectionGrain;
       draftRowSelections
-        .filter(rowControl => rowControl.dataset.selectionGrain === grain)
+        .filter(rowControl => rowControl.dataset.selectionGrain === grain && !rowControl.closest('tr')?.hidden)
         .forEach(rowControl => { rowControl.checked = control.checked; });
       syncDraftSelection();
     });

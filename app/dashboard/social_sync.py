@@ -35,7 +35,6 @@ def suspicious_tiktok_days(start, end):
             account=ACCOUNT,
             date__range=(start, end),
             reach=0,
-            impressions=0,
         ).values_list("date", flat=True)
     )
 

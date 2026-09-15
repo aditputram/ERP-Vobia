@@ -67,7 +67,7 @@ class SocialSyncTests(TestCase):
         zero_day = start
         for offset in range(7):
             day = start + timedelta(days=offset)
-            values = self.values if day != zero_day else {**self.values, "reach": 0, "impressions": 0}
+            values = self.values if day != zero_day else {**self.values, "reach": 0}
             SocialDailyMetric.objects.create(
                 platform="TIKTOK", account="vobia.id", date=day,
                 synced_at=datetime(2026, 9, 1, tzinfo=dt_timezone.utc), **values,

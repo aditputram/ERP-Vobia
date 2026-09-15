@@ -239,6 +239,14 @@ class RndWorkflowTests(TestCase):
         file_response = self.client.get(reverse("rnd:design_file", args=[design.id]))
         self.assertEqual(file_response.status_code, 200)
         self.assertEqual(file_response["Cache-Control"], "private, no-store")
+        card_response = self.client.get(
+            f'{reverse("rnd:design_file", args=[design.id])}?size=card&v=1'
+        )
+        self.assertEqual(card_response["Content-Type"], "image/webp")
+        self.assertEqual(
+            card_response["Cache-Control"],
+            "private, max-age=28800, immutable",
+        )
         self.client.logout()
         self.assertEqual(self.client.get(reverse("rnd:design_file", args=[design.id])).status_code, 302)
 
@@ -331,11 +339,7 @@ class RndWorkflowTests(TestCase):
                 "name": "Commuter Bag",
                 "category": "Bag",
                 "status": DevelopmentProduct.Status.CONCEPT,
-                "product_cover": SimpleUploadedFile(
-                    "cover.png",
-                    b"\x89PNG\r\n\x1a\nlocal cover",
-                    content_type="image/png",
-                ),
+                "product_cover": self._image("cover.png", size=(1800, 1200)),
                 "mockup": SimpleUploadedFile(
                     "mockup.pdf",
                     b"%PDF-1.4\nlocal mockup",
@@ -361,6 +365,9 @@ class RndWorkflowTests(TestCase):
         self.assertRedirects(response, reverse("rnd:collection_detail", args=[collection.id]))
         product = collection.products.get(name="Commuter Bag")
         self.assertTrue(product.product_cover.name.startswith("rnd/product_covers/"))
+        self.assertTrue(product.product_cover.name.endswith(".webp"))
+        with Image.open(product.product_cover.path) as cover:
+            self.assertLessEqual(max(cover.size), 1600)
         self.assertTrue(product.mockup.name.startswith("rnd/mockups/"))
         self.assertTrue(product.technical_drawing.name.startswith("rnd/technical_drawings/"))
         self.assertEqual(product.materials.count(), 2)
@@ -381,6 +388,15 @@ class RndWorkflowTests(TestCase):
             self.assertEqual(file_response.status_code, 200)
             self.assertEqual(file_response["X-Content-Type-Options"], "nosniff")
 
+        cover_card = self.client.get(
+            f'{reverse("rnd:product_file", args=[product.id, "product-cover"])}?size=card&v=1'
+        )
+        self.assertEqual(cover_card["Content-Type"], "image/webp")
+        self.assertEqual(
+            cover_card["Cache-Control"],
+            "private, max-age=28800, immutable",
+        )
+
         self.client.logout()
         denied = self.client.get(reverse("rnd:product_file", args=[product.id, "mockup"]))
         self.assertEqual(denied.status_code, 302)
@@ -390,11 +406,7 @@ class RndWorkflowTests(TestCase):
         product = self._product(collection)
         product.mockup = self._pdf("mockup.pdf", "MDR PAGE")
         product.technical_drawing = self._pdf("drawing.pdf", "TECHNICAL DRAWING PAGE")
-        product.product_cover = SimpleUploadedFile(
-            "cover.png",
-            b"\x89PNG\r\n\x1a\nlocal cover",
-            content_type="image/png",
-        )
+        product.product_cover = self._image("cover.png")
         product.save(update_fields=("product_cover", "mockup", "technical_drawing", "updated_at"))
         self.client.force_login(self.rnd_editor)
 
@@ -430,6 +442,8 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(preview["Content-Type"], "application/pdf")
         self.assertEqual(preview["X-Frame-Options"], "SAMEORIGIN")
         self.assertEqual(preview["Cache-Control"], "private, no-store")
+        cached_preview = self.client.get(f"{preview_url}?v=1")
+        self.assertEqual(cached_preview["Cache-Control"], "private, max-age=28800, immutable")
         combined = b"".join(preview.streaming_content)
         reader = PdfReader(BytesIO(combined))
         self.assertEqual(len(reader.pages), 3)
@@ -592,7 +606,7 @@ class RndWorkflowTests(TestCase):
             "dashboard:upcoming_collection_product_file",
             args=[approved.id, "product-cover"],
         )
-        self.assertContains(detail, f'href="{cover_file}"')
+        self.assertContains(detail, f'href="{cover_file}?v=')
         self.assertEqual(self.client.get(cover_file).status_code, 200)
         raw_mockup = reverse(
             "dashboard:upcoming_collection_product_file",

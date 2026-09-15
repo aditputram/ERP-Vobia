@@ -15,7 +15,7 @@
     <div class="rnd-product-grid">
         {% for product in products %}<article class="rnd-product-card">
             <div class="rnd-product-card-top"><span class="pill">{{ product.category|default:"Belum berkategori" }}</span><span class="status-chip"><span></span>{{ product.development_stage_label }}</span></div>
-            {% if product.product_cover %}<a class="rnd-product-card-cover" href="{% url 'rnd:product_detail' product.id %}"><img src="{% url 'rnd:product_file' product.id 'product-cover' %}" alt="Product cover {{ product.name }}" loading="lazy"></a>{% endif %}
+            {% if product.product_cover %}<a class="rnd-product-card-cover" href="{% url 'rnd:product_detail' product.id %}"><img src="{% url 'rnd:product_file' product.id 'product-cover' %}?size=card&amp;v={{ product.updated_at|date:'U' }}" alt="Product cover {{ product.name }}" loading="lazy" decoding="async"></a>{% endif %}
             <div class="rnd-product-card-copy"><h3>{{ product.name }}</h3><p>Dokumen {{ product.get_document_status_display }} · Rev {{ product.document_revision|stringformat:"03d" }}</p></div>
             <div class="rnd-development-actions">
                 {% if product.development_stage == 'MATERIAL_PURCHASE' and can_progress %}<form method="post" action="{% url 'rnd:product_development_transition' product.id %}">{% csrf_token %}<input type="hidden" name="action" value="material_completed"><button class="primary-button" type="submit">Material Terbeli · Lanjut Sampling</button></form>

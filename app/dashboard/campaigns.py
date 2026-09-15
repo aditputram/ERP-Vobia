@@ -15,6 +15,7 @@ from django.views.decorators.http import require_POST
 
 from sales.models import SalesOrderLine
 from traffic.models import TrafficProductMetric
+from config.image_files import card_image
 
 from .forms_campaign import CampaignActualTimelineForm, CampaignExpenseForm, CampaignForm, CampaignProductFormSet, CreativeForm
 from .models import Campaign, CampaignExpense
@@ -50,7 +51,7 @@ def _sync_actual_spent(campaign):
 @login_required
 def campaign_list(request):
     request.session["active_module"] = "marketing"
-    campaigns = Campaign.objects.order_by("-created_at").prefetch_related("products")
+    campaigns = Campaign.objects.order_by("-created_at")
     return render(request, "dashboard/campaign_list.html", {"campaigns": campaigns})
 
 
@@ -103,9 +104,22 @@ def campaign_cover(request, campaign_id):
     campaign = get_object_or_404(Campaign, id=campaign_id)
     if not campaign.cover:
         return HttpResponseForbidden()
-    response = FileResponse(campaign.cover.open("rb"), content_type=guess_type(campaign.cover.name)[0] or "application/octet-stream")
-    response["Content-Disposition"] = f'inline; filename="{campaign.cover.name.rsplit("/", 1)[-1]}"'
+    if request.GET.get("size") == "card":
+        file_handle, served_name = card_image(
+            campaign.cover,
+            namespace="campaign-cover",
+            object_id=campaign.id,
+        )
+    else:
+        file_handle, served_name = campaign.cover.open("rb"), campaign.cover.name
+    response = FileResponse(file_handle, content_type=guess_type(served_name)[0] or "application/octet-stream")
+    response["Content-Disposition"] = f'inline; filename="{served_name.rsplit("/", 1)[-1]}"'
     response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = (
+        "private, max-age=28800, immutable"
+        if request.GET.get("v")
+        else "private, no-store"
+    )
     return response
 
 
@@ -167,13 +181,24 @@ def campaign_detail(request, campaign_id):
     traffic_totals = {}
     for (product_id, source, _period, _listing), views in traffic_by_listing.items():
         traffic_totals[(product_id, source)] = traffic_totals.get((product_id, source), 0) + views
+    product_ids = [item.product_id for item in campaign.products.all()]
+    actual_by_product = {
+        item["sku__product_variant__product_id"]: item
+        for item in SalesOrderLine.objects.filter(
+            is_counted=True,
+            sku__product_variant__product_id__in=product_ids,
+            order__order_date__gte=campaign.prelaunch_date,
+            order__order_date__lte=end,
+        ).values("sku__product_variant__product_id").annotate(
+            qty=Sum("quantity"),
+            gross=Sum("total_gross_sales"),
+        )
+    }
     rows = []
     for item in campaign.products.all():
-        actual = SalesOrderLine.objects.filter(
-            is_counted=True, sku__product_variant__product=item.product,
-            order__order_date__gte=campaign.prelaunch_date, order__order_date__lte=end,
-        ).aggregate(qty=Sum("quantity"), gross=Sum("total_gross_sales"))
-        qty, gross = actual["qty"] or 0, actual["gross"] or Decimal("0")
+        actual = actual_by_product.get(item.product_id, {})
+        qty = actual.get("qty") or 0
+        gross = actual.get("gross") or Decimal("0")
         rows.append({"item": item, "qty": qty, "gross": gross,
                      "qty_achievement": Decimal(qty) / item.target_qty * 100 if item.target_qty else None,
                      "traffic_shopee": traffic_totals.get((item.product_id, "Shopee"), 0),

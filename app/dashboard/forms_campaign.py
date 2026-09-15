@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from master_data.models import Product
 
+from config.image_files import ImageProcessingError, optimized_upload
+
 from .models import Campaign, CampaignCreative, CampaignExpense, CampaignProduct
 
 
@@ -62,7 +64,10 @@ class CampaignForm(forms.ModelForm):
             raise forms.ValidationError("Campaign Cover harus berupa JPG, PNG, atau WebP.")
         if cover.content_type == "image/webp" and header[8:12] != b"WEBP":
             raise forms.ValidationError("Campaign Cover WebP tidak valid.")
-        return cover
+        try:
+            return optimized_upload(cover)
+        except ImageProcessingError as exc:
+            raise forms.ValidationError(str(exc)) from exc
 
     def clean(self):
         data = super().clean()

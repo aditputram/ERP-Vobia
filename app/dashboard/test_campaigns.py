@@ -1,11 +1,14 @@
 import uuid
+from io import BytesIO
 from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from unittest.mock import patch
+from PIL import Image
 
 from master_data.models import Category, Product, ProductStatus, ProductVariant, SKU
 from imports.models import RawFile
@@ -18,6 +21,12 @@ from .models import Campaign, CampaignCreative, CampaignExpense, CampaignProduct
 
 
 class CampaignTests(TestCase):
+    @staticmethod
+    def image_upload(name="cover.png", size=(1800, 1200)):
+        output = BytesIO()
+        Image.new("RGB", size, "#607d8b").save(output, "PNG")
+        return SimpleUploadedFile(name, output.getvalue(), content_type="image/png")
+
     def test_post_key_ignores_share_parameters_and_www(self):
         self.assertEqual(
             _post_key("https://www.instagram.com/p/DbvfhPrmCyd/?hl=en&img_index=1"),
@@ -65,6 +74,28 @@ class CampaignTests(TestCase):
             "launch_date": "2026-01-10", "budget": "Rp. 1.000.000",
         }, instance=self.campaign)
         self.assertTrue(form.is_valid(), form.errors)
+
+    def test_campaign_cover_is_optimized_and_versioned_card_is_cached(self):
+        form = CampaignForm(data={
+            "name": self.campaign.name, "description": self.campaign.description,
+            "campaign_plan_url": self.campaign.campaign_plan_url,
+            "creative_asset_url": "",
+            "approval_date": "2026-01-01", "sample_date": "2026-01-02",
+            "creative_date": "2026-01-03", "prelaunch_date": "2026-01-05",
+            "launch_date": "2026-01-10", "budget": "Rp. 1.000.000",
+        }, files={"cover": self.image_upload()}, instance=self.campaign)
+        self.assertTrue(form.is_valid(), form.errors)
+        campaign = form.save()
+        self.assertTrue(campaign.cover.name.endswith(".webp"))
+        with Image.open(campaign.cover.path) as cover:
+            self.assertLessEqual(max(cover.size), 1600)
+
+        response = self.client.get(
+            f'{reverse("dashboard:campaign_cover", args=[campaign.id])}?size=card&v=1'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/webp")
+        self.assertEqual(response["Cache-Control"], "private, max-age=28800, immutable")
 
     def sale(self, day, gross):
         order = SalesOrder.objects.create(

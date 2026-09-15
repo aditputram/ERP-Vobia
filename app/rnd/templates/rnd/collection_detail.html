@@ -17,7 +17,7 @@
     {% if products %}<div class="rnd-product-grid">
         {% for product in products %}<a class="rnd-product-card" href="{% url 'rnd:product_detail' product.id %}">
             <div class="rnd-product-card-top"><span class="pill">{{ product.category|default:"Belum berkategori" }}</span><span class="status-chip"><span></span>{{ product.get_document_status_display }}</span></div>
-            {% if product.product_cover %}<div class="rnd-product-card-cover"><img src="{% url 'rnd:product_file' product.id 'product-cover' %}" alt="Product cover {{ product.name }}" loading="lazy"></div>{% endif %}
+            {% if product.product_cover %}<div class="rnd-product-card-cover"><img src="{% url 'rnd:product_file' product.id 'product-cover' %}?size=card&amp;v={{ product.updated_at|date:'U' }}" alt="Product cover {{ product.name }}" loading="lazy" decoding="async"></div>{% endif %}
             <div class="rnd-product-card-copy"><h3>{{ product.name }}</h3><p>{% if product.material_count %}{{ product.material_count }} material{% else %}BOM belum diisi{% endif %} · Rev {{ product.document_revision|stringformat:"03d" }}</p></div>
             <div class="rnd-product-card-footer"><span>{% if collection.development_started_at %}{{ product.development_stage_label }}{% elif product.document_status == 'APPROVED' %}Menunggu Development{% else %}{{ product.get_status_display }}{% endif %}</span><strong>Buka dokumen <span aria-hidden="true">→</span></strong></div>
         </a>{% endfor %}

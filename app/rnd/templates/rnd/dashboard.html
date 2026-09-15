@@ -16,7 +16,7 @@
         {% for collection in collections %}<a class="rnd-product-card rnd-collection-card" href="{% url 'rnd:collection_detail' collection.id %}">
             <div class="rnd-product-card-top"><span class="pill">{{ collection.code }}</span><span class="status-chip"><span></span>{{ collection.get_status_display }}</span></div>
             <div class="rnd-collection-covers">
-                {% for product in collection.cover_products|slice:":4" %}<div class="rnd-collection-cover-item"><img src="{% url 'rnd:product_file' product.id 'product-cover' %}" alt="Product cover {{ product.name }}" loading="lazy"></div>{% empty %}<div class="rnd-collection-cover-empty">Cover Product belum tersedia</div>{% endfor %}
+                {% for product in collection.cover_products|slice:":4" %}<div class="rnd-collection-cover-item"><img src="{% url 'rnd:product_file' product.id 'product-cover' %}?size=card&amp;v={{ product.updated_at|date:'U' }}" alt="Product cover {{ product.name }}" loading="lazy" decoding="async"></div>{% empty %}<div class="rnd-collection-cover-empty">Cover Product belum tersedia</div>{% endfor %}
             </div>
             <div class="rnd-product-card-copy"><h3>{{ collection.name }}</h3><p>{{ collection.product_count }} Product · {{ collection.final_count }} / {{ collection.product_count }} Final Development</p></div>
             <div class="rnd-product-card-footer"><span>{{ collection.get_status_display }}</span><strong>Buka Collection <span aria-hidden="true">→</span></strong></div>

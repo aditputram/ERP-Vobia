@@ -27,7 +27,7 @@
     <div class="rnd-design-grid">
         {% for design in recent_designs %}
         <a class="rnd-design-card" href="{% url 'rnd:design_detail' design.id %}">
-            <div class="rnd-design-image"><img src="{% url 'rnd:design_file' design.id %}" alt="{{ design.original_name }}" loading="lazy"></div>
+            <div class="rnd-design-image"><img src="{% url 'rnd:design_file' design.id %}?size=card&amp;v={{ design.created_at|date:'U' }}" alt="{{ design.original_name }}" loading="lazy" decoding="async"></div>
             <div class="rnd-design-copy"><strong>{{ design.original_name }}</strong><small>{{ design.created_at|date:"d M Y · H:i" }}{% if design.recommended_at %} · Direkomendasikan{% endif %}</small></div>
         </a>
         {% empty %}<p class="empty-state rnd-design-empty">Belum ada foto Design dalam 7 hari terakhir.</p>{% endfor %}
@@ -39,7 +39,7 @@
     <div class="rnd-design-grid">
         {% for design in recommended_designs %}
         <a class="rnd-design-card" href="{% url 'rnd:design_detail' design.id %}">
-            <div class="rnd-design-image"><img src="{% url 'rnd:design_file' design.id %}" alt="{{ design.original_name }}" loading="lazy"></div>
+            <div class="rnd-design-image"><img src="{% url 'rnd:design_file' design.id %}?size=card&amp;v={{ design.created_at|date:'U' }}" alt="{{ design.original_name }}" loading="lazy" decoding="async"></div>
             <div class="rnd-design-copy"><strong>{{ design.original_name }}</strong><small>Direkomendasikan {{ design.recommended_at|date:"d M Y · H:i" }}</small></div>
         </a>
         {% empty %}<p class="empty-state rnd-design-empty">Belum ada Design yang direkomendasikan.</p>{% endfor %}
@@ -52,7 +52,7 @@
     <div class="rnd-design-grid">
         {% for design in other_designs %}
         <a class="rnd-design-card" href="{% url 'rnd:design_detail' design.id %}">
-            <div class="rnd-design-image"><img src="{% url 'rnd:design_file' design.id %}" alt="{{ design.original_name }}" loading="lazy"></div>
+            <div class="rnd-design-image"><img src="{% url 'rnd:design_file' design.id %}?size=card&amp;v={{ design.created_at|date:'U' }}" alt="{{ design.original_name }}" loading="lazy" decoding="async"></div>
             <div class="rnd-design-copy"><strong>{{ design.original_name }}</strong><small>{{ design.created_at|date:"d M Y · H:i" }}</small></div>
         </a>
         {% endfor %}

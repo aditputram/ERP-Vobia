@@ -17,6 +17,7 @@ from django.views.decorators.http import require_POST
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from audit.services import record_audit
+from config.image_files import card_image
 
 from .forms import (
     CollectionForm,
@@ -63,6 +64,10 @@ def _can_edit_rnd(user):
 DESIGN_RETENTION = timedelta(days=180)
 
 
+def _private_file_cache(request):
+    return "private, max-age=28800, immutable" if request.GET.get("v") else "private, no-store"
+
+
 def _delete_design_asset(design, *, actor, action):
     image_storage = design.image.storage
     image_name = design.image.name
@@ -97,7 +102,7 @@ def dashboard(request):
         Prefetch(
             "products",
             queryset=DevelopmentProduct.objects.exclude(product_cover="").only(
-                "id", "collection_id", "name", "product_cover"
+                "id", "collection_id", "name", "product_cover", "updated_at"
             ),
             to_attr="cover_products",
         )
@@ -199,14 +204,22 @@ def design_detail(request, design_id):
 @login_required
 def design_file(request, design_id):
     design = get_object_or_404(DesignAsset, id=design_id)
+    if request.GET.get("size") == "card":
+        file_handle, served_name = card_image(
+            design.image,
+            namespace="rnd-design",
+            object_id=design.id,
+        )
+    else:
+        file_handle, served_name = design.image.open("rb"), design.image.name
     response = FileResponse(
-        design.image.open("rb"),
+        file_handle,
         as_attachment=False,
-        filename=design.original_name,
-        content_type=guess_type(design.original_name)[0] or "application/octet-stream",
+        filename=served_name.rsplit("/", 1)[-1],
+        content_type=guess_type(served_name)[0] or "application/octet-stream",
     )
     response["X-Content-Type-Options"] = "nosniff"
-    response["Cache-Control"] = "private, no-store"
+    response["Cache-Control"] = _private_file_cache(request)
     return response
 
 
@@ -641,7 +654,7 @@ def product_file(request, product_id, file_kind):
             content_type="application/pdf",
         )
         response["X-Content-Type-Options"] = "nosniff"
-        response["Cache-Control"] = "private, no-store"
+        response["Cache-Control"] = _private_file_cache(request)
         return response
     field = {
         "product-cover": product.product_cover,
@@ -652,14 +665,22 @@ def product_file(request, product_id, file_kind):
     }.get(file_kind)
     if not field:
         raise Http404
+    if file_kind == "product-cover" and request.GET.get("size") == "card":
+        file_handle, served_name = card_image(
+            field,
+            namespace="rnd-product-cover",
+            object_id=product.id,
+        )
+    else:
+        file_handle, served_name = field.open("rb"), field.name
     response = FileResponse(
-        field.open("rb"),
+        file_handle,
         as_attachment=False,
-        filename=field.name.rsplit("/", 1)[-1],
-        content_type=guess_type(field.name)[0] or "application/octet-stream",
+        filename=served_name.rsplit("/", 1)[-1],
+        content_type=guess_type(served_name)[0] or "application/octet-stream",
     )
     response["X-Content-Type-Options"] = "nosniff"
-    response["Cache-Control"] = "private, no-store"
+    response["Cache-Control"] = _private_file_cache(request)
     return response
 
 
@@ -671,26 +692,6 @@ def product_revision_file(request, product_id, revision):
         product_id=product_id,
         revision=revision,
     )
-    product = document_revision.product
-    if (
-        revision == product.document_revision
-        and document_revision.status != DevelopmentProductDocumentRevision.Status.APPROVED
-        and product.mockup
-        and product.technical_drawing
-    ):
-        document = build_combined_document(
-            product=product,
-            submitted_at=document_revision.submitted_at,
-        )
-        response = FileResponse(
-            BytesIO(document),
-            as_attachment=False,
-            filename=document_revision.submitted_document.name.rsplit("/", 1)[-1],
-            content_type="application/pdf",
-        )
-        response["X-Content-Type-Options"] = "nosniff"
-        response["Cache-Control"] = "private, no-store"
-        return response
     field = document_revision.approved_document or document_revision.submitted_document
     if not field:
         raise Http404
@@ -701,7 +702,7 @@ def product_revision_file(request, product_id, revision):
         content_type="application/pdf",
     )
     response["X-Content-Type-Options"] = "nosniff"
-    response["Cache-Control"] = "private, no-store"
+    response["Cache-Control"] = _private_file_cache(request)
     return response
 
 
@@ -853,7 +854,7 @@ def upcoming_collection_list(request):
                 queryset=DevelopmentProduct.objects.filter(
                     document_status=DevelopmentProduct.DocumentStatus.APPROVED
                 ).exclude(product_cover="").only(
-                    "id", "collection_id", "name", "product_cover"
+                    "id", "collection_id", "name", "product_cover", "updated_at"
                 ),
                 to_attr="cover_products",
             )

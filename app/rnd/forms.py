@@ -7,6 +7,8 @@ from django.core.files.base import ContentFile
 from django.forms import inlineformset_factory
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from config.image_files import ImageProcessingError, optimized_upload
+
 from .models import (
     Collection,
     DesignAsset,
@@ -143,7 +145,13 @@ class DevelopmentProductForm(forms.ModelForm):
         return self._clean_file("technical_drawing")
 
     def clean_product_cover(self):
-        return self._clean_file("product_cover", image_only=True)
+        uploaded = self._clean_file("product_cover", image_only=True)
+        if not uploaded or not hasattr(uploaded, "content_type"):
+            return uploaded
+        try:
+            return optimized_upload(uploaded)
+        except ImageProcessingError as exc:
+            raise forms.ValidationError(str(exc)) from exc
 
 
 class DevelopmentProductMaterialForm(forms.ModelForm):

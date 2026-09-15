@@ -466,8 +466,17 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-history-baseline { background: #f7fbe7 !important; color: #526b10; font-weight: 850; }
 .sales-draft-matrix table { width: max-content; min-width: 100%; }
 .sales-draft-matrix th, .sales-draft-matrix td { white-space: nowrap; }
-.sales-draft-matrix input[type="number"] { width: 100px; }
-.sales-draft-matrix thead th { position: static; }
+.sales-draft-matrix input[type="number"] { width: 88px; }
+.sales-draft-matrix thead th { position: sticky; top: 0; z-index: 5; height: 34px; padding: 7px; background: #f3f3ed; }
+.sales-draft-matrix thead tr:nth-child(2) th { top: 34px; }
+.sales-draft-matrix .sticky-col { position: sticky; z-index: 4; background: white; }
+.sales-draft-matrix .sticky-col-1 { left: 0; width: 105px; min-width: 105px; max-width: 105px; }
+.sales-draft-matrix .sticky-col-2 { left: 105px; width: 180px; min-width: 180px; max-width: 180px; }
+.sales-draft-matrix .has-selection .sticky-col-1 { left: 44px; }
+.sales-draft-matrix .has-selection .sticky-col-2 { left: 149px; }
+.sales-draft-matrix .sales-draft-product-col { overflow: hidden; text-align: left; text-overflow: ellipsis; }
+.sales-draft-matrix .sales-draft-product-col strong { display: block; overflow: hidden; text-overflow: ellipsis; }
+.sales-draft-matrix thead .sticky-col { z-index: 8; background: #f3f3ed; }
 
 .auth-page { background: var(--nav); }
 .auth-layout { min-height: 100vh; display: grid; grid-template-columns: minmax(420px, 1.05fr) minmax(440px, .95fr); }

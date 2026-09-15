@@ -215,6 +215,18 @@
   const draftStatus = draft?.querySelector('[data-draft-status-filter]');
   const draftCategory = draft?.querySelector('[data-draft-category-filter]');
   const draftSearch = draft?.querySelector('[data-draft-product-search]');
+  const syncDraftCategories = () => {
+    const status = draftStatus?.value || '';
+    const available = new Set();
+    if (status) draftRows.forEach(row => row.dataset.statusCategories.split(' ').forEach(pair => {
+      const [pairStatus, category] = pair.split(':');
+      if (pairStatus === status) available.add(category);
+    }));
+    [...(draftCategory?.options || [])].slice(1).forEach(option => {
+      option.hidden = option.disabled = Boolean(status) && !available.has(option.value);
+    });
+    if (status && draftCategory?.value && !available.has(draftCategory.value)) draftCategory.value = '';
+  };
   const applyDraftTableFilters = () => {
     const query = (draftSearch?.value || '').trim().toLocaleLowerCase('id-ID');
     draftRows.forEach(row => {
@@ -226,8 +238,10 @@
       if (row.hidden && selection?.checked) selection.click();
     });
   };
-  [draftStatus, draftCategory].forEach(control => control?.addEventListener('change', applyDraftTableFilters));
+  draftStatus?.addEventListener('change', () => { syncDraftCategories(); applyDraftTableFilters(); });
+  draftCategory?.addEventListener('change', applyDraftTableFilters);
   draftSearch?.addEventListener('input', applyDraftTableFilters);
+  syncDraftCategories();
 
 })();
 </script>

@@ -2,6 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
 import uuid
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -121,35 +122,39 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(page, "Target September 2026")
         self.assertContains(page, "Target Oktober 2026")
         self.assertNotIn('<th>Gross Sales</th>', page.content.decode().split('id="draft-projection"', 1)[1])
-        self.assertContains(page, '<tfoot>', count=3)  # Summary plus both draft grains.
+        self.assertContains(page, '<tfoot>', count=2)  # Summary plus Parent SKU draft.
         gross_page = self.client.get(reverse("sales:planning_builder"), {**filters, "draft_metric": "gross", "draft_grain": "parent_sku"})
         self.assertNotContains(gross_page, '<th>Sales Qty</th>')
-        self.assertContains(gross_page, f'type="hidden" name="qty_{targets[0].id}" value="10"')
+        self.assertContains(gross_page, 'type="hidden" name="parent_qty_2026-09_MATRIX-PARENT" value="10"')
         self.assertEqual(gross_page.context["selected_draft_grain"], "parent_sku")
         both = self.client.get(reverse("sales:planning_builder"), {**filters, "draft_metric": ["qty", "gross"]})
         self.assertContains(both, '<th>Sales Qty</th>')
         self.assertContains(both, '<th>Gross Sales</th>')
-        payload = {**filters, "form_name": "projection", "draft_grain": "parent_sku",
-                   **{f"qty_{target.id}": target.quantity_target + 1 for target in targets[:3]}}
+        payload = {
+            **filters,
+            "form_name": "projection",
+            "parent_qty_2026-09_MATRIX-PARENT": "11",
+            "parent_qty_2026-10_MATRIX-PARENT": "27",
+        }
         saved = self.client.post(reverse("sales:planning_builder"), payload, follow=True)
         self.assertEqual(saved.context["selected_draft_months"], page.context["selected_draft_months"])
         self.assertEqual(saved.context["target_totals"]["qty"], 38)
         self.assertEqual(saved.context["selected_draft_metrics"], ["qty"])
         self.assertEqual(saved.context["selected_draft_grain"], "parent_sku")
-        for target, expected in zip(targets, [11, 21, 6, 30]):
+        for target, expected in zip(targets, [11, 22, 5, 30]):
             target.refresh_from_db()
             self.assertEqual(target.quantity_target, expected)
             target.plan.refresh_from_db()
             self.assertEqual(target.plan.quantity_target, expected)
         # No field may silently zero an omitted target or edit an unselected month.
         stale = {**payload}
-        del stale[f"qty_{targets[0].id}"]
+        del stale["parent_qty_2026-09_MATRIX-PARENT"]
         self.assertContains(self.client.post(reverse("sales:planning_builder"), stale, follow=True), "Isi Draft telah berubah")
-        invalid = {**payload, f"qty_{targets[0].id}": "88", f"qty_{targets[1].id}": "-1"}
+        invalid = {**payload, "parent_qty_2026-09_MATRIX-PARENT": "88", "parent_qty_2026-10_MATRIX-PARENT": "-1"}
         self.client.post(reverse("sales:planning_builder"), invalid)
         targets[0].refresh_from_db()
         self.assertEqual(targets[0].quantity_target, 11)
-        outside = {**payload, f"qty_{targets[3].id}": "99"}
+        outside = {**payload, "parent_qty_2026-11_MATRIX-PARENT": "99"}
         self.assertContains(self.client.post(reverse("sales:planning_builder"), outside, follow=True), "Isi Draft telah berubah")
         targets[3].refresh_from_db()
         self.assertEqual(targets[3].quantity_target, 30)
@@ -238,7 +243,7 @@ class SalesReportRouteTests(TestCase):
             "form_name": "projection",
             "scenario": str(scenario.id),
             "month": "2026-09",
-            f"qty_{target.id}": "3",
+            f"parent_qty_2026-09_{product.code}": "3",
         }
 
         saved = self.client.post(reverse("sales:planning_builder"), payload, follow=True)
@@ -278,7 +283,8 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(scenario.approved_by, self.user)
         self.assertContains(approved, "approved dan seluruh projection dikunci")
 
-    def test_sales_projection_builder_previews_three_months_then_saves_selected_product(self):
+    @patch("sales.views.timezone.localdate", return_value=date(2026, 8, 31))
+    def test_sales_projection_builder_previews_three_months_then_saves_selected_product(self, _localdate):
         product, sku = self._planning_product("BUILDER-PRODUCT")
         product.parent_sku = "PARENT-BUILDER"
         product.save(update_fields=["parent_sku"])
@@ -364,24 +370,19 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(preview.context["builder_preview"]["parent_rows"][0]["parent_sku"], "PARENT-BUILDER")
         self.assertEqual(len(preview.context["builder_preview"]["sku_rows"]), 2)
         self.assertEqual(sum(cell["target_qty"] for cell in preview.context["builder_preview"]["sku_rows"]), 68)
-        self.assertContains(preview, "Parent SKU (Sum)")
-        self.assertContains(preview, 'data-preview-grain-panel="sku"')
-        self.assertContains(preview, 'data-preview-grain-panel="parent_sku"')
-        self.assertContains(preview, 'data-preview-grain-selector')
-        self.assertContains(preview, 'name="preview_grain"', count=2)
-        self.assertContains(preview, 'data-preview-table-scroll', count=2)
+        self.assertContains(preview, 'name="parent_qty_2026-09_PARENT-BUILDER"')
+        self.assertNotContains(preview, 'name="target_qty_')
+        self.assertNotContains(preview, 'name="preview_grain"')
+        self.assertContains(preview, 'data-preview-table-scroll', count=1)
         self.assertContains(preview, "Cancel Preview")
-        self.assertContains(preview, 'data-sales-planning-total', count=3)  # Two footers and the refresh selector.
-        self.assertContains(preview, '<tfoot>', count=2)
+        self.assertContains(preview, '<tfoot>', count=1)
         totals = preview.context["builder_preview"]["totals"]
         self.assertEqual(totals["qty"], 68)
         self.assertEqual(totals["gross"], Decimal("6800000"))
         self.assertEqual(totals["history"][-1]["qty"], Decimal("62"))
 
         payload["action"] = "save"
-        payload[f"target_qty_{sku.id}"] = "15"
-        for sku_row in preview.context["builder_preview"]["sku_rows"]:
-            payload.setdefault(f"target_qty_{sku_row['sku'].id}", str(sku_row["target_qty"]))
+        payload["parent_qty_2026-09_PARENT-BUILDER"] = "15"
         saved = self.client.post(reverse("sales:planning_builder"), payload, follow=True)
         plan = SalesPlan.objects.get(scenario=scenario, month=date(2026, 9, 1), product=product)
         self.assertEqual(saved.status_code, 200)
@@ -389,8 +390,7 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(plan.quantity_target, 15)
         self.assertEqual(plan.sku_targets.get(sku=sku).quantity_target, 15)
         self.assertContains(saved, "Preview September 2026 tersimpan")
-        self.assertContains(saved, 'name="draft_grain"')
-        self.assertContains(saved, "Parent SKU (Sum)")
+        self.assertContains(saved, "Pembagian size dilakukan di Planning Builder Operation")
         self.assertContains(saved, "Close Draft")
         self.assertContains(saved, "Save Draft", count=2)
         self.assertContains(saved, 'id="sales-scenario-draft-form"')
@@ -398,10 +398,10 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(saved, 'data-dirty-submit-button', count=2)
         self.assertContains(saved, 'disabled aria-disabled="true"', count=2)
         self.assertContains(saved, 'form="sales-scenario-draft-form"')
-        self.assertContains(saved, 'data-preview-table-scroll', count=2)
+        self.assertContains(saved, 'data-preview-table-scroll', count=1)
         self.assertContains(saved, 'data-draft-selection-delete-form')
         self.assertContains(saved, 'data-draft-row-select')
-        self.assertContains(saved, 'title="Delete Selected SKU From Draft"')
+        self.assertContains(saved, 'title="Delete Selected Parent SKU From Draft"')
         self.assertNotContains(saved, "Qty Gap")
         self.assertNotContains(saved, "Gross Gap")
         self.assertEqual(
@@ -411,7 +411,7 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(saved.context["rows"][0]["history"][-1]["qty"], Decimal("62"))
         self.assertEqual(saved.context["draft_parent_rows"][0]["parent_sku"], "PARENT-BUILDER")
         self.assertEqual(saved.context["draft_parent_rows"][0]["target_qty"], 15)
-        self.assertContains(saved, '<tfoot>', count=3)
+        self.assertContains(saved, '<tfoot>', count=2)
         self.assertEqual(saved.context["target_totals"]["qty"], 15)
         self.assertEqual(saved.context["target_totals"]["gross"], Decimal("1500000"))
         self.assertEqual(saved.context["target_totals"]["history"][-1]["qty"], Decimal("62"))

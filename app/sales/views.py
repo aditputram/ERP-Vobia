@@ -410,6 +410,32 @@ def _sales_planning_totals(parent_rows, history_months):
     }
 
 
+def _parent_target_input_name(parent_sku, month):
+    return f"parent_qty_{month:%Y-%m}_{parent_sku}"
+
+
+def _allocate_parent_quantity(total, weights):
+    """Keep legacy SKU rows in sync without making size allocation a Sales input."""
+    weights = [max(int(weight or 0), 0) for weight in weights]
+    if not weights:
+        return []
+    weight_total = sum(weights)
+    if not weight_total:
+        base, remainder = divmod(total, len(weights))
+        return [base + (index < remainder) for index in range(len(weights))]
+    weighted = [total * weight for weight in weights]
+    allocated = [value // weight_total for value in weighted]
+    remainder = total - sum(allocated)
+    order = sorted(
+        range(len(weights)),
+        key=lambda index: (weighted[index] % weight_total, -index),
+        reverse=True,
+    )
+    for index in order[:remainder]:
+        allocated[index] += 1
+    return allocated
+
+
 def _sales_plan_summary(request):
     targets = SalesPlanSKU.objects.all()
     bounds = targets.aggregate(start=Min("plan__month"), end=Max("plan__month"))
@@ -537,6 +563,14 @@ def _sales_projection_preview(request, scenario, month):
         group["product_count"] = len(group.pop("product_ids"))
         baseline_qty = Decimal(group["history"][-1]["qty"])
         group["baseline_qty"] = baseline_qty
+        group["target_input_name"] = _parent_target_input_name(
+            group["parent_sku"], month
+        )
+        group["gross_per_qty"] = (
+            group["target_gross"] / Decimal(group["target_qty"])
+            if group["target_qty"]
+            else Decimal("0")
+        )
         group["growth_pct"] = (
             (Decimal(group["target_qty"]) - baseline_qty) / baseline_qty * Decimal("100")
             if baseline_qty else None
@@ -569,23 +603,62 @@ def _sales_projection_preview(request, scenario, month):
 
 def _save_sales_projection_preview(request, preview):
     scenario = preview["scenario"]
-    submitted_skus = {key.removeprefix("target_qty_") for key in request.POST if key.startswith("target_qty_")}
-    if submitted_skus != {str(row["sku"].id) for row in preview["sku_rows"]}:
-        raise ValidationError("Pilihan Product sudah berubah. Buat Preview ulang sebelum menyimpan target.")
+    submitted_targets = {
+        key for key in request.POST if key.startswith("parent_qty_")
+    }
+    expected_targets = {
+        row["target_input_name"] for row in preview["parent_rows"]
+    }
     targets = []
-    for row in preview["sku_rows"]:
-        raw_qty = request.POST.get(f"target_qty_{row['sku'].id}")
-        try:
-            target_qty = int(raw_qty)
-        except (TypeError, ValueError) as exc:
-            raise ValidationError(f"Target Sales Qty {row['sku'].sku} harus berupa angka bulat.") from exc
-        if target_qty < 0:
-            raise ValidationError(f"Target Sales Qty {row['sku'].sku} tidak boleh negatif.")
-        targets.append({
-            **row,
-            "target_qty": target_qty,
-            "target_gross": (row["gross_per_qty"] * target_qty).quantize(Decimal("1")),
-        })
+    if submitted_targets:
+        if submitted_targets != expected_targets:
+            raise ValidationError("Pilihan Product sudah berubah. Buat Preview ulang sebelum menyimpan target.")
+        rows_by_parent = {}
+        for row in preview["sku_rows"]:
+            rows_by_parent.setdefault(row["parent_sku"], []).append(row)
+        for parent_row in preview["parent_rows"]:
+            try:
+                parent_qty = int(request.POST.get(parent_row["target_input_name"]))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(
+                    f"Target Sales Qty {parent_row['parent_sku']} harus berupa angka bulat."
+                ) from exc
+            if parent_qty < 0:
+                raise ValidationError(
+                    f"Target Sales Qty {parent_row['parent_sku']} tidak boleh negatif."
+                )
+            parent_sku_rows = rows_by_parent[parent_row["parent_sku"]]
+            allocations = _allocate_parent_quantity(
+                parent_qty, [row["target_qty"] for row in parent_sku_rows]
+            )
+            for row, target_qty in zip(parent_sku_rows, allocations):
+                targets.append({
+                    **row,
+                    "target_qty": target_qty,
+                    "target_gross": (row["gross_per_qty"] * target_qty).quantize(Decimal("1")),
+                })
+    else:
+        submitted_skus = {
+            key.removeprefix("target_qty_")
+            for key in request.POST
+            if key.startswith("target_qty_")
+        }
+        if submitted_skus != {str(row["sku"].id) for row in preview["sku_rows"]}:
+            raise ValidationError("Pilihan Product sudah berubah. Buat Preview ulang sebelum menyimpan target.")
+        for row in preview["sku_rows"]:
+            try:
+                target_qty = int(request.POST.get(f"target_qty_{row['sku'].id}"))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(
+                    f"Target Sales Qty {row['sku'].sku} harus berupa angka bulat."
+                ) from exc
+            if target_qty < 0:
+                raise ValidationError(f"Target Sales Qty {row['sku'].sku} tidak boleh negatif.")
+            targets.append({
+                **row,
+                "target_qty": target_qty,
+                "target_gross": (row["gross_per_qty"] * target_qty).quantize(Decimal("1")),
+            })
 
     with transaction.atomic():
         scenario = SalesPlanningScenario.objects.select_for_update().get(pk=scenario.pk)
@@ -630,7 +703,7 @@ def _save_sales_projection_preview(request, preview):
             after_values={
                 "scenario": scenario.name,
                 "month": preview["month"].isoformat(),
-                "skus": [str(row["sku"].id) for row in targets],
+                "parent_skus": sorted({row["parent_sku"] for row in targets}),
                 "method": preview["method"],
                 "parameter": str(preview["parameter"]),
             },
@@ -651,14 +724,58 @@ def _save_sales_projection(request, scenario, month):
         SalesPlanSKU.objects.filter(plan__scenario=scenario, plan__month__in=months)
         .select_related("plan", "sku", "sku__product_variant__product")
     )
-    if {key.removeprefix("qty_") for key in request.POST if key.startswith("qty_")} != {str(target.id) for target in targets}:
-        raise ValidationError("Isi Draft telah berubah. Muat ulang sebelum menyimpan agar target lain tidak tertimpa.")
-    values = []
+    target_groups = {}
     for target in targets:
-        try:
-            qty = int(request.POST.get(f"qty_{target.id}") or "0")
-        except (ArithmeticError, TypeError, ValueError) as exc:
-            raise ValidationError(f"Target {target.sku.sku} harus berupa angka yang valid.") from exc
+        product = target.sku.product_variant.product
+        parent_sku = product.parent_sku or product.code or target.sku.sku
+        target_groups.setdefault((parent_sku, target.plan.month), []).append(target)
+    expected_names = {
+        _parent_target_input_name(parent_sku, target_month)
+        for parent_sku, target_month in target_groups
+    }
+    submitted_names = {
+        key for key in request.POST if key.startswith("parent_qty_")
+    }
+    values = []
+    if submitted_names:
+        if submitted_names != expected_names:
+            raise ValidationError("Isi Draft telah berubah. Muat ulang sebelum menyimpan agar target lain tidak tertimpa.")
+        grouped_values = []
+        for (parent_sku, target_month), grouped_targets in target_groups.items():
+            try:
+                parent_qty = int(
+                    request.POST.get(_parent_target_input_name(parent_sku, target_month))
+                )
+            except (ArithmeticError, TypeError, ValueError) as exc:
+                raise ValidationError(
+                    f"Target {parent_sku} harus berupa angka yang valid."
+                ) from exc
+            if parent_qty < 0:
+                raise ValidationError(f"Target {parent_sku} tidak boleh negatif.")
+            allocations = _allocate_parent_quantity(
+                parent_qty, [target.quantity_target for target in grouped_targets]
+            )
+            grouped_values.extend(zip(grouped_targets, allocations))
+    else:
+        submitted_ids = {
+            key.removeprefix("qty_")
+            for key in request.POST
+            if key.startswith("qty_")
+        }
+        if submitted_ids != {str(target.id) for target in targets}:
+            raise ValidationError("Isi Draft telah berubah. Muat ulang sebelum menyimpan agar target lain tidak tertimpa.")
+        grouped_values = []
+        for target in targets:
+            try:
+                qty = int(request.POST.get(f"qty_{target.id}") or "0")
+            except (ArithmeticError, TypeError, ValueError) as exc:
+                raise ValidationError(
+                    f"Target {target.sku.sku} harus berupa angka yang valid."
+                ) from exc
+            grouped_values.append((target, qty))
+    for target, qty in grouped_values:
+        if qty < 0:
+            raise ValidationError(f"Target {target.sku.sku} tidak boleh negatif.")
         gross = (Decimal(target.sku.current_retail_price or 0) * qty).quantize(Decimal("1"))
         candidate = SalesPlanSKU(
             plan=target.plan,
@@ -697,7 +814,7 @@ def _save_sales_projection(request, scenario, month):
             after_values={
                 "scenario": scenario.name,
                 "months": [value.isoformat() for value in sorted(set(months))],
-                "skus": len(values),
+                "parent_skus": len(target_groups),
                 "gross_sales_target": str(sum((value[1] for value in values), Decimal("0"))),
                 "quantity_target": sum(value[2] for value in values),
             },
@@ -897,7 +1014,7 @@ def planning_builder(request):
 
     scenarios = list(
         SalesPlanningScenario.objects.select_related("created_by", "approved_by")
-        .annotate(projection_count=Count("projections__sku_targets", distinct=True))
+        .annotate(projection_count=Count("projections", distinct=True))
     )
     scenario_id = request.GET.get("scenario")
     viewed_scenario = forced_scenario or (
@@ -993,6 +1110,15 @@ def planning_builder(request):
     draft_parent_rows = []
     for group in draft_parent_groups.values():
         group["product_name"] = " / ".join(sorted(group.pop("product_names")))
+        for cell in group["targets"]:
+            cell["input_name"] = _parent_target_input_name(
+                group["parent_sku"], cell["month"]
+            )
+            cell["gross_per_qty"] = (
+                cell["gross"] / Decimal(cell["qty"])
+                if cell["qty"]
+                else Decimal("0")
+            )
         group["qty_gap"] = group["actual_qty"] - group["target_qty"]
         group["gross_gap"] = group["actual_gross"] - group["target_gross"]
         draft_parent_rows.append(group)
@@ -1031,7 +1157,7 @@ def planning_builder(request):
         "selected_draft_metrics": selected_draft_metrics,
         "show_draft_qty": "qty" in selected_draft_metrics,
         "show_draft_gross": "gross" in selected_draft_metrics,
-        "selected_draft_grain": "parent_sku" if request.GET.get("draft_grain") == "parent_sku" else "sku",
+        "selected_draft_grain": "parent_sku",
         "rows": rows,
         "draft_parent_rows": draft_parent_rows,
         "draft_history_headers": [

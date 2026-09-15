@@ -20,7 +20,7 @@ from openpyxl.utils import get_column_letter
 
 from inventory.services.fifo import inventory_balance
 from master_data.models import Category, Product, ProductStatus, Subcategory
-from sales.models import SalesOrderLine, SalesPlanSKU
+from sales.models import SalesOrderLine, SalesPlan
 
 from .forms import IncomingMonthCloseForm, ProjectionBuilderForm, ProjectionScenarioForm
 from .models import (
@@ -166,23 +166,24 @@ def _getlist(request, key):
 
 
 def _latest_sales_target_qty(projections):
-    """Return the latest saved Sales target for each SKU-month in scope."""
+    """Return Sales targets at their authoritative Parent SKU grain."""
     projections = list(projections)
-    sku_ids = {row.sku_id for row in projections}
+    product_ids = {row.sku.product_variant.product_id for row in projections}
     months = {row.month for row in projections}
     targets = {}
-    rows = SalesPlanSKU.objects.filter(
-        sku_id__in=sku_ids,
-        plan__month__in=months,
-    ).select_related("plan").order_by(
-        "sku_id",
-        "plan__month",
+    rows = SalesPlan.objects.filter(
+        product_id__in=product_ids,
+        month__in=months,
+    ).select_related("product").order_by(
+        "month",
         "-updated_at",
         "-created_at",
         "-pk",
     )
     for row in rows:
-        targets.setdefault((row.sku_id, row.plan.month), Decimal(row.quantity_target))
+        parent_sku = row.product.parent_sku or row.product.code
+        key = (parent_sku, row.month)
+        targets[key] = targets.get(key, Decimal("0")) + Decimal(row.quantity_target)
     return targets
 
 
@@ -1066,7 +1067,7 @@ def planning_builder(request):
                 selected_submetrics=selected_draft_submetrics,
                 history_months=draft_history_months,
                 history_by_sku=draft_history_by_sku,
-                sales_target_by_sku_month=draft_sales_target_qty,
+                sales_target_by_parent_month=draft_sales_target_qty,
             )
             draft_parent_matrix_rows, _, _ = build_draft_matrix(
                 draft_projections,
@@ -1077,7 +1078,7 @@ def planning_builder(request):
                 selected_submetrics=selected_draft_submetrics,
                 history_months=draft_history_months,
                 history_by_sku=draft_history_by_sku,
-                sales_target_by_sku_month=draft_sales_target_qty,
+                sales_target_by_parent_month=draft_sales_target_qty,
             )
             projected_months = {row.month for row in draft_projections}
             draft_missing_months = [

@@ -268,7 +268,7 @@ def build_draft_matrix(
     selected_submetrics=("qty",),
     history_months=(),
     history_by_sku=None,
-    sales_target_by_sku_month=None,
+    sales_target_by_parent_month=None,
 ):
     """Pivot saved SKU-month projections into a horizontal planning matrix."""
     if grain not in {"sku", "parent_sku"}:
@@ -293,8 +293,8 @@ def build_draft_matrix(
     projections = list(projections)
     history_months = list(history_months or [])
     history_by_sku = history_by_sku or {}
-    include_sales_target = sales_target_by_sku_month is not None
-    sales_target_by_sku_month = sales_target_by_sku_month or {}
+    include_sales_target = sales_target_by_parent_month is not None
+    sales_target_by_parent_month = sales_target_by_parent_month or {}
     plans_by_projection = {
         plan.sales_projection_id: plan for plan in (incoming_plans or [])
     }
@@ -508,14 +508,12 @@ def build_draft_matrix(
                 })
                 continue
             if header["metric"] == "sales_target":
-                target_values = [
-                    sales_target_by_sku_month.get((sku_id, header["month"]))
-                    for sku_id in row_sku_ids
-                ]
                 cells.append({
                     "value": (
-                        sum(target_values, Decimal("0"))
-                        if target_values and all(value is not None for value in target_values)
+                        sales_target_by_parent_month.get(
+                            (row["parent_identity"], header["month"])
+                        )
+                        if grain == "parent_sku"
                         else None
                     ),
                     "kind": header["kind"],
@@ -636,12 +634,17 @@ def build_draft_matrix(
             growth_pct = None
         elif header["metric"] == "sales_target":
             target_values = [
-                sales_target_by_sku_month.get((sku_id, header["month"]))
-                for sku_id in unique_sku_ids
+                sales_target_by_parent_month.get(
+                    (parent_identity, header["month"])
+                )
+                for parent_identity in {
+                    row["parent_identity"] for row in rows
+                }
             ]
+            target_values = [item for item in target_values if item is not None]
             value = (
                 sum(target_values, Decimal("0"))
-                if target_values and all(item is not None for item in target_values)
+                if target_values
                 else None
             )
             growth_pct = None

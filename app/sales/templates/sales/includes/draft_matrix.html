@@ -21,12 +21,13 @@
         {% for history in row.history %}{% if show_draft_qty %}<td>{{ history.qty|floatformat:"0g" }}</td>{% endif %}{% if show_draft_gross %}<td>Rp {{ history.gross|floatformat:"0g" }}</td>{% endif %}{% endfor %}
         {% for cell in row.targets %}
           {% if show_draft_qty %}<td>
-            {% if parent_view %}<strong data-draft-matrix-parent-qty data-month="{{ cell.month|date:'Y-m' }}">{{ cell.qty|floatformat:"0g"|default:"—" }}</strong>
+            {% if parent_view and cell.qty != None and viewed_scenario.status == 'DRAFT' %}<input type="number" min="0" step="1" name="{{ cell.input_name }}" value="{{ cell.qty|floatformat:'0u' }}" data-draft-matrix-qty data-month="{{ cell.month|date:'Y-m' }}" data-gross-per-qty="{{ cell.gross_per_qty|floatformat:'4u' }}" aria-label="Target Qty Parent SKU {{ row.parent_sku }} {{ cell.month|date:'Y-m' }}">
+            {% elif parent_view %}<strong data-draft-matrix-parent-qty data-month="{{ cell.month|date:'Y-m' }}">{{ cell.qty|floatformat:"0g"|default:"—" }}</strong>
             {% elif cell.target %}<input type="number" min="0" step="1" name="qty_{{ cell.target.id }}" value="{{ cell.qty|floatformat:'0u' }}" data-draft-matrix-qty data-month="{{ cell.month|date:'Y-m' }}" aria-label="Target Qty {{ row.sku.sku }} {{ cell.month|date:'Y-m' }}" {% if viewed_scenario.status == 'APPROVED' %}disabled{% endif %}>
             {% else %}—{% endif %}
           </td>{% endif %}
           {% if show_draft_gross %}<td>
-            {% if not show_draft_qty and not parent_view and cell.target %}<input type="hidden" name="qty_{{ cell.target.id }}" value="{{ cell.qty|floatformat:'0u' }}" data-draft-matrix-qty data-month="{{ cell.month|date:'Y-m' }}">{% endif %}
+            {% if not show_draft_qty and parent_view and cell.qty != None and viewed_scenario.status == 'DRAFT' %}<input type="hidden" name="{{ cell.input_name }}" value="{{ cell.qty|floatformat:'0u' }}" data-draft-matrix-qty data-month="{{ cell.month|date:'Y-m' }}" data-gross-per-qty="{{ cell.gross_per_qty|floatformat:'4u' }}">{% elif not show_draft_qty and not parent_view and cell.target %}<input type="hidden" name="qty_{{ cell.target.id }}" value="{{ cell.qty|floatformat:'0u' }}" data-draft-matrix-qty data-month="{{ cell.month|date:'Y-m' }}">{% endif %}
             <strong {% if parent_view %}data-draft-matrix-parent-gross{% else %}data-draft-matrix-gross{% endif %} data-month="{{ cell.month|date:'Y-m' }}">{% if cell.gross != None %}Rp {{ cell.gross|floatformat:"0g" }}{% else %}—{% endif %}</strong>
           </td>{% endif %}
         {% endfor %}

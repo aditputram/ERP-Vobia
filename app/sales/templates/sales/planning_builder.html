@@ -2,7 +2,7 @@
 {% block title %}Sales Planning Builder · Vobia ERP{% endblock %}
 {% block content %}
 <header class="page-header">
-  <div><p class="eyebrow">SALES · PLANNING BUILDER</p><h1>Planning Builder</h1><p>Proyeksi internal tim Sales per Product. Planning ini berdiri sendiri dan tidak mengubah Operation, PPIC, Production, atau Inventory.</p></div>
+  <div><p class="eyebrow">SALES · PLANNING BUILDER</p><h1>Planning Builder</h1><p>Target Sales diisi per Parent SKU. Pembagian quantity per size dilakukan oleh tim Operation.</p></div>
   <span class="status-chip"><span></span>Sales projection only</span>
 </header>
 
@@ -55,22 +55,11 @@
 
 {% if builder_preview %}
 <section class="panel section-gap" id="projection-preview">
-  <div class="panel-header"><div><p class="eyebrow">PROJECTION PREVIEW</p><h2>{{ builder_preview.scenario.name }} · {{ builder_preview.month|date:"F Y" }}</h2><p class="muted">{{ builder_preview.method_label }}{% if builder_preview.method != 'SAME_AS_LAST_MONTH' %} {{ builder_preview.parameter|floatformat:"-2g" }}%{% endif %}.</p></div><div class="preview-header-actions"><a class="secondary-button compact" href="{% url 'sales:planning_builder' %}?scenario={{ builder_preview.scenario.id }}&month={{ builder_preview.month|date:'Y-m' }}#draft-projection">Cancel Preview</a><span class="pill">{{ builder_preview.parent_rows|length }} Parent SKU · {{ builder_preview.sku_rows|length }} SKU</span></div></div>
-  <div class="preview-grain-selector" data-preview-grain-selector>
-    <span class="preview-grain-label">Tampilan baris</span>
-    <label class="preview-grain-option"><input type="radio" name="preview_grain" value="parent_sku" checked><span>Parent SKU (Sum)</span></label>
-    <label class="preview-grain-option"><input type="radio" name="preview_grain" value="sku"><span>SKU</span></label>
-    <small>Target Sales Qty hanya diedit pada SKU; Parent SKU adalah ringkasan otomatis.</small>
-  </div>
-  <div data-preview-grain-panel="parent_sku">
+  <div class="panel-header"><div><p class="eyebrow">PROJECTION PREVIEW</p><h2>{{ builder_preview.scenario.name }} · {{ builder_preview.month|date:"F Y" }}</h2><p class="muted">{{ builder_preview.method_label }}{% if builder_preview.method != 'SAME_AS_LAST_MONTH' %} {{ builder_preview.parameter|floatformat:"-2g" }}%{% endif %}.</p></div><div class="preview-header-actions"><a class="secondary-button compact" href="{% url 'sales:planning_builder' %}?scenario={{ builder_preview.scenario.id }}&month={{ builder_preview.month|date:'Y-m' }}#draft-projection">Cancel Preview</a><span class="pill">{{ builder_preview.parent_rows|length }} Parent SKU</span></div></div>
+  <div>
     <div class="table-wrap" data-preview-table-scroll><table><thead><tr><th rowspan="2">Parent SKU</th><th rowspan="2">Product</th><th rowspan="2">SKU</th>{% for header in builder_preview.history_headers %}<th colspan="2">{{ header.month|date:"F Y" }}</th>{% endfor %}<th colspan="2">Target {{ builder_preview.month|date:"F Y" }}</th><th rowspan="2">Growth vs {{ builder_preview.growth_baseline_month|date:"F Y" }}</th></tr><tr>{% for header in builder_preview.history_headers %}<th>{% if header.is_projection %}Projection{% else %}Actual{% endif %} Qty</th><th>{% if header.is_projection %}Projection{% else %}Actual{% endif %} Gross</th>{% endfor %}<th>Sales Qty</th><th>Gross Sales</th></tr></thead><tbody>
-      {% for row in builder_preview.parent_rows %}<tr data-sales-parent-row data-parent-sku="{{ row.parent_sku }}" data-baseline-qty="{{ row.baseline_qty|floatformat:'4u' }}"><td><span class="code-label">{{ row.parent_sku }}</span></td><td><strong>{{ row.product_name }}</strong><small class="table-subtext">{{ row.product_count }} Product</small></td><td>{{ row.sku_count|floatformat:"0g" }}</td>{% for history in row.history %}<td>{{ history.qty|floatformat:"0g" }}</td><td>Rp {{ history.gross|floatformat:"0g" }}</td>{% endfor %}<td><strong data-parent-target-qty>{{ row.target_qty|floatformat:"0g" }}</strong></td><td><strong data-parent-target-gross>Rp {{ row.target_gross|floatformat:"0g" }}</strong></td><td><strong data-parent-growth>{% if row.growth_pct != None %}{% if row.growth_pct > 0 %}+{% endif %}{{ row.growth_pct|floatformat:"2g" }}%{% else %}—{% endif %}</strong></td></tr>{% endfor %}
+      {% for row in builder_preview.parent_rows %}<tr data-sales-parent-row data-baseline-qty="{{ row.baseline_qty|floatformat:'4u' }}" data-gross-per-qty="{{ row.gross_per_qty|floatformat:'4u' }}"><td><span class="code-label">{{ row.parent_sku }}</span></td><td><strong>{{ row.product_name }}</strong><small class="table-subtext">{{ row.product_count }} Product</small></td><td>{{ row.sku_count|floatformat:"0g" }}</td>{% for history in row.history %}<td>{{ history.qty|floatformat:"0g" }}</td><td>Rp {{ history.gross|floatformat:"0g" }}</td>{% endfor %}<td><input form="sales-projection-preview-save" type="number" name="{{ row.target_input_name }}" min="0" step="1" value="{{ row.target_qty|floatformat:'0u' }}" aria-label="Target Sales Qty Parent SKU {{ row.parent_sku }}" data-parent-target-input></td><td><strong data-parent-target-gross>Rp {{ row.target_gross|floatformat:"0g" }}</strong></td><td><strong data-parent-growth>{% if row.growth_pct != None %}{% if row.growth_pct > 0 %}+{% endif %}{{ row.growth_pct|floatformat:"2g" }}%{% else %}—{% endif %}</strong></td></tr>{% endfor %}
     </tbody>{% include "sales/includes/planning_totals.html" with totals=builder_preview.totals identity_columns=2 show_sku_count=True show_growth=True only %}</table></div>
-  </div>
-  <div data-preview-grain-panel="sku" hidden>
-    <div class="table-wrap" data-preview-table-scroll><table><thead><tr><th rowspan="2">SKU</th><th rowspan="2">Parent SKU</th><th rowspan="2">Product</th><th rowspan="2">Size</th>{% for header in builder_preview.history_headers %}<th colspan="2">{{ header.month|date:"F Y" }}</th>{% endfor %}<th colspan="2">Target {{ builder_preview.month|date:"F Y" }}</th><th rowspan="2">Growth vs {{ builder_preview.growth_baseline_month|date:"F Y" }}</th></tr><tr>{% for header in builder_preview.history_headers %}<th>{% if header.is_projection %}Projection{% else %}Actual{% endif %} Qty</th><th>{% if header.is_projection %}Projection{% else %}Actual{% endif %} Gross</th>{% endfor %}<th>Sales Qty</th><th>Gross Sales</th></tr></thead><tbody>
-      {% for row in builder_preview.sku_rows %}<tr data-sales-sku-row data-parent-sku="{{ row.parent_sku }}" data-baseline-qty="{{ row.baseline_qty|floatformat:'4u' }}" data-gross-per-qty="{{ row.gross_per_qty|floatformat:'4u' }}"><td><span class="code-label">{{ row.sku.sku }}</span></td><td>{{ row.parent_sku }}</td><td><strong>{{ row.product.name }}</strong><small class="table-subtext">{{ row.sku.product_variant.name }}</small></td><td>{{ row.sku.size|default:"—" }}</td>{% for history in row.history %}<td>{{ history.qty|floatformat:"0g" }}</td><td>Rp {{ history.gross|floatformat:"0g" }}</td>{% endfor %}<td><input form="sales-projection-preview-save" type="number" name="target_qty_{{ row.sku.id }}" min="0" step="1" value="{{ row.target_qty|floatformat:'0u' }}" aria-label="Target Sales Qty {{ row.sku.sku }}" data-sku-target-qty></td><td><strong data-sku-target-gross>Rp {{ row.target_gross|floatformat:"0g" }}</strong></td><td><strong data-sku-growth>{% if row.growth_pct != None %}{% if row.growth_pct > 0 %}+{% endif %}{{ row.growth_pct|floatformat:"2g" }}%{% else %}—{% endif %}</strong></td></tr>{% endfor %}
-    </tbody>{% include "sales/includes/planning_totals.html" with totals=builder_preview.totals identity_columns=4 show_growth=True only %}</table></div>
   </div>
   <form method="post" class="sales-plan-actions" id="sales-projection-preview-save">
     {% for name, value in plan_summary.params %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}{% csrf_token %}<input type="hidden" name="form_name" value="builder"><input type="hidden" name="action" value="save"><input type="hidden" name="scenario" value="{{ builder_preview.scenario.id }}"><input type="hidden" name="month" value="{{ builder_preview.month|date:'Y-m' }}"><input type="hidden" name="product_status" value="{{ builder_preview.product_status }}"><input type="hidden" name="category" value="{{ builder_preview.category }}"><input type="hidden" name="subcategory" value="{{ builder_preview.subcategory }}"><input type="hidden" name="planning_activity" value="{{ builder_preview.planning_activity }}"><input type="hidden" name="method" value="{{ builder_preview.method }}"><input type="hidden" name="parameter" value="{{ builder_preview.parameter }}"><input type="hidden" name="reason" value="{{ builder_preview.reason }}">{% for product_id in builder_preview.selected_product_ids %}<input type="hidden" name="product" value="{{ product_id }}">{% endfor %}
@@ -83,13 +72,13 @@
   <div class="panel-header"><div><p class="eyebrow">SCENARIO LIBRARY</p><h2>Scenario yang sudah dibuat</h2></div><span class="pill">{{ scenarios|length }} scenario</span></div>
   {% if scenarios %}<div class="scenario-list">{% for scenario in scenarios %}<div class="scenario-row">
     <div class="scenario-edit-form"><label>Nama<input value="{{ scenario.name }}" disabled></label><label>Mulai<input value="{{ scenario.start_month|date:'M Y' }}" disabled></label><label>Selesai<input value="{{ scenario.end_month|date:'M Y' }}" disabled></label><div class="scenario-meta"><span class="status-badge {% if scenario.status == 'APPROVED' %}ready{% endif %}">{{ scenario.get_status_display }}</span><small>{{ scenario.created_at|date:"d M Y H:i" }}</small></div></div>
-    <div class="scenario-row-actions"><a class="secondary-button compact" href="?scenario={{ scenario.id }}&month={{ scenario.start_month|date:'Y-m' }}#draft-projection">View {% if scenario.status == 'DRAFT' %}Draft{% else %}Projection{% endif %} · {{ scenario.projection_count|floatformat:"0g" }} SKU-bulan</a></div>
+    <div class="scenario-row-actions"><a class="secondary-button compact" href="?scenario={{ scenario.id }}&month={{ scenario.start_month|date:'Y-m' }}#draft-projection">View {% if scenario.status == 'DRAFT' %}Draft{% else %}Projection{% endif %} · {{ scenario.projection_count|floatformat:"0g" }} Product-bulan</a></div>
   </div>{% endfor %}</div>{% else %}<div class="empty-state">Belum ada Scenario.</div>{% endif %}
 </section>
 
 {% if viewed_scenario and not close_draft %}
 <section class="panel section-gap" id="draft-projection">
-  <div class="panel-header"><div><p class="eyebrow">SCENARIO {{ viewed_scenario.get_status_display|upper }}</p><h2>{{ viewed_scenario.name }}</h2><p class="muted">Sales Quantity dan Gross Sales target per SKU. Tidak mengalir ke Operation.</p></div><div class="preview-header-actions">{% if viewed_scenario.status == 'DRAFT' and rows %}<button class="primary-button compact" type="submit" form="sales-scenario-draft-form" data-dirty-submit-button disabled aria-disabled="true">Save Draft</button>{% endif %}<a class="secondary-button compact" href="{% url 'sales:planning_builder' %}?scenario={{ viewed_scenario.id }}&month={{ selected_month|date:'Y-m' }}&close_draft=1#scenario-library">Close Draft</a><span class="status-badge {% if viewed_scenario.status == 'APPROVED' %}ready{% endif %}">{{ viewed_scenario.get_status_display }}</span></div></div>
+  <div class="panel-header"><div><p class="eyebrow">SCENARIO {{ viewed_scenario.get_status_display|upper }}</p><h2>{{ viewed_scenario.name }}</h2><p class="muted">Sales Quantity dan Gross Sales target per Parent SKU. Target ini menjadi referensi Planning Builder Operation.</p></div><div class="preview-header-actions">{% if viewed_scenario.status == 'DRAFT' and rows %}<button class="primary-button compact" type="submit" form="sales-scenario-draft-form" data-dirty-submit-button disabled aria-disabled="true">Save Draft</button>{% endif %}<a class="secondary-button compact" href="{% url 'sales:planning_builder' %}?scenario={{ viewed_scenario.id }}&month={{ selected_month|date:'Y-m' }}&close_draft=1#scenario-library">Close Draft</a><span class="status-badge {% if viewed_scenario.status == 'APPROVED' %}ready{% endif %}">{{ viewed_scenario.get_status_display }}</span></div></div>
   <form id="sales-draft-matrix-filters" method="get" action="{% url 'sales:planning_builder' %}#draft-projection" data-auto-submit>
     {% for name, value in plan_summary.params %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
     <input type="hidden" name="scenario" value="{{ viewed_scenario.id }}"><input type="hidden" name="month" value="{{ selected_month|date:'Y-m' }}"><input type="hidden" name="draft_grain" value="{{ selected_draft_grain }}">
@@ -100,7 +89,7 @@
   </form>
   <section class="metric-grid section-gap">
     <article class="metric-card"><span>Gross Sales Target</span><strong class="metric-money" data-draft-matrix-summary-gross>Rp {{ target_totals.gross|floatformat:"0g" }}</strong><small>{% for month in selected_draft_months %}{{ month|date:"M Y" }}{% if not forloop.last %}, {% endif %}{% endfor %}</small></article>
-    <article class="metric-card"><span>Sales Qty Target</span><strong data-draft-matrix-summary-qty>{{ target_totals.qty|floatformat:"0g" }}</strong><small>{{ rows|length }} SKU</small></article>
+    <article class="metric-card"><span>Sales Qty Target</span><strong data-draft-matrix-summary-qty>{{ target_totals.qty|floatformat:"0g" }}</strong><small>{{ draft_parent_rows|length }} Parent SKU</small></article>
   </section>
   {% if rows %}
   {% if viewed_scenario.status == 'DRAFT' %}<form id="sales-draft-selection-delete-form" method="post" data-draft-selection-delete-form>
@@ -109,19 +98,13 @@
   <form id="sales-scenario-draft-form" method="post" data-dirty-submit>
     {% for month in selected_draft_months %}<input type="hidden" name="draft_month" value="{{ month|date:'Y-m' }}">{% endfor %}{% for metric in selected_draft_metrics %}<input type="hidden" name="draft_metric" value="{{ metric }}">{% endfor %}
     {% for name, value in plan_summary.params %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}{% csrf_token %}<input type="hidden" name="form_name" value="projection"><input type="hidden" name="scenario" value="{{ viewed_scenario.id }}"><input type="hidden" name="month" value="{{ selected_month|date:'Y-m' }}">
-    <div class="preview-grain-selector" data-draft-grain-selector>
-      <span class="preview-grain-label">Tampilan baris</span>
-      <label class="preview-grain-option"><input type="radio" name="draft_grain" value="sku" {% if selected_draft_grain == 'sku' %}checked{% endif %} data-dirty-ignore><span>SKU</span></label>
-      <label class="preview-grain-option"><input type="radio" name="draft_grain" value="parent_sku" {% if selected_draft_grain == 'parent_sku' %}checked{% endif %} data-dirty-ignore><span>Parent SKU (Sum)</span></label>
-      <small>Target hanya diedit pada SKU; Parent SKU adalah ringkasan otomatis.</small>
-      {% if viewed_scenario.status == 'DRAFT' %}<button class="draft-delete-selection-button" type="submit" form="sales-draft-selection-delete-form" hidden data-draft-delete-selected title="Delete Selected SKU From Draft" aria-label="Delete Selected SKU From Draft">
-        <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11H8L7 9Zm3 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg><span class="draft-delete-tooltip" role="tooltip" data-draft-delete-tooltip>Delete Selected SKU From Draft</span>
+    <div class="preview-grain-selector">
+      <span class="preview-grain-label">Parent SKU</span><small>Pembagian size dilakukan di Planning Builder Operation.</small>
+      {% if viewed_scenario.status == 'DRAFT' %}<button class="draft-delete-selection-button" type="submit" form="sales-draft-selection-delete-form" hidden data-draft-delete-selected title="Delete Selected Parent SKU From Draft" aria-label="Delete Selected Parent SKU From Draft">
+        <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11H8L7 9Zm3 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg><span class="draft-delete-tooltip" role="tooltip" data-draft-delete-tooltip>Delete Selected Parent SKU From Draft</span>
       </button>{% endif %}
     </div>
-    <div data-draft-grain-panel="sku"{% if selected_draft_grain != 'sku' %} hidden{% endif %}>
-      {% include "sales/includes/draft_matrix.html" with matrix_rows=rows grain="sku" parent_view=False identity_columns=4 %}
-    </div>
-    <div data-draft-grain-panel="parent_sku"{% if selected_draft_grain != 'parent_sku' %} hidden{% endif %}>
+    <div data-draft-grain-panel="parent_sku">
       {% include "sales/includes/draft_matrix.html" with matrix_rows=draft_parent_rows grain="parent_sku" parent_view=True identity_columns=2 %}
     </div>
     {% if viewed_scenario.status == 'DRAFT' %}<div class="sales-plan-actions"><button class="primary-button" type="submit" data-dirty-submit-button disabled aria-disabled="true">Save Draft</button></div>{% endif %}
@@ -152,30 +135,17 @@
     return `${growth > 0 ? '+' : ''}${new Intl.NumberFormat('id-ID', {maximumFractionDigits: 2}).format(growth)}%`;
   };
   document.querySelectorAll('#projection-preview').forEach(section => {
-    const skuRows = [...section.querySelectorAll('[data-sales-sku-row]')];
+    const parentRows = [...section.querySelectorAll('[data-sales-parent-row]')];
     const refreshTargets = () => {
       let totalQty = 0, totalGross = 0;
-      const parents = new Map();
-      skuRows.forEach(row => {
-        const qty = Math.max(0, Math.floor(Number(row.querySelector('[data-sku-target-qty]').value) || 0));
+      parentRows.forEach(row => {
+        const qty = Math.max(0, Math.floor(Number(row.querySelector('[data-parent-target-input]').value) || 0));
         const gross = Math.round(qty * (Number(row.dataset.grossPerQty) || 0));
-        row.querySelector('[data-sku-target-gross]').textContent = `Rp ${formatNumber(gross)}`;
-        const growth = row.querySelector('[data-sku-growth]');
+        row.querySelector('[data-parent-target-gross]').textContent = `Rp ${formatNumber(gross)}`;
+        const growth = row.querySelector('[data-parent-growth]');
         if (growth) growth.textContent = formatGrowth(qty, Number(row.dataset.baselineQty) || 0);
         totalQty += qty;
         totalGross += gross;
-        const parent = parents.get(row.dataset.parentSku) || {qty: 0, gross: 0};
-        parent.qty += qty;
-        parent.gross += gross;
-        parents.set(row.dataset.parentSku, parent);
-      });
-      section.querySelectorAll('[data-sales-parent-row]').forEach(row => {
-        const parent = parents.get(row.dataset.parentSku);
-        if (!parent) return;
-        row.querySelector('[data-parent-target-qty]').textContent = formatNumber(parent.qty);
-        row.querySelector('[data-parent-target-gross]').textContent = `Rp ${formatNumber(parent.gross)}`;
-        const growth = row.querySelector('[data-parent-growth]');
-        if (growth) growth.textContent = formatGrowth(parent.qty, Number(row.dataset.baselineQty) || 0);
       });
       section.querySelectorAll('[data-sales-planning-total]').forEach(row => {
         row.querySelector('[data-sales-total-qty]').textContent = formatNumber(totalQty);
@@ -184,9 +154,9 @@
         if (growth) growth.textContent = formatGrowth(totalQty, Number(row.dataset.baselineQty) || 0);
       });
     };
-    skuRows.forEach(row => row.querySelector('[data-sku-target-qty]').addEventListener('input', refreshTargets));
+    parentRows.forEach(row => row.querySelector('[data-parent-target-input]').addEventListener('input', refreshTargets));
   });
-  const hasUnsavedTargets = () => [...document.querySelectorAll('#sales-scenario-draft-form input[name^="qty_"], #projection-preview input[data-sku-target-qty]')]
+  const hasUnsavedTargets = () => [...document.querySelectorAll('#sales-scenario-draft-form input[name^="parent_qty_"], #projection-preview input[data-parent-target-input]')]
     .some(control => control.value !== control.defaultValue);
   const summaryFilters = document.querySelector('#sales-plan-summary-filters');
   ['change', 'filters:auto-submit', 'submit'].forEach(type => summaryFilters?.addEventListener(type, event => {
@@ -211,36 +181,20 @@
         if (unsaved) window.alert('Simpan perubahan Draft terlebih dahulu sebelum mengganti tampilan.');
       }
     }, true);
-    document.querySelectorAll('input[name="draft_grain"][type="radio"]').forEach(input => {
-      input.addEventListener('change', () => {
-        if (input.checked) {
-          filters.elements.draft_grain.value = input.value;
-          if (summaryFilters) summaryFilters.elements.draft_grain.value = input.value;
-        }
-      });
-    });
   }
   const draft = document.querySelector('#draft-projection');
   const draftInputs = [...(draft?.querySelectorAll('[data-draft-matrix-qty]') || [])];
   const refreshDraftMatrix = () => {
-    const months = new Map(), parents = new Map();
+    const months = new Map();
     draftInputs.forEach(input => {
-      const row = input.closest('[data-sales-draft-sku-row]');
+      const row = input.closest('[data-sales-draft-parent-row]');
       const month = input.dataset.month;
       const qty = Math.max(0, Math.floor(Number(input.value) || 0));
-      const gross = Math.round(qty * (Number(row.dataset.grossPerQty) || 0));
-      const grossCell = [...row.querySelectorAll('[data-draft-matrix-gross]')].find(cell => cell.dataset.month === month);
+      const gross = Math.round(qty * (Number(input.dataset.grossPerQty) || 0));
+      const grossCell = [...row.querySelectorAll('[data-draft-matrix-parent-gross]')].find(cell => cell.dataset.month === month);
       if (grossCell) grossCell.textContent = `Rp ${formatNumber(gross)}`;
-      for (const [map, key] of [[months, month], [parents, row.dataset.parentSku + '::' + month]]) {
-        const total = map.get(key) || {qty: 0, gross: 0};
-        total.qty += qty; total.gross += gross; map.set(key, total);
-      }
-    });
-    draft.querySelectorAll('[data-sales-draft-parent-row]').forEach(row => {
-      row.querySelectorAll('[data-draft-matrix-parent-qty], [data-draft-matrix-parent-gross]').forEach(cell => {
-        const total = parents.get(row.dataset.parentSku + '::' + cell.dataset.month);
-        if (total) cell.textContent = cell.hasAttribute('data-draft-matrix-parent-qty') ? formatNumber(total.qty) : `Rp ${formatNumber(total.gross)}`;
-      });
+      const total = months.get(month) || {qty: 0, gross: 0};
+      total.qty += qty; total.gross += gross; months.set(month, total);
     });
     draft.querySelectorAll('[data-draft-matrix-total-qty], [data-draft-matrix-total-gross]').forEach(cell => {
       const total = months.get(cell.dataset.month) || {qty: 0, gross: 0};

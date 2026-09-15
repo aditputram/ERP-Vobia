@@ -2512,7 +2512,7 @@ class MerchandisingReportViewTests(TestCase):
         )
         self.assertEqual(
             [row["cells"][3]["value"] for row in matrix_response.context["draft_sku_matrix_rows"]],
-            [Decimal("70"), Decimal("90")],
+            [None, None],
         )
         self.assertEqual(
             [row["cells"][4]["value"] for row in matrix_response.context["draft_sku_matrix_rows"]],
@@ -2547,7 +2547,7 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(
             [cell["value"] for cell in first_financial_row["cells"]],
             [
-                Decimal("2"), Decimal("2"), Decimal("2"), Decimal("70"), Decimal("7"),
+                Decimal("2"), Decimal("2"), Decimal("2"), None, Decimal("7"),
                 Decimal("700000"), Decimal("1400000"), Decimal("1358000"),
             ],
         )
@@ -2578,7 +2578,7 @@ class MerchandisingReportViewTests(TestCase):
             [
                 Decimal("2"), Decimal("2"), Decimal("2"),
                 first_projection.beginning_qty + Decimal("1"),
-                Decimal("70"),
+                None,
                 Decimal("7"),
                 first_projection.beginning_qty + Decimal("1") - Decimal("7"),
                 Decimal("1"),

@@ -247,8 +247,9 @@ def sync_platform(
             for offset in range((end - start).days + 1)
             if start + timedelta(days=offset) not in existing
         )
-        if platform == SocialDailyMetric.Platform.TIKTOK:
-            days.update(suspicious_tiktok_days(start, end))
+    if platform == SocialDailyMetric.Platform.TIKTOK:
+        repair_start, repair_end = required_range or (cutoff - timedelta(days=89), cutoff)
+        days.update(suspicious_tiktok_days(repair_start, repair_end))
     days = sorted(days)
     try:
         rows = fetch_instagram_days(days) if platform == SocialDailyMetric.Platform.INSTAGRAM else fetch_tiktok_days(days)

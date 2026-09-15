@@ -62,7 +62,7 @@ class SocialSyncTests(TestCase):
         ).exists())
 
     @patch("dashboard.social_sync.fetch_tiktok_days")
-    def test_required_range_repairs_zero_tiktok_day_outside_normal_lookback(self, fetch):
+    def test_daily_sync_repairs_partial_zero_tiktok_day_outside_normal_lookback(self, fetch):
         start = self.day - timedelta(days=6)
         zero_day = start
         for offset in range(7):
@@ -76,7 +76,7 @@ class SocialSyncTests(TestCase):
 
         sync_platform(
             "TIKTOK", self.day, lookback_days=4,
-            idempotency_key="manual:repair-zero", required_range=(start, self.day),
+            idempotency_key="daily:repair-zero",
         )
 
         fetched_days = fetch.call_args.args[0]

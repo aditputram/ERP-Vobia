@@ -5,7 +5,7 @@
     <div>
         <p class="eyebrow">R&amp;D · DESIGN LIBRARY</p>
         <h1>{{ design.original_name }}</h1>
-        <p class="rnd-design-upload-meta"><strong>Uploader:</strong> {% if design.uploaded_by %}{{ design.uploaded_by.get_full_name|default:design.uploaded_by.username }}{% else %}User tidak tersedia{% endif %} · {{ design.created_at|date:"d M Y · H:i" }} · Tersedia sampai {{ expires_at|date:"d M Y" }}.</p>
+        <div class="rnd-design-upload-meta"><strong>Uploader:</strong> {% if design.uploaded_by %}{{ design.uploaded_by.get_full_name|default:design.uploaded_by.username }}{% else %}User tidak tersedia{% endif %} · {{ design.created_at|date:"d M Y · H:i" }} · Tersedia sampai {{ expires_at|date:"d M Y" }}.</div>
     </div>
     <div class="header-actions">
         <a class="secondary-button" href="{% url 'rnd:designing' %}" onclick="if (document.referrer.startsWith(this.href)) { history.back(); return false; }">Kembali</a>

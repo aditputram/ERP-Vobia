@@ -37,6 +37,7 @@
         {% if product.collection.development_started_at %}<p>Progress Product dilanjutkan dari tab Development Collection.</p><a class="primary-button" href="{% url 'rnd:development_detail' product.collection.id %}">Buka Development</a>{% else %}<p>Dokumen ini sudah memenuhi gate. Setelah seluruh dokumen Product Approved, jalankan <strong>Lanjut Development</strong> dari halaman Collection.</p>{% endif %}
         {% if can_officially_approve and not product.collection.development_started_at %}{% include "rnd/_revision_request_form.html" with button_label="Minta Revisi" %}{% endif %}
     {% endif %}
+    {% if can_duplicate_product %}<div class="rnd-duplicate-action"><form method="post" action="{% url 'rnd:product_duplicate' product.id %}" onsubmit="return confirm('Duplicate Product {{ product.name|escapejs }} beserta Product Cover, Mockup, Technical Drawing, dan BOM?');">{% csrf_token %}<button class="secondary-button" type="submit">Duplicate Product</button></form></div>{% endif %}
 </section>
 {% if not editable and product.document_status == 'DRAFT' %}<section class="panel section-gap"><p>Product sudah dikunci karena Collection telah di-handover ke Marketing.</p></section>{% endif %}
 <script src="{% static 'js/rnd-materials.js' %}?v=20260901-01" defer></script>

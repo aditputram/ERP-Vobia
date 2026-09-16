@@ -42,6 +42,7 @@ from .services import (
     can_edit_module,
     delete_collection,
     delete_rejected_product,
+    duplicate_product,
     handover_to_marketing,
     publish_marketing_preview,
     reject_product_document,
@@ -607,6 +608,12 @@ def product_detail(request, product_id):
                 product.document_status == DevelopmentProduct.DocumentStatus.REJECTED
                 and can_edit_module(request.user, "rnd")
             ),
+            "can_duplicate_product": (
+                can_edit_module(request.user, "rnd")
+                and not product.collection.development_started_at
+                and not product.collection.handed_over_at
+                and not product.collection.commercial_approved_at
+            ),
             "revision_requested": revision_requested,
             "revision_request": revision_request,
             "revision_options": [
@@ -770,6 +777,24 @@ def product_delete(request, product_id):
         return HttpResponseForbidden("Delete Product memerlukan akses Edit atau Approve R&D.")
     messages.success(request, f"Product {product_name} yang ditolak berhasil dihapus.")
     return redirect("rnd:collection_detail", collection_id=collection_id)
+
+
+@login_required
+@require_POST
+def product_duplicate(request, product_id):
+    product = get_object_or_404(DevelopmentProduct, id=product_id)
+    try:
+        duplicate = duplicate_product(product=product, actor=request.user)
+    except ValidationError as exc:
+        messages.error(request, _validation_message(exc))
+        return redirect("rnd:product_detail", product_id=product.id)
+    except PermissionDenied:
+        return HttpResponseForbidden("Duplicate Product memerlukan akses Edit atau Approve R&D.")
+    messages.success(
+        request,
+        f"Product {product.name} berhasil diduplikat. Ganti nama, Product Cover, dan Mockup sesuai warna baru.",
+    )
+    return redirect(f'{reverse("rnd:product_detail", args=[duplicate.id])}?edit=1#edit-product')
 
 
 @login_required

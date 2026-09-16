@@ -274,6 +274,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .rnd-workflow-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .rnd-workflow-actions form { margin: 0; }
 .rnd-workflow-actions .primary-button, .rnd-workflow-actions .secondary-button { margin-top: 0; }
+.rnd-duplicate-action { display: flex; justify-content: flex-end; margin-top: 18px; }
+.rnd-duplicate-action form { margin: 0; }
+.rnd-duplicate-action .secondary-button { margin-top: 0; }
 .rnd-revision-request-form { max-width: 620px; display: grid; gap: 7px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 .rnd-revision-request-form label { color: #64655e; font-size: 10px; font-weight: 750; }
 .rnd-revision-request-form fieldset { margin: 0; padding: 0; border: 0; }

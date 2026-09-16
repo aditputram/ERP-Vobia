@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from django.core.files.base import ContentFile
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -11,6 +13,7 @@ from .models import (
     Collection,
     DevelopmentProduct,
     DevelopmentProductDocumentRevision,
+    DevelopmentProductMaterial,
     MarketingRecommendation,
 )
 
@@ -27,6 +30,82 @@ def can_edit_module(user, module):
 
 def _actor_name(actor):
     return actor.get_full_name().strip() or actor.get_username()
+
+
+def _copy_product_file(*, source, target, field_name):
+    source_file = getattr(source, field_name)
+    if not source_file.name:
+        return
+    source_file.open("rb")
+    try:
+        content = ContentFile(source_file.read())
+    finally:
+        source_file.close()
+    getattr(target, field_name).save(source_file.name.rsplit("/", 1)[-1], content, save=False)
+
+
+@transaction.atomic
+def duplicate_product(*, product, actor):
+    if not can_edit_module(actor, "rnd"):
+        raise PermissionDenied("Duplicate Product memerlukan akses Edit atau Approve R&D.")
+    source = (
+        DevelopmentProduct.objects.select_for_update()
+        .select_related("collection")
+        .prefetch_related("materials")
+        .get(pk=product.pk)
+    )
+    if (
+        source.collection.development_started_at
+        or source.collection.handed_over_at
+        or source.collection.commercial_approved_at
+    ):
+        raise ValidationError("Product tidak dapat diduplikat setelah Development dimulai atau handover ke Marketing.")
+
+    duplicate = DevelopmentProduct(
+        collection=source.collection,
+        working_code=f"RND-{str(uuid4()).upper()}",
+        name=f"{source.name[:175]} Copy",
+        category=source.category,
+        product_story=source.product_story,
+        target_customer=source.target_customer,
+        target_retail_price=source.target_retail_price,
+        estimated_cogs=source.estimated_cogs,
+        final_sample_url=source.final_sample_url,
+        notes=source.notes,
+        status=DevelopmentProduct.Status.CONCEPT,
+        development_stage=DevelopmentProduct.DevelopmentStage.NOT_STARTED,
+        prototype_number=0,
+        document_status=DevelopmentProduct.DocumentStatus.DRAFT,
+        document_revision=0,
+    )
+    for field_name in ("product_cover", "mockup", "technical_drawing"):
+        _copy_product_file(source=source, target=duplicate, field_name=field_name)
+    duplicate.save()
+    DevelopmentProductMaterial.objects.bulk_create(
+        [
+            DevelopmentProductMaterial(
+                product=duplicate,
+                material=material.material,
+                requirement=material.requirement,
+                eom=material.eom,
+            )
+            for material in source.materials.all()
+        ]
+    )
+    sync_collection_status(collection=source.collection, actor=actor)
+    record_audit(
+        actor=actor,
+        action="rnd_product_duplicated",
+        entity_type="rnd.development_product",
+        entity_id=duplicate.id,
+        before_values={"source_product_id": str(source.id)},
+        after_values={
+            "collection_id": str(source.collection_id),
+            "product_name": duplicate.name,
+            "document_status": duplicate.document_status,
+        },
+    )
+    return duplicate
 
 
 @transaction.atomic

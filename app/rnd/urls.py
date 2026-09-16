@@ -46,6 +46,7 @@ urlpatterns = [
     path("products/<uuid:product_id>/submit-approval/", views.product_submit_approval, name="product_submit"),
     path("products/<uuid:product_id>/approve/", views.product_approve, name="product_approve"),
     path("products/<uuid:product_id>/reject/", views.product_reject, name="product_reject"),
+    path("products/<uuid:product_id>/duplicate/", views.product_duplicate, name="product_duplicate"),
     path("products/<uuid:product_id>/delete/", views.product_delete, name="product_delete"),
     path(
         "products/<uuid:product_id>/request-revision/",

@@ -822,6 +822,82 @@ class RndWorkflowTests(TestCase):
             ).exists()
         )
 
+    def test_editor_can_duplicate_product_as_independent_draft_with_bom(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.name = "Kelabu"
+        product.category = "Shirt"
+        product.product_cover = self._image("kelabu-cover.png")
+        product.mockup = self._pdf("kelabu-mockup.pdf", "KELABU MOCKUP")
+        product.technical_drawing = self._pdf("kelabu-techpack.pdf", "KELABU TECHPACK")
+        product.document_status = DevelopmentProduct.DocumentStatus.SUBMITTED
+        product.submitted_at = timezone.now()
+        product.submitted_by = self.rnd_editor
+        product.save()
+        DevelopmentProductMaterial.objects.create(
+            product=product,
+            material="Katun Flannel",
+            requirement=Decimal("1.5000"),
+            eom="Yard",
+        )
+        self.client.force_login(self.rnd_editor)
+
+        page = self.client.get(reverse("rnd:product_detail", args=[product.id]))
+        self.assertContains(page, "Duplicate Product")
+        response = self.client.post(reverse("rnd:product_duplicate", args=[product.id]))
+
+        duplicate = DevelopmentProduct.objects.exclude(pk=product.pk).get()
+        self.assertRedirects(
+            response,
+            f'{reverse("rnd:product_detail", args=[duplicate.id])}?edit=1#edit-product',
+        )
+        self.assertEqual(duplicate.collection, collection)
+        self.assertEqual(duplicate.name, "Kelabu Copy")
+        self.assertEqual(duplicate.category, product.category)
+        self.assertEqual(duplicate.document_status, DevelopmentProduct.DocumentStatus.DRAFT)
+        self.assertEqual(duplicate.document_revision, 0)
+        self.assertEqual(duplicate.status, DevelopmentProduct.Status.CONCEPT)
+        self.assertIsNone(duplicate.submitted_at)
+        self.assertIsNone(duplicate.submitted_by)
+        self.assertEqual(duplicate.document_revisions.count(), 0)
+        self.assertEqual(
+            list(duplicate.materials.values_list("material", "requirement", "eom")),
+            [("Katun Flannel", Decimal("1.5000"), "Yard")],
+        )
+        for field_name in ("product_cover", "mockup", "technical_drawing"):
+            source_file = getattr(product, field_name)
+            duplicate_file = getattr(duplicate, field_name)
+            self.assertNotEqual(source_file.name, duplicate_file.name)
+            source_file.open("rb")
+            duplicate_file.open("rb")
+            self.assertEqual(source_file.read(), duplicate_file.read())
+            source_file.close()
+            duplicate_file.close()
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="rnd_product_duplicated",
+                entity_id=str(duplicate.id),
+            ).exists()
+        )
+
+    def test_product_duplicate_requires_rnd_edit_and_unlocked_collection(self):
+        collection = self._collection()
+        product = self._product(collection)
+        self.client.force_login(self.marketing)
+        self.assertEqual(
+            self.client.post(reverse("rnd:product_duplicate", args=[product.id])).status_code,
+            403,
+        )
+        collection.development_started_at = timezone.now()
+        collection.save(update_fields=("development_started_at", "updated_at"))
+        self.client.force_login(self.rnd_editor)
+        response = self.client.post(
+            reverse("rnd:product_duplicate", args=[product.id]),
+            follow=True,
+        )
+        self.assertContains(response, "Product tidak dapat diduplikat setelah Development dimulai")
+        self.assertEqual(collection.products.count(), 1)
+
     def test_document_revision_history_is_selectable_and_old_pdf_is_preserved(self):
         collection = self._collection()
         product = self._product(collection)

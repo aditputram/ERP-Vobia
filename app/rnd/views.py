@@ -427,16 +427,36 @@ def development_detail(request, collection_id):
         id=collection_id,
     )
     products = list(collection.products.select_related("rnd_approved_by"))
+    material_count = sum(
+        product.development_stage == DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE
+        for product in products
+    )
+    sampling_count = sum(
+        product.development_stage == DevelopmentProduct.DevelopmentStage.SAMPLING
+        for product in products
+    )
+    prototype_count = sum(
+        product.development_stage
+        in {
+            DevelopmentProduct.DevelopmentStage.PROTOTYPE,
+            DevelopmentProduct.DevelopmentStage.RESAMPLING,
+        }
+        for product in products
+    )
+    final_count = sum(
+        product.development_stage == DevelopmentProduct.DevelopmentStage.FINAL
+        for product in products
+    )
     return render(
         request,
         "rnd/development_detail.html",
         {
             "collection": collection,
             "products": products,
-            "final_count": sum(
-                product.development_stage == DevelopmentProduct.DevelopmentStage.FINAL
-                for product in products
-            ),
+            "material_count": material_count,
+            "sampling_count": sampling_count,
+            "prototype_count": prototype_count,
+            "final_count": final_count,
             "can_progress": can_edit_module(request.user, "rnd"),
             "can_decide": can_approve_module(request.user, "rnd"),
         },

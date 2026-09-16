@@ -9,6 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from .forms import ChatMessageForm
 from .models import ChatMessage, ChatReadState, ChatThread, accessible_threads
@@ -46,6 +47,7 @@ def _thread_rows(user):
 
 
 @login_required
+@xframe_options_sameorigin
 def inbox(request, thread_id=None):
     embedded = request.GET.get("embed") == "1" or request.POST.get("embed") == "1"
     threads = _thread_rows(request.user)

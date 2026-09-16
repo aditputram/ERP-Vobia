@@ -109,6 +109,9 @@ class ChatTests(TestCase):
         self.client.force_login(self.rnd)
         thread = ChatThread.objects.get(key="module:rnd")
 
+        embedded = self.client.get(f"{reverse('chat:thread', args=[thread.id])}?embed=1")
+        self.assertEqual(embedded.headers["X-Frame-Options"], "SAMEORIGIN")
+
         response = self.client.post(
             f"{reverse('chat:thread', args=[thread.id])}?embed=1",
             {"body": "Pesan popup", "embed": "1"},

@@ -298,6 +298,36 @@ class DevelopmentProductMaterial(UUIDTimestampedModel):
         return f"{self.material} · {self.requirement} {self.eom}"
 
 
+class DevelopmentProductStageDate(UUIDTimestampedModel):
+    product = models.ForeignKey(
+        DevelopmentProduct,
+        on_delete=models.CASCADE,
+        related_name="stage_dates",
+    )
+    stage_key = models.CharField(max_length=80)
+    target_date = models.DateField(null=True, blank=True)
+    actual_date = models.DateField(null=True, blank=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="rnd_development_stage_dates_updated",
+    )
+
+    class Meta:
+        ordering = ("created_at",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("product", "stage_key"),
+                name="rnd_unique_stage_date_per_product",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.product} · {self.stage_key}"
+
+
 class MarketingRecommendation(UUIDTimestampedModel):
     class Decision(models.TextChoices):
         GO = "GO", "GO"

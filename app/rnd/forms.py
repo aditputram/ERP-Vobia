@@ -154,6 +154,11 @@ class DevelopmentProductForm(forms.ModelForm):
             raise forms.ValidationError(str(exc)) from exc
 
 
+class DevelopmentStageDateForm(forms.Form):
+    target_date = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
+    actual_date = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
+
+
 class DevelopmentProductMaterialForm(forms.ModelForm):
     requirement = forms.DecimalField(
         label="Kebutuhan",

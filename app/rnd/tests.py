@@ -22,6 +22,7 @@ from .models import (
     DevelopmentProduct,
     DevelopmentProductDocumentRevision,
     DevelopmentProductMaterial,
+    DevelopmentProductStageDate,
     MarketingRecommendation,
 )
 
@@ -1236,6 +1237,29 @@ class RndWorkflowTests(TestCase):
         )
         self.assertEqual(timeline_page.context["timeline"][-2]["state"], "active")
         self.assertNotContains(timeline_page, "Mockup + Technical Drawing")
+        self.assertContains(timeline_page, "Target Date", count=len(timeline_page.context["timeline"]))
+        dated = self.client.post(
+            reverse("rnd:development_product_detail", args=[product.id]),
+            {
+                "stage_key": "prototype_2",
+                "target_date": "2026-09-20",
+                "actual_date": "2026-09-22",
+            },
+        )
+        self.assertRedirects(
+            dated,
+            f'{reverse("rnd:development_product_detail", args=[product.id])}#development-timeline',
+        )
+        stage_date = DevelopmentProductStageDate.objects.get(
+            product=product,
+            stage_key="prototype_2",
+        )
+        self.assertEqual(stage_date.target_date.isoformat(), "2026-09-20")
+        self.assertEqual(stage_date.actual_date.isoformat(), "2026-09-22")
+        self.assertEqual(stage_date.updated_by, self.rnd_editor)
+        dated_page = self.client.get(reverse("rnd:development_product_detail", args=[product.id]))
+        self.assertContains(dated_page, "20 Sep 2026")
+        self.assertContains(dated_page, "22 Sep 2026")
 
         self.client.force_login(self.rnd_approver)
         self.client.post(

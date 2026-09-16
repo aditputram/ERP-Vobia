@@ -24,6 +24,7 @@ from .forms import (
     DesignAssetForm,
     DevelopmentProductForm,
     DevelopmentProductMaterialFormSet,
+    DevelopmentStageDateForm,
     MarketingRecommendationForm,
     OfficialDecisionForm,
 )
@@ -33,6 +34,7 @@ from .models import (
     DesignAsset,
     DevelopmentProduct,
     DevelopmentProductDocumentRevision,
+    DevelopmentProductStageDate,
     MarketingRecommendation,
 )
 from .services import (
@@ -442,6 +444,7 @@ def _development_timeline(product):
     stage = product.development_stage
     timeline = [
         {
+            "key": "material_purchase",
             "label": "Pembelian Material",
             "state": (
                 "active"
@@ -459,6 +462,7 @@ def _development_timeline(product):
             ),
         },
         {
+            "key": "sampling",
             "label": "Sampling",
             "state": (
                 "active"
@@ -486,7 +490,12 @@ def _development_timeline(product):
     ]
     if not product.prototype_number:
         timeline.append(
-            {"label": "Prototype 1", "state": "pending", "detail": "Menunggu Sampling selesai"}
+            {
+                "key": "prototype_1",
+                "label": "Prototype 1",
+                "state": "pending",
+                "detail": "Menunggu Sampling selesai",
+            }
         )
     else:
         for number in range(1, product.prototype_number + 1):
@@ -496,6 +505,7 @@ def _development_timeline(product):
             )
             timeline.append(
                 {
+                    "key": f"prototype_{number}",
                     "label": f"Prototype {number}",
                     "state": "active" if is_active else "done",
                     "detail": "Menunggu keputusan Approve R&D" if is_active else "Selesai",
@@ -505,11 +515,13 @@ def _development_timeline(product):
                 timeline.extend(
                     (
                         {
+                            "key": f"revision_{number}",
                             "label": f"Revisi Prototype {number}",
                             "state": "done",
                             "detail": "Diputuskan perlu revisi",
                         },
                         {
+                            "key": f"resampling_{number}",
                             "label": f"Resampling {number}",
                             "state": "done",
                             "detail": "Selesai",
@@ -521,16 +533,19 @@ def _development_timeline(product):
             timeline.extend(
                 (
                     {
+                        "key": f"revision_{number}",
                         "label": f"Revisi Prototype {number}",
                         "state": "done",
                         "detail": "Diputuskan perlu revisi",
                     },
                     {
+                        "key": f"resampling_{number}",
                         "label": f"Resampling {number}",
                         "state": "active",
                         "detail": f"Sedang diproses menuju Prototype {number + 1}",
                     },
                     {
+                        "key": f"prototype_{number + 1}",
                         "label": f"Prototype {number + 1}",
                         "state": "pending",
                         "detail": "Menunggu Resampling selesai",
@@ -539,6 +554,7 @@ def _development_timeline(product):
             )
     timeline.append(
         {
+            "key": "final_development",
             "label": "Final Development",
             "state": "active" if stage == DevelopmentProduct.DevelopmentStage.FINAL else "pending",
             "detail": "Product sudah disetujui" if stage == DevelopmentProduct.DevelopmentStage.FINAL else "Menunggu Prototype disetujui",
@@ -548,20 +564,70 @@ def _development_timeline(product):
 
 
 @login_required
+@transaction.atomic
 def development_product_detail(request, product_id):
     request.session["active_module"] = "rnd"
     product = get_object_or_404(
-        DevelopmentProduct.objects.select_related("collection").filter(
+        DevelopmentProduct.objects.select_related("collection").prefetch_related("stage_dates").filter(
             collection__development_started_at__isnull=False
         ),
         id=product_id,
     )
+    timeline = _development_timeline(product)
+    if request.method == "POST":
+        if not can_edit_module(request.user, "rnd"):
+            return HttpResponseForbidden("Tanggal Development memerlukan akses Edit atau Approve R&D.")
+        stage_key = request.POST.get("stage_key", "")
+        if stage_key not in {step["key"] for step in timeline}:
+            messages.error(request, "Tahap Development tidak valid.")
+        else:
+            form = DevelopmentStageDateForm(request.POST)
+            if form.is_valid():
+                previous = product.stage_dates.filter(stage_key=stage_key).first()
+                stage_date, _ = DevelopmentProductStageDate.objects.update_or_create(
+                    product=product,
+                    stage_key=stage_key,
+                    defaults={
+                        "target_date": form.cleaned_data["target_date"],
+                        "actual_date": form.cleaned_data["actual_date"],
+                        "updated_by": request.user,
+                    },
+                )
+                record_audit(
+                    actor=request.user,
+                    action="rnd_product_development_dates_updated",
+                    entity_type="rnd.development_product_stage_date",
+                    entity_id=stage_date.id,
+                    before_values={
+                        "target_date": previous.target_date.isoformat() if previous and previous.target_date else None,
+                        "actual_date": previous.actual_date.isoformat() if previous and previous.actual_date else None,
+                    },
+                    after_values={
+                        "product_id": str(product.id),
+                        "stage_key": stage_key,
+                        "target_date": stage_date.target_date.isoformat() if stage_date.target_date else None,
+                        "actual_date": stage_date.actual_date.isoformat() if stage_date.actual_date else None,
+                    },
+                )
+                messages.success(request, "Target Date dan Actual Date berhasil disimpan.")
+            else:
+                messages.error(request, "Target Date atau Actual Date tidak valid.")
+        return redirect(
+            f'{reverse("rnd:development_product_detail", args=[product.id])}#development-timeline'
+        )
+
+    dates_by_stage = {item.stage_key: item for item in product.stage_dates.all()}
+    for step in timeline:
+        stage_date = dates_by_stage.get(step["key"])
+        step["target_date"] = stage_date.target_date if stage_date else None
+        step["actual_date"] = stage_date.actual_date if stage_date else None
     return render(
         request,
         "rnd/development_product_detail.html",
         {
             "product": product,
-            "timeline": _development_timeline(product),
+            "timeline": timeline,
+            "can_edit_dates": can_edit_module(request.user, "rnd"),
         },
     )
 

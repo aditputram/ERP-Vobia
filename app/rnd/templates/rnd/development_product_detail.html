@@ -10,10 +10,20 @@
     <article class="metric-card"><span>Prototype Saat Ini</span><strong>{% if product.prototype_number %}{{ product.prototype_number }}{% else %}—{% endif %}</strong></article>
     <article class="metric-card"><span>Status Dokumen</span><strong class="metric-text">{{ product.get_document_status_display }}</strong></article>
 </section>
-<section class="panel section-gap">
-    <div class="panel-header"><div><p class="eyebrow">DEVELOPMENT TIMELINE</p><h2>Perjalanan Development Product</h2></div></div>
-    <ol class="roadmap">
-        {% for step in timeline %}<li class="{{ step.state }}"><span>{{ forloop.counter|stringformat:"02d" }}</span><div><strong>{{ step.label }}</strong><small>{{ step.detail }}</small></div></li>{% endfor %}
-    </ol>
+<section class="panel section-gap" id="development-timeline">
+    <div class="panel-header"><div><p class="eyebrow">DEVELOPMENT TIMELINE</p><h2>Target dan alur kerja</h2></div><span class="status-chip"><span></span>{{ product.development_stage_label }}</span></div>
+    <div class="rnd-development-roadmap-wrap">
+        <ol class="production-roadmap rnd-development-roadmap">
+            {% for step in timeline %}<li class="{{ step.state }}">
+                <span>{{ forloop.counter|stringformat:"02d" }}</span>
+                <div class="rnd-development-step-copy">
+                    <div class="rnd-development-step-title"><strong>{{ step.label }}</strong>{% if can_edit_dates %}<details class="rnd-development-date-edit"><summary aria-label="Edit tanggal {{ step.label }}" title="Edit tanggal {{ step.label }}">✎</summary><form method="post">{% csrf_token %}<input type="hidden" name="stage_key" value="{{ step.key }}"><label>Target Date<input type="date" name="target_date" value="{{ step.target_date|date:'Y-m-d' }}"></label><label>Actual Date<input type="date" name="actual_date" value="{{ step.actual_date|date:'Y-m-d' }}"></label><button class="secondary-button compact" type="submit">Simpan</button></form></details>{% endif %}</div>
+                    <small>Target · {{ step.target_date|date:"d M Y"|default:"—" }}</small>
+                    <small>Actual · {{ step.actual_date|date:"d M Y"|default:"—" }}</small>
+                    <small>{{ step.detail }}</small>
+                </div>
+            </li>{% endfor %}
+        </ol>
+    </div>
 </section>
 {% endblock %}

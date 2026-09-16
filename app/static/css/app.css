@@ -316,6 +316,21 @@ tbody tr:last-child td { border-bottom: 0; }
 .rnd-development-actions { display: grid; gap: 7px; margin-bottom: 14px; }
 .rnd-development-actions form { margin: 0; }
 .rnd-development-actions .primary-button, .rnd-development-actions .secondary-button { width: 100%; margin-top: 0; }
+.rnd-development-roadmap-wrap { overflow-x: auto; padding: 4px 0 10px; }
+.production-roadmap.rnd-development-roadmap { display: flex; min-width: max-content; }
+.rnd-development-roadmap li { flex: 0 0 210px; align-content: start; }
+.rnd-development-roadmap li.pending > span { color: #96978f; background: white; }
+.rnd-development-roadmap li.active > span { box-shadow: 0 0 0 5px rgba(215,245,108,.28); }
+.rnd-development-step-copy { min-width: 0; }
+.rnd-development-step-title { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 7px; }
+.rnd-development-step-title strong { flex: 1; }
+.rnd-development-date-edit[open] { flex: 0 0 100%; }
+.rnd-development-date-edit[open] summary { margin-left: auto; }
+.rnd-development-date-edit summary { width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 7px; background: white; cursor: pointer; font-size: 12px; list-style: none; }
+.rnd-development-date-edit summary::-webkit-details-marker { display: none; }
+.rnd-development-date-edit form { width: 100%; display: grid; gap: 8px; margin-top: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: white; }
+.rnd-development-date-edit label { display: grid; gap: 4px; color: var(--muted); font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.rnd-development-date-edit input { width: 100%; min-height: 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; }
 .inline-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .inline-form input { width: 110px; min-height: 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; }
 .primary-button.compact, .secondary-button.compact { min-height: 34px; margin-top: 0; padding: 0 10px; font-size: 9px; }

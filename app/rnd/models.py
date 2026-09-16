@@ -94,6 +94,21 @@ class DesignAsset(UUIDTimestampedModel):
         return self.original_name
 
 
+class DesignAssetComment(UUIDTimestampedModel):
+    design = models.ForeignKey(DesignAsset, on_delete=models.CASCADE, related_name="comments")
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="rnd_design_comments",
+    )
+    body = models.TextField(max_length=2000)
+
+    class Meta:
+        ordering = ("created_at",)
+
+
 class DevelopmentProduct(UUIDTimestampedModel):
     class DocumentStatus(models.TextChoices):
         DRAFT = "DRAFT", "Draft"

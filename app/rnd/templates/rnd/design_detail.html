@@ -5,7 +5,7 @@
     <div>
         <p class="eyebrow">R&amp;D · DESIGN LIBRARY</p>
         <h1>{{ design.original_name }}</h1>
-        <p>Di-upload {{ design.created_at|date:"d M Y · H:i" }}{% if design.uploaded_by %} oleh {{ design.uploaded_by.get_full_name|default:design.uploaded_by.username }}{% endif %}. Tersedia sampai {{ expires_at|date:"d M Y" }}.</p>
+        <p><strong>Uploader:</strong> {% if design.uploaded_by %}{{ design.uploaded_by.get_full_name|default:design.uploaded_by.username }}{% else %}User tidak tersedia{% endif %} · {{ design.created_at|date:"d M Y · H:i" }} · Tersedia sampai {{ expires_at|date:"d M Y" }}.</p>
     </div>
     <div class="header-actions">
         <a class="secondary-button" href="{% url 'rnd:designing' %}" onclick="if (document.referrer.startsWith(this.href)) { history.back(); return false; }">Kembali</a>
@@ -33,6 +33,20 @@
     {% if next_design %}<a id="next-design" class="rnd-design-arrow next" href="{% url 'rnd:design_detail' next_design.id %}" aria-label="Buka Design berikutnya" onclick="location.replace(this.href); return false;">&#8250;</a>{% else %}<span class="rnd-design-arrow next disabled" aria-hidden="true">&#8250;</span>{% endif %}
 </section>
 <p class="rnd-design-navigation-help">Gunakan tombol panah atau keyboard ← → untuk melihat Design lainnya.</p>
+<section class="panel section-gap" id="design-comments">
+    <div class="panel-header"><div><p class="eyebrow">COLLABORATION NOTES</p><h2>Notes &amp; Komentar ({{ design.comments.count }})</h2></div></div>
+    <div class="rnd-design-comments">
+        {% for comment in design.comments.all %}
+        <article class="rnd-design-comment">
+            <header><strong>{% if comment.author %}{{ comment.author.get_full_name|default:comment.author.username }}{% else %}User tidak tersedia{% endif %}</strong><time>{{ comment.created_at|date:"d M Y · H:i" }}</time></header>
+            <p>{{ comment.body|linebreaksbr }}</p>
+        </article>
+        {% empty %}
+        <p class="empty-state">Belum ada notes atau komentar.</p>
+        {% endfor %}
+    </div>
+    <form method="post" class="stack-form rnd-design-comment-form">{% csrf_token %}{{ comment_form.as_p }}<button class="primary-button compact" type="submit">Kirim Komentar</button></form>
+</section>
 <script>
 document.querySelectorAll("[data-design-recommendation-form]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
@@ -54,6 +68,7 @@ document.querySelectorAll("[data-design-recommendation-form]").forEach((form) =>
 });
 document.addEventListener("keydown", (event) => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.target.matches("input, textarea, select, button, [contenteditable='true']")) return;
     const link = document.getElementById(event.key === "ArrowLeft" ? "previous-design" : event.key === "ArrowRight" ? "next-design" : "");
     if (link) {
         event.preventDefault();

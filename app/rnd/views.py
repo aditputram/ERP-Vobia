@@ -23,6 +23,7 @@ from config.image_files import card_image
 from .forms import (
     CollectionForm,
     DesignAssetForm,
+    DesignAssetCommentForm,
     DevelopmentProductForm,
     DevelopmentProductMaterialFormSet,
     DevelopmentStageDateForm,
@@ -34,6 +35,7 @@ from .documents import build_combined_document
 from .models import (
     Collection,
     DesignAsset,
+    DesignAssetComment,
     DevelopmentProduct,
     DevelopmentProductDocumentRevision,
     DevelopmentProductStageAttachment,
@@ -175,9 +177,26 @@ def designing(request):
 def design_detail(request, design_id):
     request.session["active_module"] = "rnd"
     design = get_object_or_404(
-        DesignAsset.objects.select_related("uploaded_by", "recommended_by"),
+        DesignAsset.objects.select_related("uploaded_by", "recommended_by").prefetch_related(
+            Prefetch("comments", queryset=DesignAssetComment.objects.select_related("author"))
+        ),
         id=design_id,
     )
+    comment_form = DesignAssetCommentForm(request.POST or None)
+    if request.method == "POST" and comment_form.is_valid():
+        comment = comment_form.save(commit=False)
+        comment.design = design
+        comment.author = request.user
+        comment.save()
+        record_audit(
+            actor=request.user,
+            action="rnd_design_commented",
+            entity_type="rnd.design_asset_comment",
+            entity_id=comment.id,
+            after_values={"design_id": str(design.id), "body": comment.body},
+        )
+        messages.success(request, "Komentar berhasil ditambahkan.")
+        return redirect(f'{reverse("rnd:design_detail", args=[design.id])}#design-comments')
     previous_design = (
         DesignAsset.objects.filter(
             Q(created_at__gt=design.created_at)
@@ -203,6 +222,7 @@ def design_detail(request, design_id):
             "next_design": next_design,
             "expires_at": design.created_at + DESIGN_RETENTION,
             "can_recommend": can_approve_module(request.user, "rnd"),
+            "comment_form": comment_form,
         },
     )
 

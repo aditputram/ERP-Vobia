@@ -19,6 +19,7 @@ from master_data.models import Product
 from .models import (
     Collection,
     DesignAsset,
+    DesignAssetComment,
     DevelopmentProduct,
     DevelopmentProductDocumentRevision,
     DevelopmentProductMaterial,
@@ -205,12 +206,34 @@ class RndWorkflowTests(TestCase):
         self.assertContains(page, design.original_name)
         detail = self.client.get(reverse("rnd:design_detail", args=[design.id]))
         self.assertContains(detail, "history.back()")
+        self.assertContains(detail, "Uploader:")
+        self.assertContains(detail, self.rnd_editor.username)
+        self.assertContains(detail, "Notes &amp; Komentar (0)")
         self.assertNotContains(detail, "Rekomendasikan untuk Collection Baru</button>")
+        commented = self.client.post(
+            reverse("rnd:design_detail", args=[design.id]),
+            {"body": "Warna sudah cocok, coba kerah dibuat lebih kecil."},
+        )
+        self.assertRedirects(
+            commented,
+            f'{reverse("rnd:design_detail", args=[design.id])}#design-comments',
+        )
+        comment = DesignAssetComment.objects.get(design=design)
+        self.assertEqual(comment.author, self.rnd_editor)
+        self.assertEqual(comment.body, "Warna sudah cocok, coba kerah dibuat lebih kecil.")
         denied = self.client.post(reverse("rnd:design_recommend", args=[design.id]))
         self.assertEqual(denied.status_code, 403)
 
         self.client.force_login(self.rnd_approver)
+        second_comment = self.client.post(
+            reverse("rnd:design_detail", args=[design.id]),
+            {"body": "Setuju, lanjutkan eksplorasi warna kedua."},
+        )
+        self.assertEqual(second_comment.status_code, 302)
         detail = self.client.get(reverse("rnd:design_detail", args=[design.id]))
+        self.assertContains(detail, "Notes &amp; Komentar (2)")
+        self.assertContains(detail, "Warna sudah cocok, coba kerah dibuat lebih kecil.")
+        self.assertContains(detail, "Setuju, lanjutkan eksplorasi warna kedua.")
         self.assertContains(detail, "data-design-recommendation-form")
         self.assertContains(detail, 'headers: {"X-Requested-With": "XMLHttpRequest"}')
         self.assertContains(detail, "location.reload()")

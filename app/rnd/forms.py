@@ -12,6 +12,7 @@ from config.image_files import ImageProcessingError, optimized_upload
 from .models import (
     Collection,
     DesignAsset,
+    DesignAssetComment,
     DevelopmentProduct,
     DevelopmentProductMaterial,
     DevelopmentProductStageMaterial,
@@ -60,6 +61,18 @@ class DesignAssetForm(forms.ModelForm):
         except (OSError, UnidentifiedImageError, Image.DecompressionBombError):
             raise forms.ValidationError("Foto tidak dapat diproses sebagai gambar yang valid.")
         return ContentFile(output.getvalue(), name=f"{Path(uploaded.name).stem[:220]}.webp")
+
+
+class DesignAssetCommentForm(forms.ModelForm):
+    class Meta:
+        model = DesignAssetComment
+        fields = ("body",)
+        labels = {"body": "Notes / Komentar"}
+        widgets = {
+            "body": forms.Textarea(
+                attrs={"rows": 3, "placeholder": "Tulis masukan untuk Design ini..."}
+            )
+        }
 
 
 class CollectionForm(forms.ModelForm):

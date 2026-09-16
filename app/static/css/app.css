@@ -311,6 +311,12 @@ tbody tr:last-child td { border-bottom: 0; }
 .rnd-design-arrow.next { right: 18px; }
 .rnd-design-arrow.disabled { opacity: .25; }
 .rnd-design-navigation-help { margin: 8px 0 0; color: var(--muted); text-align: center; font-size: 9px; }
+.rnd-design-comments { display: grid; gap: 9px; }
+.rnd-design-comment { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #fafaf7; }
+.rnd-design-comment header { display: flex; justify-content: space-between; gap: 12px; font-size: 10px; }
+.rnd-design-comment time { color: var(--muted); }
+.rnd-design-comment p { margin: 7px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rnd-design-comment-form { max-width: 760px; margin-top: 14px; }
 .rnd-development-gate { display: flex; flex-direction: column; align-items: flex-start; }
 .rnd-development-gate form { margin-top: auto; }
 .rnd-development-gate .primary-button, .rnd-development-gate .secondary-button { min-height: 38px; margin-top: auto; }

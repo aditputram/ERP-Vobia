@@ -1,0 +1,22 @@
+<button class="chat-shortcut" type="button" aria-label="Buka Messages" aria-haspopup="dialog" data-chat-popup-open>
+    <span class="chat-shortcut-icon" aria-hidden="true"></span>
+    {% if chat_unread_count %}<span class="chat-shortcut-badge">{{ chat_unread_count }}</span>{% endif %}
+</button>
+<dialog class="chat-popup" aria-label="Messages" data-chat-popup>
+    <header><strong>Messages</strong><button type="button" aria-label="Tutup Messages" data-chat-popup-close>×</button></header>
+    <iframe title="Messages" data-src="{% url 'chat:inbox' %}?embed=1" data-chat-popup-frame></iframe>
+</dialog>
+<script>
+(() => {
+    const popup = document.querySelector('[data-chat-popup]');
+    const open = document.querySelector('[data-chat-popup-open]');
+    if (!popup || !open) return;
+    const frame = popup.querySelector('[data-chat-popup-frame]');
+    open.addEventListener('click', () => {
+        if (!frame.dataset.loaded) { frame.src = frame.dataset.src; frame.dataset.loaded = '1'; }
+        popup.showModal();
+    });
+    popup.querySelector('[data-chat-popup-close]').addEventListener('click', () => popup.close());
+    popup.addEventListener('click', event => { if (event.target === popup) popup.close(); });
+})();
+</script>

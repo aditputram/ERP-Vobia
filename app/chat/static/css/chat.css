@@ -49,5 +49,12 @@
 .chat-empty { display: grid; place-content: center; min-height: 180px; padding: 28px; color: var(--muted); text-align: center; }
 .chat-empty strong { color: var(--ink); font-size: 15px; }
 .chat-empty p { margin: 6px 0 0; }
+.chat-embedded .app-shell { display: block; min-height: 100dvh; }
+.chat-embedded .sidebar { display: none; }
+.chat-embedded .main-content { min-height: 100dvh; padding: 0; }
+.chat-embedded .chat-page-header { display: none; }
+.chat-embedded .chat-shell { height: 100dvh; min-height: 0; grid-template-columns: 220px minmax(0, 1fr); gap: 0; }
+.chat-embedded .chat-sidebar, .chat-embedded .chat-main { border: 0; border-radius: 0; box-shadow: none; }
+.chat-embedded .chat-message { width: 85%; }
 @media (max-width: 900px) { .chat-shell { grid-template-columns: 220px minmax(0, 1fr); } .chat-message { width: 85%; } }
 @media (max-width: 760px) { .chat-shell { display: block; height: auto; } .chat-sidebar { max-height: 320px; margin-bottom: 12px; } .chat-main { min-height: 620px; } .chat-conversation-header { align-items: stretch; flex-direction: column; } .chat-search input { width: 100%; } .chat-message { width: 92%; } }

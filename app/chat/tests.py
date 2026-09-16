@@ -105,3 +105,13 @@ class ChatTests(TestCase):
         self.assertTrue(ChatReadState.objects.filter(thread=thread, user=self.marketing).exists())
         self.assertEqual(unread_chat(request)["chat_unread_count"], 0)
 
+    def test_embedded_chat_stays_embedded_after_sending(self):
+        self.client.force_login(self.rnd)
+        thread = ChatThread.objects.get(key="module:rnd")
+
+        response = self.client.post(
+            f"{reverse('chat:thread', args=[thread.id])}?embed=1",
+            {"body": "Pesan popup", "embed": "1"},
+        )
+
+        self.assertRedirects(response, f"{reverse('chat:thread', args=[thread.id])}?embed=1")

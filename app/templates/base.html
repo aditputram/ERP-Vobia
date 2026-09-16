@@ -7,10 +7,10 @@
     <meta name="color-scheme" content="light">
     <title>Vobia Space - {% block title %}ERP{% endblock %}</title>
     <link rel="icon" type="image/png" href="{% static 'img/vobia-tiktok-app-icon.png' %}?v=20260831">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260916-03">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260916-04">
     <script src="{% static 'js/app.js' %}?v=20260915-01" defer></script>
 </head>
-<body>
+<body{% if request.GET.embed == "1" %} class="chat-embedded"{% endif %}>
     <div class="app-shell{% if request.resolver_match.namespace == 'accounts' %} system-shell{% endif %}">
         {% if request.resolver_match.namespace != 'accounts' %}
         <aside class="sidebar">
@@ -169,8 +169,6 @@
                 <a class="nav-item {% if request.resolver_match.url_name == 'guide' %}active{% endif %}" href="{% url 'dashboard:guide' %}"><span>Panduan &amp; UAT</span></a>
                 {% endif %}
                 {% endif %}
-                <span class="nav-label">KOMUNIKASI</span>
-                <a class="nav-item {% if request.resolver_match.namespace == 'chat' %}active{% endif %}" href="{% url 'chat:inbox' %}"><span>Messages</span>{% if chat_unread_count %}<span class="chat-nav-badge">{{ chat_unread_count }}</span>{% endif %}</a>
             </nav>
 
             <div class="sidebar-footer">
@@ -187,11 +185,8 @@
         </aside>
         {% endif %}
 
-        {% if request.user.is_authenticated %}
-        <a class="chat-shortcut" href="{% url 'chat:inbox' %}" aria-label="Buka Messages" title="Messages">
-            <span class="chat-shortcut-icon" aria-hidden="true"></span>
-            {% if chat_unread_count %}<span class="chat-shortcut-badge">{{ chat_unread_count }}</span>{% endif %}
-        </a>
+        {% if request.user.is_authenticated and request.resolver_match.namespace != 'chat' %}
+        {% include "chat/_shortcut.html" %}
         {% endif %}
 
         <main class="main-content">

@@ -6,6 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Max, Q
 from django.http import FileResponse, Http404, HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -46,6 +47,7 @@ def _thread_rows(user):
 
 @login_required
 def inbox(request, thread_id=None):
+    embedded = request.GET.get("embed") == "1" or request.POST.get("embed") == "1"
     threads = _thread_rows(request.user)
     selected = (
         next((thread for thread in threads if thread.pk == thread_id), None)
@@ -88,7 +90,8 @@ def inbox(request, thread_id=None):
                 user=request.user,
                 defaults={"last_read_at": message.created_at},
             )
-            return redirect("chat:thread", thread_id=selected.id)
+            target = reverse("chat:thread", args=[selected.id])
+            return redirect(f"{target}?embed=1" if embedded else target)
 
     query = request.GET.get("q", "").strip()[:120]
     reply_message = None
@@ -132,6 +135,7 @@ def inbox(request, thread_id=None):
             "query": query,
             "reply_message": reply_message,
             "users": users,
+            "embedded": embedded,
         },
     )
 
@@ -148,7 +152,8 @@ def start_direct(request, user_id):
         defaults={"kind": ChatThread.Kind.DIRECT, "created_by": request.user},
     )
     thread.participants.add(request.user, target)
-    return redirect("chat:thread", thread_id=thread.id)
+    target_url = reverse("chat:thread", args=[thread.id])
+    return redirect(f"{target_url}?embed=1" if request.POST.get("embed") == "1" else target_url)
 
 
 @login_required

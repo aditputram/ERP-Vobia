@@ -1131,6 +1131,10 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(collection.development_started_by, self.rnd_editor)
         self.assertIsNotNone(collection.development_started_at)
         self.assertEqual(collection.status, Collection.Status.DEVELOPMENT)
+        product_page = self.client.get(reverse("rnd:product_detail", args=[first.id]))
+        self.assertContains(product_page, "Kembali ke Product Development")
+        self.assertContains(product_page, reverse("rnd:development_detail", args=[collection.id]))
+        self.assertNotContains(product_page, "Kembali ke Collection")
         self.assertFalse(
             collection.products.exclude(
                 development_stage=DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE

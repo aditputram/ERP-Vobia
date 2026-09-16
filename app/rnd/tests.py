@@ -1174,6 +1174,12 @@ class RndWorkflowTests(TestCase):
         product.save(update_fields=("document_status", "status", "updated_at"))
         self.client.force_login(self.rnd_editor)
         self.client.post(reverse("rnd:collection_start_development", args=[collection.id]))
+        development_page = self.client.get(reverse("rnd:development_detail", args=[collection.id]))
+        self.assertContains(
+            development_page,
+            reverse("rnd:development_product_detail", args=[product.id]),
+        )
+        self.assertContains(development_page, "Buka Timeline")
 
         for action, expected_stage in (
             ("material_completed", DevelopmentProduct.DevelopmentStage.SAMPLING),
@@ -1213,6 +1219,23 @@ class RndWorkflowTests(TestCase):
         )
         product.refresh_from_db()
         self.assertEqual(product.development_stage_label, "Prototype 2")
+        timeline_page = self.client.get(
+            reverse("rnd:development_product_detail", args=[product.id])
+        )
+        self.assertEqual(
+            [step["label"] for step in timeline_page.context["timeline"]],
+            [
+                "Pembelian Material",
+                "Sampling",
+                "Prototype 1",
+                "Revisi Prototype 1",
+                "Resampling 1",
+                "Prototype 2",
+                "Final Development",
+            ],
+        )
+        self.assertEqual(timeline_page.context["timeline"][-2]["state"], "active")
+        self.assertNotContains(timeline_page, "Mockup + Technical Drawing")
 
         self.client.force_login(self.rnd_approver)
         self.client.post(

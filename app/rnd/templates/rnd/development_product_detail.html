@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ product.name }} · Product Development{% endblock %}
+{% block content %}
+<header class="page-header">
+    <div><p class="eyebrow">R&amp;D · PRODUCT DEVELOPMENT · {{ product.collection.code }}</p><h1>{{ product.name }}</h1></div>
+    <div class="header-actions"><a class="secondary-button" href="{% url 'rnd:development_detail' product.collection.id %}" onclick="if (document.referrer.startsWith(this.href)) { history.back(); return false; }">Kembali ke Product Development</a></div>
+</header>
+<section class="metric-grid three">
+    <article class="metric-card"><span>Status Development</span><strong class="metric-text">{{ product.development_stage_label }}</strong></article>
+    <article class="metric-card"><span>Prototype Saat Ini</span><strong>{% if product.prototype_number %}{{ product.prototype_number }}{% else %}—{% endif %}</strong></article>
+    <article class="metric-card"><span>Status Dokumen</span><strong class="metric-text">{{ product.get_document_status_display }}</strong></article>
+</section>
+<section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">DEVELOPMENT TIMELINE</p><h2>Perjalanan Development Product</h2></div></div>
+    <ol class="roadmap">
+        {% for step in timeline %}<li class="{{ step.state }}"><span>{{ forloop.counter|stringformat:"02d" }}</span><div><strong>{{ step.label }}</strong><small>{{ step.detail }}</small></div></li>{% endfor %}
+    </ol>
+</section>
+{% endblock %}

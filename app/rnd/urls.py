@@ -14,6 +14,11 @@ urlpatterns = [
         views.development_detail,
         name="development_detail",
     ),
+    path(
+        "development/products/<uuid:product_id>/",
+        views.development_product_detail,
+        name="development_product_detail",
+    ),
     path("designing/<uuid:design_id>/", views.design_detail, name="design_detail"),
     path("designing/<uuid:design_id>/file/", views.design_file, name="design_file"),
     path("designing/<uuid:design_id>/recommend/", views.design_recommend, name="design_recommend"),

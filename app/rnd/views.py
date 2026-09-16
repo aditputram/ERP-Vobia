@@ -438,6 +438,134 @@ def development_detail(request, collection_id):
     )
 
 
+def _development_timeline(product):
+    stage = product.development_stage
+    timeline = [
+        {
+            "label": "Pembelian Material",
+            "state": (
+                "active"
+                if stage == DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE
+                else "pending"
+                if stage == DevelopmentProduct.DevelopmentStage.NOT_STARTED
+                else "done"
+            ),
+            "detail": (
+                "Sedang berjalan"
+                if stage == DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE
+                else "Menunggu Development dimulai"
+                if stage == DevelopmentProduct.DevelopmentStage.NOT_STARTED
+                else "Selesai"
+            ),
+        },
+        {
+            "label": "Sampling",
+            "state": (
+                "active"
+                if stage == DevelopmentProduct.DevelopmentStage.SAMPLING
+                else "pending"
+                if stage
+                in {
+                    DevelopmentProduct.DevelopmentStage.NOT_STARTED,
+                    DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE,
+                }
+                else "done"
+            ),
+            "detail": (
+                "Sedang berjalan"
+                if stage == DevelopmentProduct.DevelopmentStage.SAMPLING
+                else "Menunggu pembelian material selesai"
+                if stage
+                in {
+                    DevelopmentProduct.DevelopmentStage.NOT_STARTED,
+                    DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE,
+                }
+                else "Selesai"
+            ),
+        },
+    ]
+    if not product.prototype_number:
+        timeline.append(
+            {"label": "Prototype 1", "state": "pending", "detail": "Menunggu Sampling selesai"}
+        )
+    else:
+        for number in range(1, product.prototype_number + 1):
+            is_active = (
+                stage == DevelopmentProduct.DevelopmentStage.PROTOTYPE
+                and number == product.prototype_number
+            )
+            timeline.append(
+                {
+                    "label": f"Prototype {number}",
+                    "state": "active" if is_active else "done",
+                    "detail": "Menunggu keputusan Approve R&D" if is_active else "Selesai",
+                }
+            )
+            if number < product.prototype_number:
+                timeline.extend(
+                    (
+                        {
+                            "label": f"Revisi Prototype {number}",
+                            "state": "done",
+                            "detail": "Diputuskan perlu revisi",
+                        },
+                        {
+                            "label": f"Resampling {number}",
+                            "state": "done",
+                            "detail": "Selesai",
+                        },
+                    )
+                )
+        if stage == DevelopmentProduct.DevelopmentStage.RESAMPLING:
+            number = product.prototype_number
+            timeline.extend(
+                (
+                    {
+                        "label": f"Revisi Prototype {number}",
+                        "state": "done",
+                        "detail": "Diputuskan perlu revisi",
+                    },
+                    {
+                        "label": f"Resampling {number}",
+                        "state": "active",
+                        "detail": f"Sedang diproses menuju Prototype {number + 1}",
+                    },
+                    {
+                        "label": f"Prototype {number + 1}",
+                        "state": "pending",
+                        "detail": "Menunggu Resampling selesai",
+                    },
+                )
+            )
+    timeline.append(
+        {
+            "label": "Final Development",
+            "state": "active" if stage == DevelopmentProduct.DevelopmentStage.FINAL else "pending",
+            "detail": "Product sudah disetujui" if stage == DevelopmentProduct.DevelopmentStage.FINAL else "Menunggu Prototype disetujui",
+        }
+    )
+    return timeline
+
+
+@login_required
+def development_product_detail(request, product_id):
+    request.session["active_module"] = "rnd"
+    product = get_object_or_404(
+        DevelopmentProduct.objects.select_related("collection").filter(
+            collection__development_started_at__isnull=False
+        ),
+        id=product_id,
+    )
+    return render(
+        request,
+        "rnd/development_product_detail.html",
+        {
+            "product": product,
+            "timeline": _development_timeline(product),
+        },
+    )
+
+
 @login_required
 @require_POST
 def collection_start_development(request, collection_id):

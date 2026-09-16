@@ -938,7 +938,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .chat-shortcut-icon { position: relative; width: 20px; height: 15px; border: 2px solid currentColor; border-radius: 5px; }
 .chat-shortcut-icon::after { position: absolute; bottom: -5px; left: 3px; width: 6px; height: 6px; border-bottom: 2px solid currentColor; border-left: 2px solid currentColor; background: var(--lime); content: ""; transform: skewY(-35deg); }
 .chat-shortcut-badge { position: absolute; top: -4px; right: -4px; min-width: 19px; padding: 3px 5px; border: 2px solid white; border-radius: 999px; color: white; background: #d93c33; font-size: 8px; font-weight: 900; line-height: 1.1; text-align: center; }
-.chat-popup { width: min(50vw, 860px); max-width: calc(100vw - 32px); height: calc(100dvh - 44px); max-height: calc(100dvh - 44px); padding: 0; overflow: hidden; border: 0; border-radius: 16px; background: white; box-shadow: 0 24px 70px rgba(20, 21, 18, .28); }
+.chat-popup { width: min(50vw, 860px); max-width: calc(100vw - 32px); height: calc(100dvh - 44px); max-height: calc(100dvh - 44px); margin: 22px 22px 22px auto; padding: 0; overflow: hidden; border: 0; border-radius: 16px; background: white; box-shadow: 0 24px 70px rgba(20, 21, 18, .28); }
 .chat-popup[open] { display: grid; grid-template-rows: 52px minmax(0, 1fr); }
 .chat-popup::backdrop { background: rgba(18, 19, 16, .38); backdrop-filter: blur(2px); }
 .chat-popup > header { display: flex; align-items: center; justify-content: space-between; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line); }
@@ -976,7 +976,7 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 
 @media (max-width: 760px) {
-    .chat-popup { width: calc(100vw - 20px); max-width: none; height: calc(100dvh - 20px); max-height: calc(100dvh - 20px); }
+    .chat-popup { width: calc(100vw - 20px); max-width: none; height: calc(100dvh - 20px); max-height: calc(100dvh - 20px); margin: 10px; }
     .po-confirmation-grid { grid-template-columns: 1fr; }
     .po-confirmation-grid .po-notes-field { grid-column: auto; }
     .app-shell { display: block; }

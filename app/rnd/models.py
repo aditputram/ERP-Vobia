@@ -307,6 +307,7 @@ class DevelopmentProductStageDate(UUIDTimestampedModel):
     stage_key = models.CharField(max_length=80)
     target_date = models.DateField(null=True, blank=True)
     actual_date = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -326,6 +327,43 @@ class DevelopmentProductStageDate(UUIDTimestampedModel):
 
     def __str__(self):
         return f"{self.product} · {self.stage_key}"
+
+
+class DevelopmentProductStageAttachment(UUIDTimestampedModel):
+    stage = models.ForeignKey(
+        DevelopmentProductStageDate,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    image = models.FileField(upload_to="rnd/development_attachments/")
+    original_name = models.CharField(max_length=255)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="rnd_development_stage_attachments_uploaded",
+    )
+
+    class Meta:
+        ordering = ("created_at",)
+
+
+class DevelopmentProductStageMaterial(UUIDTimestampedModel):
+    stage = models.ForeignKey(
+        DevelopmentProductStageDate,
+        on_delete=models.CASCADE,
+        related_name="purchased_materials",
+    )
+    material = models.CharField(max_length=180)
+    purchase_price = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+    )
+
+    class Meta:
+        ordering = ("created_at",)
 
 
 class MarketingRecommendation(UUIDTimestampedModel):

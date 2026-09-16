@@ -14,6 +14,7 @@ from .models import (
     DesignAsset,
     DevelopmentProduct,
     DevelopmentProductMaterial,
+    DevelopmentProductStageMaterial,
     MarketingRecommendation,
 )
 
@@ -157,6 +158,44 @@ class DevelopmentProductForm(forms.ModelForm):
 class DevelopmentStageDateForm(forms.Form):
     target_date = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
     actual_date = forms.DateField(required=False, widget=forms.DateInput(attrs={"type": "date"}))
+    notes = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 4}))
+    image = forms.FileField(
+        required=False,
+        widget=forms.FileInput(attrs={"accept": ".jpg,.jpeg,.png,.webp"}),
+    )
+
+    def clean_image(self):
+        uploaded = self.cleaned_data.get("image")
+        if not uploaded:
+            return None
+        if uploaded.size > 10 * 1024 * 1024:
+            raise forms.ValidationError("Gambar maksimal 10 MB.")
+        signatures = {
+            "image/jpeg": (b"\xff\xd8\xff",),
+            "image/png": (b"\x89PNG\r\n\x1a\n",),
+            "image/webp": (b"RIFF",),
+        }.get(uploaded.content_type, ())
+        header = uploaded.read(12)
+        uploaded.seek(0)
+        if not signatures or not any(header.startswith(signature) for signature in signatures):
+            raise forms.ValidationError("Gambar harus berupa JPG, PNG, atau WebP yang valid.")
+        if uploaded.content_type == "image/webp" and header[8:12] != b"WEBP":
+            raise forms.ValidationError("File WebP tidak valid.")
+        try:
+            return optimized_upload(uploaded)
+        except ImageProcessingError as exc:
+            raise forms.ValidationError(str(exc)) from exc
+
+
+class DevelopmentStageMaterialForm(forms.ModelForm):
+    class Meta:
+        model = DevelopmentProductStageMaterial
+        fields = ("material", "purchase_price")
+        labels = {"material": "Material", "purchase_price": "Harga Beli"}
+        widgets = {
+            "material": forms.TextInput(attrs={"placeholder": "Nama material"}),
+            "purchase_price": forms.NumberInput(attrs={"min": "0", "step": "1"}),
+        }
 
 
 class DevelopmentProductMaterialForm(forms.ModelForm):

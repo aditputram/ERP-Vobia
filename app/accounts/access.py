@@ -173,6 +173,7 @@ MODULE_TABS = {
                 "rnd:development_list",
                 "rnd:development_detail",
                 "rnd:development_product_detail",
+                "rnd:development_stage_attachment_file",
                 "rnd:product_development_transition",
                 "rnd:product_detail",
                 "rnd:product_revision_file",

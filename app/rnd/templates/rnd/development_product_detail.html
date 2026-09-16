@@ -12,18 +12,20 @@
 </section>
 <section class="panel section-gap" id="development-timeline">
     <div class="panel-header"><div><p class="eyebrow">DEVELOPMENT TIMELINE</p><h2>Target dan alur kerja</h2></div><span class="status-chip"><span></span>{{ product.development_stage_label }}</span></div>
-    <div class="rnd-development-roadmap-wrap">
-        <ol class="production-roadmap rnd-development-roadmap">
-            {% for step in timeline %}<li class="{{ step.state }}">
-                <span>{{ forloop.counter|stringformat:"02d" }}</span>
-                <div class="rnd-development-step-copy">
-                    <div class="rnd-development-step-title"><strong>{{ step.label }}</strong>{% if can_edit_dates %}<details class="rnd-development-date-edit"><summary aria-label="Edit tanggal {{ step.label }}" title="Edit tanggal {{ step.label }}">✎</summary><form method="post">{% csrf_token %}<input type="hidden" name="stage_key" value="{{ step.key }}"><label>Target Date<input type="date" name="target_date" value="{{ step.target_date|date:'Y-m-d' }}"></label><label>Actual Date<input type="date" name="actual_date" value="{{ step.actual_date|date:'Y-m-d' }}"></label><button class="secondary-button compact" type="submit">Simpan</button></form></details>{% endif %}</div>
-                    <small>Target · {{ step.target_date|date:"d M Y"|default:"—" }}</small>
-                    <small>Actual · {{ step.actual_date|date:"d M Y"|default:"—" }}</small>
-                    <small>{{ step.detail }}</small>
-                </div>
-            </li>{% endfor %}
-        </ol>
-    </div>
+    <ol class="rnd-development-timeline-cards">
+        {% for step in timeline %}<li class="{{ step.state }}">
+            <span class="rnd-development-marker">{{ forloop.counter|stringformat:"02d" }}</span>
+            <article class="rnd-development-stage-card">
+                <header>
+                    <div><small>TAHAP {{ forloop.counter|stringformat:"02d" }}</small><h3>{{ step.label }}</h3></div>
+                    <div class="rnd-development-stage-actions"><span class="status-badge {% if step.state == 'done' %}ready{% endif %}">{{ step.detail }}</span>{% if can_edit_details %}<details class="rnd-development-detail-edit"><summary aria-label="Edit {{ step.label }}" title="Edit {{ step.label }}">✎</summary><form method="post" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="stage_key" value="{{ step.key }}"><div class="rnd-development-form-grid"><label>Target Date<input type="date" name="target_date" value="{{ step.target_date|date:'Y-m-d' }}"></label><label>Actual Date<input type="date" name="actual_date" value="{{ step.actual_date|date:'Y-m-d' }}"></label></div><label>Notes<textarea name="notes" rows="4" placeholder="Tulis catatan proses {{ step.label }}">{{ step.notes }}</textarea></label><label>Attach Foto<input type="file" name="image" accept=".jpg,.jpeg,.png,.webp"><small>JPG, PNG, atau WebP. Maksimal 10 MB.</small></label><button class="primary-button compact" type="submit">Simpan Detail</button></form></details>{% endif %}</div>
+                </header>
+                <div class="rnd-development-stage-meta"><span><small>Target Date</small><strong>{{ step.target_date|date:"d M Y"|default:"—" }}</strong></span><span><small>Actual Date</small><strong>{{ step.actual_date|date:"d M Y"|default:"—" }}</strong></span></div>
+                <div class="rnd-development-notes"><small>NOTES</small><p>{{ step.notes|default:"Belum ada notes."|linebreaksbr }}</p></div>
+                {% if step.attachments %}<div class="rnd-development-gallery">{% for attachment in step.attachments %}<a href="{% url 'rnd:development_stage_attachment_file' attachment.id %}" target="_blank" rel="noopener"><img src="{% url 'rnd:development_stage_attachment_file' attachment.id %}?v={{ attachment.updated_at|date:'U' }}" alt="Foto {{ step.label }}" loading="lazy" decoding="async"></a>{% endfor %}</div>{% endif %}
+                {% if step.key == "material_purchase" %}<section class="rnd-development-materials"><div class="rnd-development-subheader"><div><small>PEMBELIAN MATERIAL</small><h4>Material dan Harga Beli</h4></div>{% if can_edit_details %}<details><summary class="secondary-button compact">+ Tambah Material</summary><form method="post">{% csrf_token %}<input type="hidden" name="action" value="add_material"><input type="hidden" name="stage_key" value="material_purchase"><label>Material<input type="text" name="material" maxlength="180" required placeholder="Nama material"></label><label>Harga Beli<input type="number" name="purchase_price" min="0" step="1" required placeholder="0"></label><button class="primary-button compact" type="submit">Tambah</button></form></details>{% endif %}</div>{% if step.purchased_materials %}<div class="table-wrap"><table><thead><tr><th>Material</th><th>Harga Beli</th></tr></thead><tbody>{% for material in step.purchased_materials %}<tr><td>{{ material.material }}</td><td>Rp {{ material.purchase_price|floatformat:"0g" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="muted">Belum ada material pembelian.</p>{% endif %}</section>{% endif %}
+            </article>
+        </li>{% endfor %}
+    </ol>
 </section>
 {% endblock %}

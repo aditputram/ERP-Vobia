@@ -22,7 +22,9 @@ from .models import (
     DevelopmentProduct,
     DevelopmentProductDocumentRevision,
     DevelopmentProductMaterial,
+    DevelopmentProductStageAttachment,
     DevelopmentProductStageDate,
+    DevelopmentProductStageMaterial,
     MarketingRecommendation,
 )
 
@@ -1237,13 +1239,17 @@ class RndWorkflowTests(TestCase):
         )
         self.assertEqual(timeline_page.context["timeline"][-2]["state"], "active")
         self.assertNotContains(timeline_page, "Mockup + Technical Drawing")
-        self.assertContains(timeline_page, "Target Date", count=len(timeline_page.context["timeline"]))
+        self.assertContains(timeline_page, "Target dan alur kerja")
+        self.assertContains(timeline_page, "Belum ada notes.")
+        self.assertContains(timeline_page, "+ Tambah Material")
         dated = self.client.post(
             reverse("rnd:development_product_detail", args=[product.id]),
             {
                 "stage_key": "prototype_2",
                 "target_date": "2026-09-20",
                 "actual_date": "2026-09-22",
+                "notes": "Sample sudah sesuai warna.",
+                "image": self._image("prototype-2.png"),
             },
         )
         self.assertRedirects(
@@ -1256,10 +1262,45 @@ class RndWorkflowTests(TestCase):
         )
         self.assertEqual(stage_date.target_date.isoformat(), "2026-09-20")
         self.assertEqual(stage_date.actual_date.isoformat(), "2026-09-22")
+        self.assertEqual(stage_date.notes, "Sample sudah sesuai warna.")
         self.assertEqual(stage_date.updated_by, self.rnd_editor)
+        attachment = DevelopmentProductStageAttachment.objects.get(stage=stage_date)
+        self.assertTrue(attachment.image.name.endswith(".webp"))
+        self.assertEqual(
+            self.client.get(
+                reverse("rnd:development_stage_attachment_file", args=[attachment.id])
+            ).status_code,
+            200,
+        )
+        material_response = self.client.post(
+            reverse("rnd:development_product_detail", args=[product.id]),
+            {
+                "action": "add_material",
+                "stage_key": "material_purchase",
+                "material": "Flannel 12 oz",
+                "purchase_price": "125000",
+            },
+        )
+        self.assertEqual(material_response.status_code, 302)
+        material = DevelopmentProductStageMaterial.objects.get(
+            stage__product=product,
+            stage__stage_key="material_purchase",
+        )
+        self.assertEqual(material.material, "Flannel 12 oz")
+        self.assertEqual(material.purchase_price, Decimal("125000"))
         dated_page = self.client.get(reverse("rnd:development_product_detail", args=[product.id]))
         self.assertContains(dated_page, "20 Sep 2026")
         self.assertContains(dated_page, "22 Sep 2026")
+        self.assertContains(dated_page, "Sample sudah sesuai warna.")
+        self.assertContains(dated_page, "Flannel 12 oz")
+
+        self.client.force_login(self.marketing)
+        self.assertEqual(
+            self.client.get(
+                reverse("rnd:development_stage_attachment_file", args=[attachment.id])
+            ).status_code,
+            403,
+        )
 
         self.client.force_login(self.rnd_approver)
         self.client.post(

@@ -16,6 +16,7 @@ from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
+from accounts.access import can_access_tab
 from audit.services import record_audit
 from config.image_files import card_image
 
@@ -25,6 +26,7 @@ from .forms import (
     DevelopmentProductForm,
     DevelopmentProductMaterialFormSet,
     DevelopmentStageDateForm,
+    DevelopmentStageMaterialForm,
     MarketingRecommendationForm,
     OfficialDecisionForm,
 )
@@ -34,6 +36,7 @@ from .models import (
     DesignAsset,
     DevelopmentProduct,
     DevelopmentProductDocumentRevision,
+    DevelopmentProductStageAttachment,
     DevelopmentProductStageDate,
     MarketingRecommendation,
 )
@@ -568,7 +571,9 @@ def _development_timeline(product):
 def development_product_detail(request, product_id):
     request.session["active_module"] = "rnd"
     product = get_object_or_404(
-        DevelopmentProduct.objects.select_related("collection").prefetch_related("stage_dates").filter(
+        DevelopmentProduct.objects.select_related("collection").prefetch_related(
+            "stage_dates__attachments", "stage_dates__purchased_materials"
+        ).filter(
             collection__development_started_at__isnull=False
         ),
         id=product_id,
@@ -581,37 +586,78 @@ def development_product_detail(request, product_id):
         if stage_key not in {step["key"] for step in timeline}:
             messages.error(request, "Tahap Development tidak valid.")
         else:
-            form = DevelopmentStageDateForm(request.POST)
-            if form.is_valid():
-                previous = product.stage_dates.filter(stage_key=stage_key).first()
-                stage_date, _ = DevelopmentProductStageDate.objects.update_or_create(
-                    product=product,
-                    stage_key=stage_key,
-                    defaults={
-                        "target_date": form.cleaned_data["target_date"],
-                        "actual_date": form.cleaned_data["actual_date"],
-                        "updated_by": request.user,
-                    },
-                )
-                record_audit(
-                    actor=request.user,
-                    action="rnd_product_development_dates_updated",
-                    entity_type="rnd.development_product_stage_date",
-                    entity_id=stage_date.id,
-                    before_values={
-                        "target_date": previous.target_date.isoformat() if previous and previous.target_date else None,
-                        "actual_date": previous.actual_date.isoformat() if previous and previous.actual_date else None,
-                    },
-                    after_values={
-                        "product_id": str(product.id),
-                        "stage_key": stage_key,
-                        "target_date": stage_date.target_date.isoformat() if stage_date.target_date else None,
-                        "actual_date": stage_date.actual_date.isoformat() if stage_date.actual_date else None,
-                    },
-                )
-                messages.success(request, "Target Date dan Actual Date berhasil disimpan.")
+            if request.POST.get("action") == "add_material":
+                if stage_key != "material_purchase":
+                    messages.error(request, "Material hanya dapat ditambahkan pada tahap Pembelian Material.")
+                else:
+                    form = DevelopmentStageMaterialForm(request.POST)
+                    if form.is_valid():
+                        stage_date, _ = DevelopmentProductStageDate.objects.get_or_create(
+                            product=product,
+                            stage_key=stage_key,
+                            defaults={"updated_by": request.user},
+                        )
+                        material = form.save(commit=False)
+                        material.stage = stage_date
+                        material.save()
+                        record_audit(
+                            actor=request.user,
+                            action="rnd_product_development_material_added",
+                            entity_type="rnd.development_product_stage_material",
+                            entity_id=material.id,
+                            after_values={
+                                "product_id": str(product.id),
+                                "material": material.material,
+                                "purchase_price": str(material.purchase_price),
+                            },
+                        )
+                        messages.success(request, "Material pembelian berhasil ditambahkan.")
+                    else:
+                        messages.error(request, "Nama material atau harga beli tidak valid.")
             else:
-                messages.error(request, "Target Date atau Actual Date tidak valid.")
+                form = DevelopmentStageDateForm(request.POST, request.FILES)
+                if form.is_valid():
+                    previous = product.stage_dates.filter(stage_key=stage_key).first()
+                    stage_date, _ = DevelopmentProductStageDate.objects.update_or_create(
+                        product=product,
+                        stage_key=stage_key,
+                        defaults={
+                            "target_date": form.cleaned_data["target_date"],
+                            "actual_date": form.cleaned_data["actual_date"],
+                            "notes": form.cleaned_data["notes"],
+                            "updated_by": request.user,
+                        },
+                    )
+                    image = form.cleaned_data.get("image")
+                    if image:
+                        DevelopmentProductStageAttachment.objects.create(
+                            stage=stage_date,
+                            image=image,
+                            original_name=request.FILES["image"].name[:255],
+                            uploaded_by=request.user,
+                        )
+                    record_audit(
+                        actor=request.user,
+                        action="rnd_product_development_stage_updated",
+                        entity_type="rnd.development_product_stage_date",
+                        entity_id=stage_date.id,
+                        before_values={
+                            "target_date": previous.target_date.isoformat() if previous and previous.target_date else None,
+                            "actual_date": previous.actual_date.isoformat() if previous and previous.actual_date else None,
+                            "notes": previous.notes if previous else "",
+                        },
+                        after_values={
+                            "product_id": str(product.id),
+                            "stage_key": stage_key,
+                            "target_date": stage_date.target_date.isoformat() if stage_date.target_date else None,
+                            "actual_date": stage_date.actual_date.isoformat() if stage_date.actual_date else None,
+                            "notes": stage_date.notes,
+                            "attachment_added": bool(image),
+                        },
+                    )
+                    messages.success(request, "Detail tahap Development berhasil disimpan.")
+                else:
+                    messages.error(request, "Tanggal, notes, atau gambar tidak valid.")
         return redirect(
             f'{reverse("rnd:development_product_detail", args=[product.id])}#development-timeline'
         )
@@ -621,15 +667,38 @@ def development_product_detail(request, product_id):
         stage_date = dates_by_stage.get(step["key"])
         step["target_date"] = stage_date.target_date if stage_date else None
         step["actual_date"] = stage_date.actual_date if stage_date else None
+        step["notes"] = stage_date.notes if stage_date else ""
+        step["attachments"] = list(stage_date.attachments.all()) if stage_date else []
+        step["purchased_materials"] = list(stage_date.purchased_materials.all()) if stage_date else []
     return render(
         request,
         "rnd/development_product_detail.html",
         {
             "product": product,
             "timeline": timeline,
-            "can_edit_dates": can_edit_module(request.user, "rnd"),
+            "can_edit_details": can_edit_module(request.user, "rnd"),
         },
     )
+
+
+@login_required
+def development_stage_attachment_file(request, attachment_id):
+    if not can_access_tab(request.user, "rnd", "development"):
+        raise Http404
+    attachment = get_object_or_404(
+        DevelopmentProductStageAttachment.objects.select_related("stage__product__collection"),
+        id=attachment_id,
+        stage__product__collection__development_started_at__isnull=False,
+    )
+    response = FileResponse(
+        attachment.image.open("rb"),
+        as_attachment=False,
+        filename=attachment.image.name.rsplit("/", 1)[-1],
+        content_type="image/webp",
+    )
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = _private_file_cache(request)
+    return response
 
 
 @login_required

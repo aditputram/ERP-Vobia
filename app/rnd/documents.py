@@ -173,6 +173,7 @@ def _bom_reader(*, product, submitted_at=None, approved_at=None, approved_by="")
             Paragraph("MATERIAL", header_style),
             Paragraph("KEBUTUHAN", header_style),
             Paragraph("EOM / SATUAN", header_style),
+            Paragraph("NOTES", header_style),
         ]
     ]
     materials = list(product.materials.all())
@@ -182,6 +183,7 @@ def _bom_reader(*, product, submitted_at=None, approved_at=None, approved_by="")
                 Paragraph(escape(material.material), body_style),
                 Paragraph(f"{material.requirement:.1f}".replace(".", ","), body_style),
                 Paragraph(escape(material.eom), body_style),
+                Paragraph(escape(material.notes or "-"), body_style),
             ]
             for material in materials
         )
@@ -191,12 +193,13 @@ def _bom_reader(*, product, submitted_at=None, approved_at=None, approved_by="")
                 Paragraph("Belum ada material", body_style),
                 Paragraph("-", body_style),
                 Paragraph("-", body_style),
+                Paragraph("-", body_style),
             ]
         )
 
     table = Table(
         table_data,
-        colWidths=(151 * mm, 45 * mm, 65 * mm),
+        colWidths=(95 * mm, 35 * mm, 40 * mm, 91 * mm),
         repeatRows=1,
         hAlign="LEFT",
     )

@@ -234,9 +234,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .stack-form .errorlist { margin: 0; padding-left: 18px; color: var(--danger); font-size: 9px; }
 .rnd-bom { display: grid; gap: 10px; margin-top: 10px; }
 .rnd-bom .panel-header { margin-bottom: 0; }
-.rnd-bom-table { min-width: 620px; }
+.rnd-bom-table { min-width: 820px; }
 .rnd-bom-table th:nth-child(2), .rnd-bom-table td:nth-child(2) { width: 150px; }
 .rnd-bom-table th:nth-child(3), .rnd-bom-table td:nth-child(3) { width: 180px; }
+.rnd-bom-table th:nth-child(4), .rnd-bom-table td:nth-child(4) { width: 240px; }
 .rnd-bom-table th:last-child, .rnd-bom-table td:last-child { width: 58px; text-align: right; }
 .rnd-bom-table input { width: 100%; min-height: 38px; padding: 7px 9px; border: 1px solid #d9d8d1; border-radius: 8px; background: white; }
 .rnd-bom-table input:focus { border-color: #768f21; outline: none; box-shadow: 0 0 0 3px rgba(118,143,33,.12); }

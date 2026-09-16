@@ -216,15 +216,17 @@ class DevelopmentProductMaterialForm(forms.ModelForm):
 
     class Meta:
         model = DevelopmentProductMaterial
-        fields = ("material", "requirement", "eom")
+        fields = ("material", "requirement", "eom", "notes")
         labels = {
             "material": "Material",
             "requirement": "Kebutuhan",
             "eom": "EOM / Satuan",
+            "notes": "Notes",
         }
         widgets = {
             "material": forms.TextInput(attrs={"placeholder": "Contoh: Canvas 12 oz"}),
             "eom": forms.TextInput(attrs={"placeholder": "Contoh: meter, pcs, gram"}),
+            "notes": forms.TextInput(attrs={"placeholder": "Catatan material"}),
         }
 
 

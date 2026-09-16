@@ -6,13 +6,14 @@
     {{ material_formset.non_form_errors }}
     <div class="table-wrap">
         <table class="rnd-bom-table">
-            <thead><tr><th>Material</th><th>Kebutuhan</th><th>EOM / Satuan</th><th></th></tr></thead>
+            <thead><tr><th>Material</th><th>Kebutuhan</th><th>EOM / Satuan</th><th>Notes</th><th></th></tr></thead>
             <tbody data-material-rows>
                 {% for row in material_formset %}
                 <tr data-material-row{% if row.DELETE.value %} hidden{% endif %}>
                     <td>{{ row.id }}{{ row.DELETE.as_hidden }}{{ row.material.errors }}{{ row.material }}</td>
                     <td>{{ row.requirement.errors }}{{ row.requirement }}</td>
                     <td>{{ row.eom.errors }}{{ row.eom }}</td>
+                    <td>{{ row.notes.errors }}{{ row.notes }}</td>
                     <td><button class="text-button" type="button" data-remove-material>Hapus</button></td>
                 </tr>
                 {% endfor %}
@@ -25,6 +26,7 @@
             <td>{{ material_formset.empty_form.id }}{{ material_formset.empty_form.DELETE.as_hidden }}{{ material_formset.empty_form.material }}</td>
             <td>{{ material_formset.empty_form.requirement }}</td>
             <td>{{ material_formset.empty_form.eom }}</td>
+            <td>{{ material_formset.empty_form.notes }}</td>
             <td><button class="text-button" type="button" data-remove-material>Hapus</button></td>
         </tr>
     </template>

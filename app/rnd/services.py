@@ -88,6 +88,7 @@ def duplicate_product(*, product, actor):
                 material=material.material,
                 requirement=material.requirement,
                 eom=material.eom,
+                notes=material.notes,
             )
             for material in source.materials.all()
         ]

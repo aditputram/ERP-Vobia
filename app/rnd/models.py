@@ -290,6 +290,7 @@ class DevelopmentProductMaterial(UUIDTimestampedModel):
         validators=[MinValueValidator(0.0001)],
     )
     eom = models.CharField(max_length=40)
+    notes = models.TextField(blank=True)
 
     class Meta:
         ordering = ("created_at",)

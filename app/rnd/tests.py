@@ -321,6 +321,7 @@ class RndWorkflowTests(TestCase):
         self.assertContains(page, "Material")
         self.assertContains(page, "Kebutuhan")
         self.assertContains(page, "EOM / Satuan")
+        self.assertContains(page, "Notes")
         self.assertContains(page, "+ Tambah Material")
         self.assertContains(page, "Upload Product Cover")
         self.assertContains(page, "Upload Mockup")
@@ -332,7 +333,6 @@ class RndWorkflowTests(TestCase):
             "Target Retail Price",
             "Estimated COGS",
             "Final Sample",
-            "Notes",
         ):
             self.assertNotContains(page, removed_label)
 
@@ -360,9 +360,11 @@ class RndWorkflowTests(TestCase):
                 "materials-0-material": "Canvas 12 oz",
                 "materials-0-requirement": "1.2",
                 "materials-0-eom": "meter",
+                "materials-0-notes": "Bahan utama badan tas",
                 "materials-1-material": "Resleting YKK 30 cm",
                 "materials-1-requirement": "1",
                 "materials-1-eom": "pcs",
+                "materials-1-notes": "Warna hitam",
             },
         )
         self.assertRedirects(response, reverse("rnd:collection_detail", args=[collection.id]))
@@ -377,6 +379,7 @@ class RndWorkflowTests(TestCase):
         canvas = product.materials.get(material="Canvas 12 oz")
         self.assertEqual(canvas.requirement, Decimal("1.2000"))
         self.assertEqual(canvas.eom, "meter")
+        self.assertEqual(canvas.notes, "Bahan utama badan tas")
 
         product_page = self.client.get(f'{reverse("rnd:product_detail", args=[product.id])}?edit=1')
         self.assertContains(product_page, 'value="1.2"')
@@ -642,6 +645,7 @@ class RndWorkflowTests(TestCase):
             material="Katun Flannel",
             requirement="1.5",
             eom="Yard",
+            notes="Motif sesuai mockup",
         )
         product.mockup.open("rb")
         source_mockup = product.mockup.read()
@@ -666,6 +670,7 @@ class RndWorkflowTests(TestCase):
         self.assertIn("Katun Flannel", submitted_page_texts[2])
         self.assertIn("1,5", submitted_page_texts[2])
         self.assertIn("Yard", submitted_page_texts[2])
+        self.assertIn("Motif sesuai mockup", submitted_page_texts[2])
         self.assertTrue(all("000" in text for text in submitted_page_texts))
         self.assertNotIn("DIGITAL APPROVED", submitted_text)
         revision = product.document_revisions.get(revision=0)
@@ -842,6 +847,7 @@ class RndWorkflowTests(TestCase):
             material="Katun Flannel",
             requirement=Decimal("1.5000"),
             eom="Yard",
+            notes="Gunakan warna utama",
         )
         self.client.force_login(self.rnd_editor)
 
@@ -864,8 +870,8 @@ class RndWorkflowTests(TestCase):
         self.assertIsNone(duplicate.submitted_by)
         self.assertEqual(duplicate.document_revisions.count(), 0)
         self.assertEqual(
-            list(duplicate.materials.values_list("material", "requirement", "eom")),
-            [("Katun Flannel", Decimal("1.5000"), "Yard")],
+            list(duplicate.materials.values_list("material", "requirement", "eom", "notes")),
+            [("Katun Flannel", Decimal("1.5000"), "Yard", "Gunakan warna utama")],
         )
         for field_name in ("product_cover", "mockup", "technical_drawing"):
             source_file = getattr(product, field_name)

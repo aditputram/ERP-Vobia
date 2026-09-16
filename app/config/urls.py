@@ -25,5 +25,6 @@ urlpatterns = [
     path("master-data/", include("master_data.urls")),
     path("rnd/", include("rnd.urls")),
     path("finance/", include("finance.urls")),
+    path("messages/", include("chat.urls")),
     path("", include("dashboard.urls")),
 ]

@@ -933,6 +933,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .primary-button:disabled, .secondary-button:disabled { color: #96978f; background: #e7e7e1; border-color: #e1e1dc; cursor: not-allowed; opacity: .8; }
 .table-subcopy { display: block; margin-top: 4px; color: var(--muted); font-size: 8px; }
 .access-chip { display: inline-flex; margin: 2px; padding: 5px 7px; border-radius: 999px; color: #4e650b; background: #eff7d6; font-size: 8px; font-weight: 800; }
+.chat-nav-badge { min-width: 18px; margin-left: auto; padding: 3px 6px; border-radius: 999px; color: #1b2305; background: var(--lime); font-size: 8px; font-weight: 900; text-align: center; }
 .user-access-form { display: grid; gap: 24px; }
 .user-identity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .module-access-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }

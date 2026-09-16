@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     "dashboard",
     "rnd",
     "finance",
+    "chat",
 ]
 
 MIDDLEWARE = [
@@ -91,6 +92,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "accounts.context_processors.tab_permissions",
+                "chat.context_processors.unread_chat",
             ],
         },
     },

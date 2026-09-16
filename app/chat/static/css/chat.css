@@ -57,4 +57,4 @@
 .chat-embedded .chat-sidebar, .chat-embedded .chat-main { border: 0; border-radius: 0; box-shadow: none; }
 .chat-embedded .chat-message { width: 85%; }
 @media (max-width: 900px) { .chat-shell { grid-template-columns: 220px minmax(0, 1fr); } .chat-message { width: 85%; } }
-@media (max-width: 760px) { .chat-shell { display: block; height: auto; } .chat-sidebar { max-height: 320px; margin-bottom: 12px; } .chat-main { min-height: 620px; } .chat-conversation-header { align-items: stretch; flex-direction: column; } .chat-search input { width: 100%; } .chat-message { width: 92%; } }
+@media (max-width: 760px) { .chat-shell { display: block; height: auto; } .chat-sidebar { max-height: 320px; margin-bottom: 12px; } .chat-main { min-height: 620px; } .chat-conversation-header { align-items: stretch; flex-direction: column; } .chat-search input { width: 100%; } .chat-message { width: 92%; } .chat-embedded .chat-shell { display: grid; height: 100dvh; grid-template-columns: 200px minmax(0, 1fr); } .chat-embedded .chat-sidebar { max-height: none; margin-bottom: 0; } .chat-embedded .chat-main { min-height: 0; } }

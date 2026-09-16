@@ -1342,7 +1342,7 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(product.status, DevelopmentProduct.Status.FINAL_APPROVED)
         self.assertEqual(collection.status, Collection.Status.FINAL_DEVELOPMENT)
 
-    def test_development_collection_summary_counts_current_product_stages(self):
+    def test_development_collection_summary_counts_material_entries_and_current_stages(self):
         collection = self._collection()
         collection.development_started_at = timezone.now()
         collection.save(update_fields=("development_started_at", "updated_at"))
@@ -1353,16 +1353,29 @@ class RndWorkflowTests(TestCase):
             (DevelopmentProduct.DevelopmentStage.RESAMPLING, 1),
             (DevelopmentProduct.DevelopmentStage.FINAL, 2),
         )
+        products = []
         for number, (stage, prototype_number) in enumerate(stages, start=1):
             product = self._product(collection, f"P-{number:03d}")
             product.development_stage = stage
             product.prototype_number = prototype_number
             product.save(update_fields=("development_stage", "prototype_number", "updated_at"))
+            products.append(product)
+        for product in products[:2]:
+            material_stage = DevelopmentProductStageDate.objects.create(
+                product=product,
+                stage_key="material_purchase",
+                updated_by=self.rnd_editor,
+            )
+            DevelopmentProductStageMaterial.objects.create(
+                stage=material_stage,
+                material="Material Awal",
+                purchase_price=Decimal("125000"),
+            )
 
         self.client.force_login(self.rnd_editor)
         response = self.client.get(reverse("rnd:development_detail", args=[collection.id]))
 
-        self.assertEqual(response.context["material_count"], 1)
+        self.assertEqual(response.context["material_count"], 2)
         self.assertEqual(response.context["sampling_count"], 1)
         self.assertEqual(response.context["prototype_count"], 2)
         self.assertEqual(response.context["final_count"], 1)

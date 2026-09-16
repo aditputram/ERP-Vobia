@@ -435,10 +435,7 @@ def development_detail(request, collection_id):
             )
         )
     )
-    material_count = sum(
-        product.development_stage == DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE
-        for product in products
-    )
+    material_count = sum(bool(product.purchased_material_count) for product in products)
     sampling_count = sum(
         product.development_stage == DevelopmentProduct.DevelopmentStage.SAMPLING
         for product in products

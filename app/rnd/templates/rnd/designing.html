@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% load static %}
-{% block title %}Designing · R&amp;D{% endblock %}
+{% block title %}Design Library · R&amp;D{% endblock %}
 {% block content %}
 <header class="page-header">
     <div>
         <p class="eyebrow">R&amp;D · DESIGN LIBRARY</p>
-        <h1>Designing</h1>
+        <h1>Design Library</h1>
         <p>Ruang visual anak drafting. Foto yang direkomendasikan tetap menjadi ide dan belum otomatis masuk ke Collection.</p>
     </div>
     {% if can_upload %}<div class="header-actions"><button class="secondary-button" type="button" data-rnd-panel-toggle aria-controls="upload-design-panel" aria-expanded="{% if form.is_bound %}true{% else %}false{% endif %}">Upload Design</button></div>{% endif %}

@@ -27,7 +27,7 @@
                 {% if current_business_module == 'rnd' %}
                 <span class="nav-label">R&amp;D</span>
                 {% if tab_permissions.rnd.designing %}
-                <a class="nav-item {% if 'design' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'rnd:designing' %}"><span>Designing</span></a>
+                <a class="nav-item {% if 'design' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'rnd:designing' %}"><span>Design Library</span></a>
                 {% endif %}
                 {% if tab_permissions.rnd.collections %}
                 <a class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'rnd:dashboard' %}"><span>Collection R&amp;D</span></a>

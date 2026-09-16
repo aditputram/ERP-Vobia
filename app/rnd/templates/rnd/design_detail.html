@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}{{ design.original_name }} · Designing{% endblock %}
+{% block title %}{{ design.original_name }} · Design Library{% endblock %}
 {% block content %}
 <header class="page-header">
     <div>
-        <p class="eyebrow">R&amp;D · DESIGNING</p>
+        <p class="eyebrow">R&amp;D · DESIGN LIBRARY</p>
         <h1>{{ design.original_name }}</h1>
         <p>Di-upload {{ design.created_at|date:"d M Y · H:i" }}{% if design.uploaded_by %} oleh {{ design.uploaded_by.get_full_name|default:design.uploaded_by.username }}{% endif %}. Tersedia sampai {{ expires_at|date:"d M Y" }}.</p>
     </div>

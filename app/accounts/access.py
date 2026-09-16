@@ -132,7 +132,7 @@ MODULE_TABS = {
     "rnd": (
         (
             "designing",
-            "Designing",
+            "Design Library",
             "RnD",
             (
                 "rnd:designing",

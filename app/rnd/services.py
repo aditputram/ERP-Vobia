@@ -455,12 +455,8 @@ def start_collection_development(*, collection, actor):
         )
     )
     for product in products:
-        if product.status == DevelopmentProduct.Status.FINAL_APPROVED:
-            product.development_stage = DevelopmentProduct.DevelopmentStage.FINAL
-            product.prototype_number = max(product.prototype_number, 1)
-        else:
-            product.development_stage = DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE
-            product.prototype_number = 0
+        product.development_stage = DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE
+        product.prototype_number = 0
         product.updated_at = started_at
     DevelopmentProduct.objects.bulk_update(
         products,
@@ -525,6 +521,11 @@ def transition_product_development(*, product, actor, action):
     expected_stage, next_stage = transition
     if product.development_stage != expected_stage:
         raise ValidationError("Tahap Product sudah berubah. Muat ulang halaman sebelum melanjutkan.")
+    if action == "material_completed" and not product.stage_dates.filter(
+        stage_key="material_purchase",
+        purchased_materials__isnull=False,
+    ).exists():
+        raise ValidationError("Isi minimal satu material dan harga beli sebelum lanjut ke Sampling.")
 
     before_stage = product.development_stage
     if action in {"sampling_completed", "resampling_completed"}:

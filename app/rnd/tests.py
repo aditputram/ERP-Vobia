@@ -1093,6 +1093,16 @@ class RndWorkflowTests(TestCase):
         )
         started = self.client.post(reverse("rnd:collection_start_development", args=[collection.id]))
         self.assertRedirects(started, reverse("rnd:development_detail", args=[collection.id]))
+        self.assertFalse(
+            collection.products.exclude(
+                development_stage=DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE,
+                prototype_number=0,
+            ).exists()
+        )
+        collection.products.update(
+            development_stage=DevelopmentProduct.DevelopmentStage.FINAL,
+            prototype_number=1,
+        )
         handed = self.client.post(reverse("rnd:collection_handover", args=[collection.id]))
         self.assertRedirects(handed, reverse("rnd:collection_detail", args=[collection.id]))
         collection.refresh_from_db()
@@ -1183,6 +1193,24 @@ class RndWorkflowTests(TestCase):
             reverse("rnd:development_product_detail", args=[product.id]),
         )
         self.assertContains(development_page, "Buka Timeline")
+        self.assertContains(development_page, "Isi Pembelian Material")
+
+        blocked_material = self.client.post(
+            reverse("rnd:product_development_transition", args=[product.id]),
+            {"action": "material_completed"},
+            follow=True,
+        )
+        self.assertContains(blocked_material, "Isi minimal satu material dan harga beli")
+        material_stage = DevelopmentProductStageDate.objects.create(
+            product=product,
+            stage_key="material_purchase",
+            updated_by=self.rnd_editor,
+        )
+        DevelopmentProductStageMaterial.objects.create(
+            stage=material_stage,
+            material="Material Awal",
+            purchase_price=Decimal("125000"),
+        )
 
         for action, expected_stage in (
             ("material_completed", DevelopmentProduct.DevelopmentStage.SAMPLING),
@@ -1285,6 +1313,7 @@ class RndWorkflowTests(TestCase):
         material = DevelopmentProductStageMaterial.objects.get(
             stage__product=product,
             stage__stage_key="material_purchase",
+            material="Flannel 12 oz",
         )
         self.assertEqual(material.material, "Flannel 12 oz")
         self.assertEqual(material.purchase_price, Decimal("125000"))

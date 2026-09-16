@@ -426,7 +426,15 @@ def development_detail(request, collection_id):
         ),
         id=collection_id,
     )
-    products = list(collection.products.select_related("rnd_approved_by"))
+    products = list(
+        collection.products.select_related("rnd_approved_by").annotate(
+            purchased_material_count=Count(
+                "stage_dates__purchased_materials",
+                filter=Q(stage_dates__stage_key="material_purchase"),
+                distinct=True,
+            )
+        )
+    )
     material_count = sum(
         product.development_stage == DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE
         for product in products

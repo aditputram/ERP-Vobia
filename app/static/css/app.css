@@ -934,7 +934,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .table-subcopy { display: block; margin-top: 4px; color: var(--muted); font-size: 8px; }
 .access-chip { display: inline-flex; margin: 2px; padding: 5px 7px; border-radius: 999px; color: #4e650b; background: #eff7d6; font-size: 8px; font-weight: 800; }
 .chat-nav-badge { min-width: 18px; margin-left: auto; padding: 3px 6px; border-radius: 999px; color: #1b2305; background: var(--lime); font-size: 8px; font-weight: 900; text-align: center; }
-.chat-shortcut { position: fixed; z-index: 30; top: 18px; right: 22px; display: grid; width: 46px; height: 46px; place-items: center; border: 1px solid #c9df77; border-radius: 50%; color: #263300; background: var(--lime); box-shadow: 0 8px 22px rgba(40, 51, 0, .18); transition: transform .16s ease, box-shadow .16s ease; }
+.chat-shortcut { position: fixed; z-index: 30; right: 22px; bottom: 22px; display: grid; width: 46px; height: 46px; place-items: center; border: 1px solid #c9df77; border-radius: 50%; color: #263300; background: var(--lime); box-shadow: 0 8px 22px rgba(40, 51, 0, .18); transition: transform .16s ease, box-shadow .16s ease; }
 .chat-shortcut:hover { transform: translateY(-2px); box-shadow: 0 11px 26px rgba(40, 51, 0, .24); }
 .chat-shortcut-icon { position: relative; width: 20px; height: 15px; border: 2px solid currentColor; border-radius: 5px; }
 .chat-shortcut-icon::after { position: absolute; bottom: -5px; left: 3px; width: 6px; height: 6px; border-bottom: 2px solid currentColor; border-left: 2px solid currentColor; background: var(--lime); content: ""; transform: skewY(-35deg); }

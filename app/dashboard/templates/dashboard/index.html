@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="light">
     <title>Vobia Space - Pilih Modul</title>
     <link rel="icon" type="image/png" href="{% static 'img/vobia-tiktok-app-icon.png' %}?v=20260831">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260910-02">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260916-03">
 </head>
 <body class="module-hub-page">
     <header class="module-topbar">
@@ -86,6 +86,11 @@
             {% endfor %}
         </section>
     </main>
+
+    <a class="chat-shortcut" href="{% url 'chat:inbox' %}" aria-label="Buka Messages" title="Messages">
+        <span class="chat-shortcut-icon" aria-hidden="true"></span>
+        {% if chat_unread_count %}<span class="chat-shortcut-badge">{{ chat_unread_count }}</span>{% endif %}
+    </a>
 
     <dialog class="access-warning" aria-labelledby="access-warning-title">
         <div class="access-warning-title" id="access-warning-title">Warning</div>

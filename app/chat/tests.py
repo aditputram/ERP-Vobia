@@ -63,6 +63,8 @@ class ChatTests(TestCase):
         self.assertContains(response, 'data-mention-username="rnd.peer"')
         self.assertNotContains(response, 'data-mention-username="marketing.user"')
         self.assertContains(response, "body.setRangeText")
+        self.assertContains(response, "personalMenu.contains")
+        self.assertContains(response, "pointerdown")
 
     def test_personal_chat_supports_mentions_replies_and_private_attachments(self):
         self.client.force_login(self.rnd)
@@ -88,6 +90,9 @@ class ChatTests(TestCase):
         first = ChatMessage.objects.get(thread=thread)
         self.assertEqual(list(first.mentions.all()), [self.marketing])
         self.assertEqual(first.original_name, "brief.pdf")
+        thread_page = self.client.get(reverse("chat:thread", args=[thread.id]))
+        self.assertContains(thread_page, 'aria-label="Balas pesan"')
+        self.assertNotContains(thread_page, ">Balas</a>")
 
         replied = self.client.post(
             reverse("chat:thread", args=[thread.id]),

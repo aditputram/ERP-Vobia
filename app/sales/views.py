@@ -19,6 +19,7 @@ from django.utils.formats import date_format
 from openpyxl import Workbook
 
 from audit.services import record_audit
+from accounts.access import module_level
 from master_data.models import Category, MarketplaceProductMapping, Product, ProductStatus, SKU, Subcategory
 from merchandising.services.planning_activity import (
     filter_products_by_planning_activity,
@@ -885,6 +886,36 @@ def _delete_sales_projection_items(request, scenario):
     return grain, identifiers, len(selected)
 
 
+def _delete_sales_planning_scenario(request, scenario):
+    if not (request.user.is_superuser or module_level(request.user, "sales") == "approve"):
+        raise PermissionDenied("Hapus Scenario memerlukan akses Approve Sales.")
+
+    with transaction.atomic():
+        scenario = SalesPlanningScenario.objects.select_for_update().get(pk=scenario.pk)
+        if scenario.status != SalesPlanningScenario.Status.DRAFT:
+            raise ValidationError("Hanya Scenario yang masih Draft yang dapat dihapus.")
+        snapshot = {
+            "name": scenario.name,
+            "start_month": scenario.start_month.isoformat(),
+            "end_month": scenario.end_month.isoformat(),
+            "plan_count": scenario.projections.count(),
+            "target_count": SalesPlanSKU.objects.filter(plan__scenario=scenario).count(),
+        }
+        scenario_id = scenario.id
+        SalesPlan.objects.filter(scenario=scenario).delete()
+        scenario.delete()
+        record_audit(
+            actor=request.user,
+            action="sales_planning_scenario_draft_deleted",
+            entity_type="sales.salesplanningscenario",
+            entity_id=scenario_id,
+            reason="Draft scenario dihapus oleh user Approve Sales",
+            before_values=snapshot,
+            after_values={"deleted": True},
+        )
+    return snapshot
+
+
 def _approve_sales_planning_scenario(request, scenario):
     if not request.user.has_perm("sales.approve_sales_plan"):
         raise PermissionDenied("User ini tidak memiliki izin approval Sales Planning.")
@@ -977,6 +1008,13 @@ def planning_builder(request):
                         f"{len(identifiers)} {item_label} terpilih berhasil dihapus dari seluruh bulan "
                         f"Scenario Draft ({deleted_count} SKU-bulan).",
                     )
+                elif form_name == "delete_scenario":
+                    deleted = _delete_sales_planning_scenario(request, scenario)
+                    messages.success(
+                        request,
+                        f"Scenario Draft {deleted['name']} beserta seluruh targetnya berhasil dihapus.",
+                    )
+                    scenario = None
                 elif form_name == "builder":
                     builder_preview = _sales_projection_preview(request, scenario, month)
                     if request.POST.get("action") == "save":
@@ -1189,6 +1227,7 @@ def planning_builder(request):
         "missing_months": missing_months,
         "default_scenario_month": default_month,
         "can_approve": request.user.has_perm("sales.approve_sales_plan"),
+        "can_delete_scenario": request.user.is_superuser or module_level(request.user, "sales") == "approve",
         "builder_preview": builder_preview,
         "projection_methods": SALES_PROJECTION_METHODS,
         "builder_planning_activity": builder_preview["planning_activity"] if builder_preview else "ACTIVE",

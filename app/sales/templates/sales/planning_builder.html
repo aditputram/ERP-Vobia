@@ -72,7 +72,10 @@
   <div class="panel-header"><div><p class="eyebrow">SCENARIO LIBRARY</p><h2>Scenario yang sudah dibuat</h2></div><span class="pill">{{ scenarios|length }} scenario</span></div>
   {% if scenarios %}<div class="scenario-list">{% for scenario in scenarios %}<div class="scenario-row">
     <div class="scenario-edit-form"><label>Nama<input value="{{ scenario.name }}" disabled></label><label>Mulai<input value="{{ scenario.start_month|date:'M Y' }}" disabled></label><label>Selesai<input value="{{ scenario.end_month|date:'M Y' }}" disabled></label><div class="scenario-meta"><span class="status-badge {% if scenario.status == 'APPROVED' %}ready{% endif %}">{{ scenario.get_status_display }}</span><small>{{ scenario.created_at|date:"d M Y H:i" }}</small></div></div>
-    <div class="scenario-row-actions"><a class="secondary-button compact" href="?scenario={{ scenario.id }}&month={{ scenario.start_month|date:'Y-m' }}#draft-projection">View {% if scenario.status == 'DRAFT' %}Draft{% else %}Projection{% endif %} · {{ scenario.projection_count|floatformat:"0g" }} Product-bulan</a></div>
+    <div class="scenario-row-actions">
+      <a class="secondary-button compact" href="?scenario={{ scenario.id }}&month={{ scenario.start_month|date:'Y-m' }}#draft-projection">View {% if scenario.status == 'DRAFT' %}Draft{% else %}Projection{% endif %} · {{ scenario.projection_count|floatformat:"0g" }} Product-bulan</a>
+      {% if can_delete_scenario and scenario.status == 'DRAFT' %}<form method="post" onsubmit="return confirm('Hapus Scenario Draft {{ scenario.name|escapejs }} beserta seluruh target Sales di dalamnya? Tindakan ini tidak dapat dibatalkan.');">{% csrf_token %}<input type="hidden" name="form_name" value="delete_scenario"><input type="hidden" name="scenario" value="{{ scenario.id }}"><button class="secondary-button compact danger-button" type="submit">Delete Scenario</button></form>{% endif %}
+    </div>
   </div>{% endfor %}</div>{% else %}<div class="empty-state">Belum ada Scenario.</div>{% endif %}
 </section>
 

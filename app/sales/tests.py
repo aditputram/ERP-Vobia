@@ -12,6 +12,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from accounts.models import User
+from audit.models import AuditEvent
 from inventory.models import InventoryException, InventoryMovement
 from imports.models import RawFile
 from master_data.models import Category, MarketplaceProductMapping, Product, ProductStatus, ProductVariant, SKU, Subcategory
@@ -40,6 +41,82 @@ class SalesReportRouteTests(TestCase):
             with self.subTest(name=name):
                 response = self.client.get(reverse(name))
                 self.assertEqual(response.status_code, 200)
+
+    def test_only_sales_approver_can_delete_draft_scenario(self):
+        product, sku = self._planning_product("DELETE-SCENARIO")
+        scenario = SalesPlanningScenario.objects.create(
+            name="Draft yang dihapus",
+            start_month=date(2026, 10, 1),
+            end_month=date(2026, 10, 1),
+            created_by=self.user,
+        )
+        plan = SalesPlan.objects.create(
+            scenario=scenario,
+            product=product,
+            month=date(2026, 10, 1),
+            quantity_target=2,
+            gross_sales_target=Decimal("200000"),
+        )
+        target = SalesPlanSKU.objects.create(
+            plan=plan,
+            sku=sku,
+            quantity_target=2,
+            gross_sales_target=Decimal("200000"),
+        )
+        editor = User.objects.create_user(
+            username="sales-editor",
+            password="strong-test-password",
+            module_access={"sales": "edit"},
+        )
+        self.client.force_login(editor)
+        page = self.client.get(reverse("sales:planning_builder"))
+        self.assertNotContains(page, "Delete Scenario")
+        denied = self.client.post(reverse("sales:planning_builder"), {
+            "form_name": "delete_scenario",
+            "scenario": str(scenario.id),
+        })
+        self.assertEqual(denied.status_code, 403)
+        self.assertTrue(SalesPlanningScenario.objects.filter(pk=scenario.id).exists())
+
+        approver = User.objects.create_user(
+            username="sales-approver",
+            password="strong-test-password",
+            module_access={"sales": "approve"},
+        )
+        self.client.force_login(approver)
+        page = self.client.get(reverse("sales:planning_builder"))
+        self.assertContains(page, "Delete Scenario")
+        deleted = self.client.post(reverse("sales:planning_builder"), {
+            "form_name": "delete_scenario",
+            "scenario": str(scenario.id),
+        }, follow=True)
+        self.assertContains(deleted, "berhasil dihapus")
+        self.assertFalse(SalesPlanningScenario.objects.filter(pk=scenario.id).exists())
+        self.assertFalse(SalesPlan.objects.filter(pk=plan.id).exists())
+        self.assertFalse(SalesPlanSKU.objects.filter(pk=target.id).exists())
+        audit = AuditEvent.objects.get(
+            action="sales_planning_scenario_draft_deleted",
+            entity_id=str(scenario.id),
+        )
+        self.assertEqual(audit.before_values["target_count"], 1)
+        self.assertTrue(audit.after_values["deleted"])
+
+    def test_approved_sales_scenario_stays_locked_from_delete(self):
+        scenario = SalesPlanningScenario.objects.create(
+            name="Approved tetap aman",
+            start_month=date(2026, 10, 1),
+            end_month=date(2026, 10, 1),
+            status=SalesPlanningScenario.Status.APPROVED,
+            created_by=self.user,
+            approved_by=self.user,
+            approved_at=timezone.now(),
+        )
+        response = self.client.post(reverse("sales:planning_builder"), {
+            "form_name": "delete_scenario",
+            "scenario": str(scenario.id),
+        }, follow=True)
+        self.assertContains(response, "Hanya Scenario yang masih Draft yang dapat dihapus")
+        self.assertTrue(SalesPlanningScenario.objects.filter(pk=scenario.id).exists())
 
     def test_sales_plan_summary_aggregates_saved_targets_with_cascading_filters(self):
         product, sku = self._planning_product("SUMMARY-PANTS")

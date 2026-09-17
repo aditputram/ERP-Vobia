@@ -33,6 +33,13 @@ class ChatTests(TestCase):
             password="test-password",
             module_access={**no_access, "marketing": "edit"},
         )
+        self.rnd_peer = get_user_model().objects.create_user(
+            "rnd.peer",
+            password="test-password",
+            first_name="Rani",
+            last_name="Development",
+            module_access={**no_access, "rnd": "edit"},
+        )
         self.outsider = get_user_model().objects.create_user(
             "outsider",
             password="test-password",
@@ -53,12 +60,18 @@ class ChatTests(TestCase):
             self.client.get(reverse("chat:thread", args=[finance.id])).status_code,
             403,
         )
+        self.assertContains(response, 'data-mention-username="rnd.peer"')
+        self.assertNotContains(response, 'data-mention-username="marketing.user"')
+        self.assertContains(response, "body.setRangeText")
 
     def test_personal_chat_supports_mentions_replies_and_private_attachments(self):
         self.client.force_login(self.rnd)
         started = self.client.post(reverse("chat:start_direct", args=[self.marketing.id]))
         thread = ChatThread.objects.get(kind=ChatThread.Kind.DIRECT)
         self.assertRedirects(started, reverse("chat:thread", args=[thread.id]))
+        composer = self.client.get(reverse("chat:thread", args=[thread.id]))
+        self.assertContains(composer, 'data-mention-username="marketing.user"')
+        self.assertNotContains(composer, 'data-mention-username="outsider"')
 
         sent = self.client.post(
             reverse("chat:thread", args=[thread.id]),

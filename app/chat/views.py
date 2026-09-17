@@ -11,6 +11,8 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
+from accounts.access import module_level
+
 from .forms import ChatMessageForm
 from .models import ChatMessage, ChatReadState, ChatThread, accessible_threads
 
@@ -20,6 +22,15 @@ MENTION_PATTERN = re.compile(r"(?<!\w)@([\w.-]{1,150})")
 
 def _can_access(user, thread):
     return accessible_threads(user).filter(pk=thread.pk).exists()
+
+
+def _thread_members(thread):
+    if not thread:
+        return []
+    users = get_user_model().objects.filter(is_active=True)
+    if thread.kind == ChatThread.Kind.MODULE:
+        return [user for user in users if user.is_superuser or module_level(user, thread.module) != "none"]
+    return list(users.filter(chat_threads=thread))
 
 
 def _thread_rows(user):
@@ -63,6 +74,7 @@ def inbox(request, thread_id=None):
         selected = thread
 
     form = ChatMessageForm(request.POST or None, request.FILES or None)
+    thread_members = _thread_members(selected)
     if request.method == "POST":
         if not selected:
             return HttpResponseBadRequest("Pilih percakapan terlebih dahulu.")
@@ -85,7 +97,7 @@ def inbox(request, thread_id=None):
             )
             usernames = set(MENTION_PATTERN.findall(message.body))
             if usernames:
-                message.mentions.set(get_user_model().objects.filter(is_active=True, username__in=usernames))
+                message.mentions.set(user for user in thread_members if user.username in usernames)
             selected.save(update_fields=("updated_at",))
             ChatReadState.objects.update_or_create(
                 thread=selected,
@@ -137,6 +149,7 @@ def inbox(request, thread_id=None):
             "query": query,
             "reply_message": reply_message,
             "users": users,
+            "mention_users": [user for user in thread_members if user.pk != request.user.pk],
             "embedded": embedded,
         },
     )

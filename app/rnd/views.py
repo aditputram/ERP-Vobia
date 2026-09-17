@@ -41,6 +41,7 @@ from .models import (
     DevelopmentProductStageAttachment,
     DevelopmentProductStageDate,
     MarketingRecommendation,
+    RndNotification,
 )
 from .services import (
     approve_collection_commercially,
@@ -67,6 +68,33 @@ def _validation_message(exc):
 
 def _can_edit_rnd(user):
     return can_edit_module(user, "rnd")
+
+
+@login_required
+def notification_open(request, notification_id):
+    notification = get_object_or_404(
+        RndNotification,
+        id=notification_id,
+        recipient=request.user,
+    )
+    if notification.read_at is None:
+        notification.read_at = timezone.now()
+        notification.save(update_fields=("read_at", "updated_at"))
+    target_url = notification.target_url
+    if not target_url.startswith("/") or target_url.startswith("//"):
+        target_url = reverse("rnd:dashboard")
+    return redirect(target_url)
+
+
+@login_required
+@require_POST
+def notifications_mark_all_read(request):
+    RndNotification.objects.filter(recipient=request.user, read_at__isnull=True).update(
+        read_at=timezone.now()
+    )
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return HttpResponse(status=204)
+    return redirect("rnd:dashboard")
 
 
 DESIGN_RETENTION = timedelta(days=180)

@@ -109,6 +109,35 @@ class DesignAssetComment(UUIDTimestampedModel):
         ordering = ("created_at",)
 
 
+class RndNotification(UUIDTimestampedModel):
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="rnd_notifications",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="rnd_notifications_created",
+    )
+    source_key = models.CharField(max_length=140)
+    title = models.CharField(max_length=180)
+    message = models.CharField(max_length=360)
+    target_url = models.CharField(max_length=500)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("recipient", "source_key"),
+                name="rnd_unique_notification_source_user",
+            )
+        ]
+
+
 class DevelopmentProduct(UUIDTimestampedModel):
     class DocumentStatus(models.TextChoices):
         DRAFT = "DRAFT", "Draft"

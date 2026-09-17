@@ -7,6 +7,16 @@ app_name = "rnd"
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
+    path(
+        "notifications/<uuid:notification_id>/open/",
+        views.notification_open,
+        name="notification_open",
+    ),
+    path(
+        "notifications/mark-all-read/",
+        views.notifications_mark_all_read,
+        name="notifications_mark_all_read",
+    ),
     path("designing/", views.designing, name="designing"),
     path("development/", views.development_list, name="development_list"),
     path(

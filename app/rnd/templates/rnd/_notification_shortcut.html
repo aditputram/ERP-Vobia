@@ -1,0 +1,58 @@
+<button class="rnd-notification-shortcut" type="button" aria-label="Buka notifikasi R&D" aria-haspopup="dialog" data-rnd-notification-open>
+    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
+    {% if rnd_notification_unread_count %}<span class="rnd-notification-badge" data-rnd-notification-badge>{{ rnd_notification_badge }}</span>{% endif %}
+</button>
+<dialog class="rnd-notification-popup" aria-label="Notifikasi R&D" data-rnd-notification-popup>
+    <header>
+        <div><span>R&amp;D</span><strong>Notifikasi</strong></div>
+        <button type="button" aria-label="Tutup notifikasi" data-rnd-notification-close>×</button>
+    </header>
+    <div class="rnd-notification-toolbar">
+        <span><strong data-rnd-unread-copy>{{ rnd_notification_unread_count }}</strong> belum dibaca</span>
+        {% if rnd_notification_unread_count %}
+        <form method="post" action="{% url 'rnd:notifications_mark_all_read' %}" data-rnd-mark-all>
+            {% csrf_token %}
+            <button type="submit">Tandai semua dibaca</button>
+        </form>
+        {% endif %}
+    </div>
+    <div class="rnd-notification-list">
+        {% for notification in rnd_notification_items %}
+        <a class="rnd-notification-item{% if not notification.read_at %} is-unread{% endif %}" href="{% url 'rnd:notification_open' notification.id %}">
+            <span class="rnd-notification-dot" aria-hidden="true"></span>
+            <span>
+                <strong>{{ notification.title }}</strong>
+                <span>{{ notification.message }}</span>
+                <time>{{ notification.created_at|date:"d M Y · H:i" }}</time>
+            </span>
+        </a>
+        {% empty %}
+        <div class="rnd-notification-empty"><strong>Belum ada notifikasi</strong><span>Aktivitas penting R&amp;D akan muncul di sini.</span></div>
+        {% endfor %}
+    </div>
+</dialog>
+<script>
+(() => {
+    const popup = document.querySelector('[data-rnd-notification-popup]');
+    const open = document.querySelector('[data-rnd-notification-open]');
+    if (!popup || !open) return;
+    open.addEventListener('click', () => popup.showModal());
+    popup.querySelector('[data-rnd-notification-close]').addEventListener('click', () => popup.close());
+    popup.addEventListener('click', event => { if (event.target === popup) popup.close(); });
+    const form = popup.querySelector('[data-rnd-mark-all]');
+    if (!form) return;
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const response = await fetch(form.action, {
+            method: 'POST',
+            body: new FormData(form),
+            headers: {'X-Requested-With': 'XMLHttpRequest'},
+        });
+        if (!response.ok) return;
+        document.querySelector('[data-rnd-notification-badge]')?.remove();
+        popup.querySelectorAll('.is-unread').forEach(item => item.classList.remove('is-unread'));
+        popup.querySelector('[data-rnd-unread-copy]').textContent = '0';
+        form.remove();
+    });
+})();
+</script>

@@ -1,3 +1,5 @@
+from django.db import transaction
+
 from .models import AuditEvent
 
 
@@ -12,7 +14,7 @@ def record_audit(
     after_values=None,
     metadata=None,
 ):
-    return AuditEvent.objects.create(
+    event = AuditEvent.objects.create(
         actor=actor,
         action=action,
         entity_type=entity_type,
@@ -22,4 +24,11 @@ def record_audit(
         after_values=after_values or {},
         metadata=metadata or {},
     )
+    if action.startswith("rnd_"):
+        from rnd.notifications import create_notifications_for_audit
 
+        transaction.on_commit(
+            lambda audit_event=event: create_notifications_for_audit(audit_event),
+            robust=True,
+        )
+    return event

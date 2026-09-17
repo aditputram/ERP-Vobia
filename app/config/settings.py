@@ -93,6 +93,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "accounts.context_processors.tab_permissions",
                 "chat.context_processors.unread_chat",
+                "rnd.context_processors.rnd_notifications",
             ],
         },
     },

@@ -14,6 +14,7 @@ from pypdf.generic import ArrayObject, NameObject
 from reportlab.pdfgen import canvas
 
 from audit.models import AuditEvent
+from audit.services import record_audit
 from master_data.models import Product
 
 from .models import (
@@ -27,6 +28,7 @@ from .models import (
     DevelopmentProductStageDate,
     DevelopmentProductStageMaterial,
     MarketingRecommendation,
+    RndNotification,
 )
 
 
@@ -218,6 +220,7 @@ class RndWorkflowTests(TestCase):
             commented,
             f'{reverse("rnd:design_detail", args=[design.id])}#design-comments',
         )
+
         comment = DesignAssetComment.objects.get(design=design)
         self.assertEqual(comment.author, self.rnd_editor)
         self.assertEqual(comment.body, "Warna sudah cocok, coba kerah dibuat lebih kecil.")
@@ -275,6 +278,54 @@ class RndWorkflowTests(TestCase):
         )
         self.client.logout()
         self.assertEqual(self.client.get(reverse("rnd:design_file", args=[design.id])).status_code, 302)
+
+    def test_rnd_notifications_exclude_actor_and_support_read_actions(self):
+        design = DesignAsset.objects.create(
+            image=self._image(),
+            original_name="design.png",
+            uploaded_by=self.rnd_approver,
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            record_audit(
+                actor=self.rnd_approver,
+                action="rnd_design_uploaded",
+                entity_type="rnd.design_asset",
+                entity_id=design.id,
+                after_values={"original_name": design.original_name},
+            )
+
+        notification = RndNotification.objects.get(recipient=self.rnd_editor)
+        self.assertEqual(notification.target_url, reverse("rnd:design_detail", args=[design.id]))
+        self.assertFalse(RndNotification.objects.filter(recipient=self.rnd_approver).exists())
+        self.assertFalse(RndNotification.objects.filter(recipient=self.marketing).exists())
+        self.assertTrue(RndNotification.objects.filter(recipient=self.admin).exists())
+
+        self.client.force_login(self.rnd_editor)
+        page = self.client.get(reverse("rnd:designing"))
+        self.assertContains(page, 'data-rnd-notification-open')
+        self.assertContains(page, 'data-rnd-notification-badge')
+
+        opened = self.client.get(reverse("rnd:notification_open", args=[notification.id]))
+        self.assertRedirects(opened, notification.target_url)
+        notification.refresh_from_db()
+        self.assertIsNotNone(notification.read_at)
+
+        RndNotification.objects.create(
+            recipient=self.rnd_editor,
+            actor=self.rnd_approver,
+            source_key="manual:test",
+            title="Test",
+            message="Test notification",
+            target_url=reverse("rnd:dashboard"),
+        )
+        marked = self.client.post(
+            reverse("rnd:notifications_mark_all_read"),
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(marked.status_code, 204)
+        self.assertFalse(
+            RndNotification.objects.filter(recipient=self.rnd_editor, read_at__isnull=True).exists()
+        )
 
     def test_design_gallery_navigation_expiry_and_delete(self):
         self.client.force_login(self.rnd_editor)

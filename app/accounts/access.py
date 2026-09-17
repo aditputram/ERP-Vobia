@@ -141,6 +141,8 @@ MODULE_TABS = {
                 "rnd:design_recommend",
                 "rnd:design_unrecommend",
                 "rnd:design_delete",
+                "rnd:notification_open",
+                "rnd:notifications_mark_all_read",
             ),
         ),
         (
@@ -163,6 +165,8 @@ MODULE_TABS = {
                 "rnd:product_request_revision",
                 "rnd:product_revision_file",
                 "rnd:product_file",
+                "rnd:notification_open",
+                "rnd:notifications_mark_all_read",
             ),
         ),
         (
@@ -178,6 +182,8 @@ MODULE_TABS = {
                 "rnd:product_detail",
                 "rnd:product_revision_file",
                 "rnd:product_file",
+                "rnd:notification_open",
+                "rnd:notifications_mark_all_read",
             ),
         ),
     ),

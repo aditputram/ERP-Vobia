@@ -1,6 +1,6 @@
-<button class="chat-shortcut" type="button" aria-label="Buka Messages" aria-haspopup="dialog" data-chat-popup-open>
+<button class="chat-shortcut" type="button" aria-label="Buka Messages" aria-haspopup="dialog" data-chat-popup-open data-chat-unread="{{ chat_unread_count }}" data-live-status-url="{% url 'dashboard:live_status' %}">
     <span class="chat-shortcut-icon" aria-hidden="true"></span>
-    {% if chat_unread_count %}<span class="chat-shortcut-badge">{{ chat_unread_count }}</span>{% endif %}
+    {% if chat_unread_count %}<span class="chat-shortcut-badge" data-chat-shortcut-badge>{% if chat_unread_count > 99 %}99+{% else %}{{ chat_unread_count }}{% endif %}</span>{% endif %}
 </button>
 <dialog class="chat-popup" aria-label="Messages" data-chat-popup>
     <header><strong>Messages</strong><button type="button" aria-label="Tutup Messages" data-chat-popup-close>×</button></header>
@@ -18,5 +18,94 @@
     });
     popup.querySelector('[data-chat-popup-close]').addEventListener('click', () => popup.close());
     popup.addEventListener('click', event => { if (event.target === popup) popup.close(); });
+
+    const updateBadge = count => {
+        let badge = open.querySelector('[data-chat-shortcut-badge]');
+        if (!count) { badge?.remove(); return; }
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'chat-shortcut-badge';
+            badge.dataset.chatShortcutBadge = '';
+            open.append(badge);
+        }
+        badge.textContent = count > 99 ? '99+' : count;
+    };
+    const updateNotifications = data => {
+        const notificationOpen = document.querySelector('[data-rnd-notification-open]');
+        const notificationPopup = document.querySelector('[data-rnd-notification-popup]');
+        if (!notificationOpen || !notificationPopup) return;
+        let badge = notificationOpen.querySelector('[data-rnd-notification-badge]');
+        if (!data.rnd_unread_count) badge?.remove();
+        else {
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'rnd-notification-badge';
+                badge.dataset.rndNotificationBadge = '';
+                notificationOpen.append(badge);
+            }
+            badge.textContent = data.rnd_unread_count > 99 ? '99+' : data.rnd_unread_count;
+        }
+        notificationPopup.querySelector('[data-rnd-unread-copy]').textContent = data.rnd_unread_count;
+        notificationPopup.querySelector('[data-rnd-mark-all]').hidden = !data.rnd_unread_count;
+        const list = notificationPopup.querySelector('[data-rnd-notification-list]');
+        list.replaceChildren();
+        if (!data.rnd_notifications.length) {
+            const empty = document.createElement('div');
+            empty.className = 'rnd-notification-empty';
+            const title = document.createElement('strong');
+            title.textContent = 'Belum ada notifikasi';
+            const copy = document.createElement('span');
+            copy.textContent = 'Aktivitas penting R&D akan muncul di sini.';
+            empty.append(title, copy);
+            list.append(empty);
+            return;
+        }
+        data.rnd_notifications.forEach(notification => {
+            const item = document.createElement('a');
+            item.className = `rnd-notification-item${notification.unread ? ' is-unread' : ''}`;
+            item.href = notification.open_url;
+            const dot = document.createElement('span');
+            dot.className = 'rnd-notification-dot';
+            dot.setAttribute('aria-hidden', 'true');
+            const content = document.createElement('span');
+            const title = document.createElement('strong');
+            title.textContent = notification.title;
+            const message = document.createElement('span');
+            message.textContent = notification.message;
+            const time = document.createElement('time');
+            time.textContent = notification.created_at;
+            content.append(title, message, time);
+            item.append(dot, content);
+            list.append(item);
+        });
+    };
+    let fetching = false;
+    const refreshStatus = async () => {
+        if (fetching || document.hidden) return;
+        fetching = true;
+        try {
+            const response = await fetch(open.dataset.liveStatusUrl, {headers: {'X-Requested-With': 'XMLHttpRequest'}});
+            if (!response.ok) return;
+            const data = await response.json();
+            const previous = Number(open.dataset.chatUnread || 0);
+            updateBadge(data.chat_unread_count);
+            updateNotifications(data);
+            if (data.chat_unread_count > previous) {
+                if (!popup.open) delete frame.dataset.loaded;
+                else if (frame.dataset.loaded) {
+                    const body = frame.contentDocument?.querySelector('#id_body');
+                    const attachment = frame.contentDocument?.querySelector('input[type="file"]');
+                    if (!body?.value && !attachment?.files?.length) frame.contentWindow.location.reload();
+                }
+            }
+            open.dataset.chatUnread = data.chat_unread_count;
+        } catch (_error) {
+            // A temporary network failure is retried on the next poll.
+        } finally {
+            fetching = false;
+        }
+    };
+    setInterval(refreshStatus, 5000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshStatus(); });
 })();
 </script>

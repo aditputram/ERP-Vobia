@@ -1,9 +1,15 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.cache import never_cache
 
 from audit.services import record_audit
 from accounts.access import first_allowed_route, module_level
+from chat.context_processors import unread_chat
+from rnd.context_processors import rnd_notifications
 
 
 MODULES = (
@@ -74,6 +80,30 @@ MODULES = (
         "image_position": "center 54%",
     },
 )
+
+
+@login_required
+@never_cache
+def live_status(request):
+    chat_count = unread_chat(request)["chat_unread_count"]
+    notification_context = rnd_notifications(request)
+    notifications = [
+        {
+            "open_url": reverse("rnd:notification_open", args=[notification.id]),
+            "title": notification.title,
+            "message": notification.message,
+            "created_at": timezone.localtime(notification.created_at).strftime("%d %b %Y · %H:%M"),
+            "unread": notification.read_at is None,
+        }
+        for notification in notification_context["rnd_notification_items"]
+    ]
+    return JsonResponse(
+        {
+            "chat_unread_count": chat_count,
+            "rnd_unread_count": notification_context["rnd_notification_unread_count"],
+            "rnd_notifications": notifications,
+        }
+    )
 
 
 @login_required

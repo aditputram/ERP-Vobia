@@ -15,6 +15,7 @@ app_name = "dashboard"
 
 urlpatterns = [
     path("internal/social-sync/", scheduled_sync, name="scheduled_social_sync"),
+    path("live-status/", views.live_status, name="live_status"),
     path("marketing/", instagram_dashboard, name="instagram_dashboard"),
     path("marketing/upcoming-collections/", rnd_views.upcoming_collection_list, name="upcoming_collection_list"),
     path("marketing/upcoming-collections/<uuid:collection_id>/", rnd_views.upcoming_collection_detail, name="upcoming_collection_detail"),

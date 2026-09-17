@@ -304,6 +304,9 @@ class RndWorkflowTests(TestCase):
         page = self.client.get(reverse("rnd:designing"))
         self.assertContains(page, 'data-rnd-notification-open')
         self.assertContains(page, 'data-rnd-notification-badge')
+        live_status = self.client.get(reverse("dashboard:live_status")).json()
+        self.assertEqual(live_status["rnd_unread_count"], 1)
+        self.assertEqual(live_status["rnd_notifications"][0]["title"], "Desain baru")
 
         opened = self.client.get(reverse("rnd:notification_open", args=[notification.id]))
         self.assertRedirects(opened, notification.target_url)

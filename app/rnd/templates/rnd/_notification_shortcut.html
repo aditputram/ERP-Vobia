@@ -9,14 +9,12 @@
     </header>
     <div class="rnd-notification-toolbar">
         <span><strong data-rnd-unread-copy>{{ rnd_notification_unread_count }}</strong> belum dibaca</span>
-        {% if rnd_notification_unread_count %}
-        <form method="post" action="{% url 'rnd:notifications_mark_all_read' %}" data-rnd-mark-all>
+        <form method="post" action="{% url 'rnd:notifications_mark_all_read' %}" data-rnd-mark-all{% if not rnd_notification_unread_count %} hidden{% endif %}>
             {% csrf_token %}
             <button type="submit">Tandai semua dibaca</button>
         </form>
-        {% endif %}
     </div>
-    <div class="rnd-notification-list">
+    <div class="rnd-notification-list" data-rnd-notification-list>
         {% for notification in rnd_notification_items %}
         <a class="rnd-notification-item{% if not notification.read_at %} is-unread{% endif %}" href="{% url 'rnd:notification_open' notification.id %}">
             <span class="rnd-notification-dot" aria-hidden="true"></span>
@@ -40,7 +38,6 @@
     popup.querySelector('[data-rnd-notification-close]').addEventListener('click', () => popup.close());
     popup.addEventListener('click', event => { if (event.target === popup) popup.close(); });
     const form = popup.querySelector('[data-rnd-mark-all]');
-    if (!form) return;
     form.addEventListener('submit', async event => {
         event.preventDefault();
         const response = await fetch(form.action, {
@@ -52,7 +49,7 @@
         document.querySelector('[data-rnd-notification-badge]')?.remove();
         popup.querySelectorAll('.is-unread').forEach(item => item.classList.remove('is-unread'));
         popup.querySelector('[data-rnd-unread-copy]').textContent = '0';
-        form.remove();
+        form.hidden = true;
     });
 })();
 </script>

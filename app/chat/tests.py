@@ -101,6 +101,9 @@ class ChatTests(TestCase):
 
         self.assertEqual(unread_chat(request)["chat_unread_count"], 1)
         self.client.force_login(self.marketing)
+        live_status = self.client.get(reverse("dashboard:live_status")).json()
+        self.assertEqual(live_status["chat_unread_count"], 1)
+        self.assertEqual(live_status["rnd_notifications"], [])
         self.client.get(reverse("chat:thread", args=[thread.id]))
         self.assertTrue(ChatReadState.objects.filter(thread=thread, user=self.marketing).exists())
         self.assertEqual(unread_chat(request)["chat_unread_count"], 0)

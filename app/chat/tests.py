@@ -114,6 +114,8 @@ class ChatTests(TestCase):
 
         embedded = self.client.get(f"{reverse('chat:thread', args=[thread.id])}?embed=1")
         self.assertEqual(embedded.headers["X-Frame-Options"], "SAMEORIGIN")
+        self.assertContains(embedded, "composer.requestSubmit()")
+        self.assertContains(embedded, "!event.shiftKey")
 
         response = self.client.post(
             f"{reverse('chat:thread', args=[thread.id])}?embed=1",

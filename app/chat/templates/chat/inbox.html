@@ -23,5 +23,10 @@
         {% else %}<div class="chat-empty"><strong>Belum ada percakapan</strong><p>Mulai personal chat dengan pengguna aktif.</p></div>{% endif %}
     </article>
 </section>
-<script>const stream=document.querySelector('[data-chat-stream]');if(stream&&!new URLSearchParams(location.search).has('q'))stream.scrollTop=stream.scrollHeight;</script>
+<script>
+const stream=document.querySelector('[data-chat-stream]');
+if(stream&&!new URLSearchParams(location.search).has('q'))stream.scrollTop=stream.scrollHeight;
+const composer=document.querySelector('#chat-composer');
+composer?.querySelector('#id_body')?.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();composer.requestSubmit();}});
+</script>
 {% endblock %}

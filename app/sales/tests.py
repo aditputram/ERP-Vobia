@@ -646,6 +646,9 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(deleted_parent, "berhasil dihapus dari seluruh bulan Scenario Draft")
 
     def test_transaction_export_uses_active_filters_and_exports_all_columns(self):
+        page = self.client.get(reverse("sales:transactions"))
+        self.assertContains(page, 'type="button" form="transaction-filters" data-export-xlsx')
+        self.assertNotContains(page, 'type="submit" form="transaction-filters" name="export"')
         for source, source_label, order_number, order_day in (
             (SalesOrder.Source.SHOPEE, "Shopee", "EXPORT-SHOPEE", date(2026, 8, 10)),
             (SalesOrder.Source.TIKTOK, "Tiktok", "EXPORT-TIKTOK", date(2026, 8, 11)),

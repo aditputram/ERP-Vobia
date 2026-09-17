@@ -1548,6 +1548,8 @@ class MerchandisingReportViewTests(TestCase):
     def test_dashboard_exports_the_filtered_indicator_matrix_as_xlsx(self):
         params = {"status": ["Active"], "incoming_mode": "projection"}
         page = self.client.get("/merchandising/dashboard/", params)
+        self.assertContains(page, 'type="button" data-export-xlsx')
+        self.assertNotContains(page, 'type="submit" name="export"')
         export = self.client.get(
             "/merchandising/dashboard/",
             {**params, "export": "xlsx"},
@@ -1674,6 +1676,8 @@ class MerchandisingReportViewTests(TestCase):
             "product": ["Report Product"],
         }
         page = self.client.get("/merchandising/projection/", params)
+        self.assertContains(page, 'type="button" data-export-xlsx')
+        self.assertNotContains(page, 'type="submit" name="export"')
         export = self.client.get(
             "/merchandising/projection/",
             {**params, "export": "xlsx"},

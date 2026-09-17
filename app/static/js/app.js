@@ -37,6 +37,17 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   restoreFilterScroll();
 
+  document.querySelectorAll('[data-export-xlsx]').forEach(button => {
+    button.addEventListener('click', () => {
+      const form = button.form || button.closest('form');
+      if (!form) return;
+      const destination = new URL(form.action || window.location.href, window.location.href);
+      destination.search = new URLSearchParams(new FormData(form)).toString();
+      destination.searchParams.set('export', 'xlsx');
+      window.location.assign(destination);
+    });
+  });
+
   document.querySelectorAll('[data-nav-group-toggle]').forEach(toggle => {
     const groupName = toggle.dataset.navGroupToggle;
     const panel = document.querySelector(`[data-nav-group-panel="${groupName}"]`);

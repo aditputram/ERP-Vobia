@@ -2,6 +2,7 @@ from accounts.access import module_level
 from django.urls import reverse
 
 from .models import Collection, DevelopmentProduct, RndNotification
+from .notifications import notification_category
 from .services import can_approve_module
 
 
@@ -46,20 +47,24 @@ def rnd_notifications(request):
             "rnd_notification_items": (),
             "rnd_notification_unread_count": 0,
             "rnd_notification_badge": "",
-            "rnd_show_approval_tab": False,
             "rnd_approval_items": (),
             "rnd_approval_count": 0,
         }
 
-    notifications = RndNotification.objects.filter(recipient=user).select_related("actor")
-    unread_count = notifications.filter(read_at__isnull=True).count()
+    notification_query = RndNotification.objects.filter(recipient=user).select_related("actor")
+    unread_count = notification_query.filter(read_at__isnull=True).count()
+    notifications = list(notification_query[:30])
+    for notification in notifications:
+        notification.category = notification_category(notification)
     approval_items = _approval_items(user)
+    approval_count = len(approval_items) + sum(
+        notification.category == "approval" for notification in notifications
+    )
     return {
         "show_rnd_notifications": True,
-        "rnd_notification_items": notifications[:30],
+        "rnd_notification_items": notifications,
         "rnd_notification_unread_count": unread_count,
         "rnd_notification_badge": "99+" if unread_count > 99 else str(unread_count),
-        "rnd_show_approval_tab": can_approve_module(user, "rnd"),
         "rnd_approval_items": approval_items,
-        "rnd_approval_count": len(approval_items),
+        "rnd_approval_count": approval_count,
     }

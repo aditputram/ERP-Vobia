@@ -29,6 +29,26 @@ ACTION_COPY = {
     "rnd_collection_commercially_approved": ("Collection disetujui komersial", "menyetujui collection secara komersial"),
 }
 
+COMMENT_ACTIONS = {"rnd_design_commented"}
+APPROVAL_ACTIONS = {
+    "rnd_product_document_submitted",
+    "rnd_product_document_approved",
+    "rnd_product_document_rejected",
+    "rnd_product_document_revision_requested",
+    "rnd_collection_status_changed",
+    "rnd_product_development_prototype_resampling",
+    "rnd_product_development_prototype_final",
+    "rnd_collection_commercially_approved",
+}
+CATEGORY_BY_TITLE = {
+    title: "comment" if action in COMMENT_ACTIONS else "approval" if action in APPROVAL_ACTIONS else "new"
+    for action, (title, _verb) in ACTION_COPY.items()
+}
+
+
+def notification_category(notification):
+    return CATEGORY_BY_TITLE.get(notification.title, "new")
+
 
 def _actor_name(actor):
     return (actor.get_full_name() or actor.username).strip()

@@ -2,17 +2,17 @@
     <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
     {% if rnd_notification_unread_count %}<span class="rnd-notification-badge" data-rnd-notification-badge>{{ rnd_notification_badge }}</span>{% endif %}
 </button>
-<dialog class="rnd-notification-popup{% if rnd_show_approval_tab %} has-approval-tab{% endif %}" aria-label="Notifikasi R&D" data-rnd-notification-popup>
+<dialog class="rnd-notification-popup has-approval-tab" aria-label="Notifikasi R&D" data-rnd-notification-popup>
     <header>
         <div><span>R&amp;D</span><strong>Notifikasi</strong></div>
         <button type="button" aria-label="Tutup notifikasi" data-rnd-notification-close>×</button>
     </header>
-    {% if rnd_show_approval_tab %}
     <nav class="rnd-notification-tabs" aria-label="Kategori notifikasi">
-        <button class="is-active" type="button" aria-selected="true" data-rnd-notification-tab="all">Semua</button>
+        <button class="is-active" type="button" aria-selected="true" data-rnd-notification-tab="all">All</button>
+        <button type="button" aria-selected="false" data-rnd-notification-tab="new">New</button>
+        <button type="button" aria-selected="false" data-rnd-notification-tab="comment">Comment</button>
         <button type="button" aria-selected="false" data-rnd-notification-tab="approval">Approval <span data-rnd-approval-count>{{ rnd_approval_count }}</span></button>
     </nav>
-    {% endif %}
     <div class="rnd-notification-toolbar">
         <span><strong data-rnd-unread-copy>{{ rnd_notification_unread_count }}</strong> belum dibaca</span>
         <form method="post" action="{% url 'rnd:notifications_mark_all_read' %}" data-rnd-mark-all{% if not rnd_notification_unread_count %} hidden{% endif %}>
@@ -20,9 +20,15 @@
             <button type="submit">Tandai semua dibaca</button>
         </form>
     </div>
-    <div class="rnd-notification-list" data-rnd-notification-panel="all" data-rnd-notification-list>
+    <div class="rnd-notification-list" data-rnd-notification-list>
+        {% for item in rnd_approval_items %}
+        <a class="rnd-notification-item rnd-approval-item" href="{{ item.target_url }}" data-notification-category="approval">
+            <span class="rnd-notification-dot" aria-hidden="true"></span>
+            <span><strong>{{ item.title }}</strong><span>{{ item.message }}</span><time>{{ item.created_at|date:"d M Y · H:i" }}</time></span>
+        </a>
+        {% endfor %}
         {% for notification in rnd_notification_items %}
-        <a class="rnd-notification-item{% if not notification.read_at %} is-unread{% endif %}" href="{% url 'rnd:notification_open' notification.id %}">
+        <a class="rnd-notification-item{% if not notification.read_at %} is-unread{% endif %}{% if notification.category == 'approval' %} rnd-approval-item{% endif %}" href="{% url 'rnd:notification_open' notification.id %}" data-notification-category="{{ notification.category }}">
             <span class="rnd-notification-dot" aria-hidden="true"></span>
             <span>
                 <strong>{{ notification.title }}</strong>
@@ -30,22 +36,9 @@
                 <time>{{ notification.created_at|date:"d M Y · H:i" }}</time>
             </span>
         </a>
-        {% empty %}
-        <div class="rnd-notification-empty"><strong>Belum ada notifikasi</strong><span>Aktivitas penting R&amp;D akan muncul di sini.</span></div>
         {% endfor %}
+        <div class="rnd-notification-empty" data-rnd-notification-empty{% if rnd_notification_items or rnd_approval_items %} hidden{% endif %}><strong>Belum ada notifikasi</strong><span>Aktivitas penting R&amp;D akan muncul di sini.</span></div>
     </div>
-    {% if rnd_show_approval_tab %}
-    <div class="rnd-notification-list" data-rnd-notification-panel="approval" data-rnd-approval-list hidden>
-        {% for item in rnd_approval_items %}
-        <a class="rnd-notification-item rnd-approval-item" href="{{ item.target_url }}">
-            <span class="rnd-notification-dot" aria-hidden="true"></span>
-            <span><strong>{{ item.title }}</strong><span>{{ item.message }}</span><time>{{ item.created_at|date:"d M Y · H:i" }}</time></span>
-        </a>
-        {% empty %}
-        <div class="rnd-notification-empty"><strong>Tidak ada approval pending</strong><span>Semua keputusan R&amp;D sudah ditindaklanjuti.</span></div>
-        {% endfor %}
-    </div>
-    {% endif %}
 </dialog>
 <script>
 (() => {
@@ -55,16 +48,31 @@
     open.addEventListener('click', () => popup.showModal());
     popup.querySelector('[data-rnd-notification-close]').addEventListener('click', () => popup.close());
     popup.addEventListener('click', event => { if (event.target === popup) popup.close(); });
+    const emptyCopy = {
+        all: ['Belum ada notifikasi', 'Aktivitas penting R&D akan muncul di sini.'],
+        new: ['Belum ada aktivitas baru', 'Desain, Product, Collection, dan Development baru akan muncul di sini.'],
+        comment: ['Belum ada komentar', 'Komentar Design Library akan muncul di sini.'],
+        approval: ['Belum ada aktivitas approval', 'Permintaan dan hasil keputusan approval akan muncul di sini.'],
+    };
+    const showCategory = category => {
+        const empty = popup.querySelector('[data-rnd-notification-empty]');
+        let visible = 0;
+        popup.querySelectorAll('[data-notification-category]').forEach(item => {
+            item.hidden = category !== 'all' && item.dataset.notificationCategory !== category;
+            if (!item.hidden) visible++;
+        });
+        empty.hidden = Boolean(visible);
+        [empty.querySelector('strong').textContent, empty.querySelector('span').textContent] = emptyCopy[category];
+    };
     popup.querySelectorAll('[data-rnd-notification-tab]').forEach(tab => tab.addEventListener('click', () => {
         popup.querySelectorAll('[data-rnd-notification-tab]').forEach(item => {
             const active = item === tab;
             item.classList.toggle('is-active', active);
             item.setAttribute('aria-selected', active);
         });
-        popup.querySelectorAll('[data-rnd-notification-panel]').forEach(panel => {
-            panel.hidden = panel.dataset.rndNotificationPanel !== tab.dataset.rndNotificationTab;
-        });
+        showCategory(tab.dataset.rndNotificationTab);
     }));
+    popup.addEventListener('rnd-notifications-updated', () => showCategory(popup.querySelector('[data-rnd-notification-tab].is-active').dataset.rndNotificationTab));
     const form = popup.querySelector('[data-rnd-mark-all]');
     form.addEventListener('submit', async event => {
         event.preventDefault();

@@ -49,68 +49,36 @@
         notificationPopup.querySelector('[data-rnd-mark-all]').hidden = !data.rnd_unread_count;
         const list = notificationPopup.querySelector('[data-rnd-notification-list]');
         list.replaceChildren();
-        if (!data.rnd_notifications.length) {
-            const empty = document.createElement('div');
-            empty.className = 'rnd-notification-empty';
-            const title = document.createElement('strong');
-            title.textContent = 'Belum ada notifikasi';
-            const copy = document.createElement('span');
-            copy.textContent = 'Aktivitas penting R&D akan muncul di sini.';
-            empty.append(title, copy);
-            list.append(empty);
-        } else {
-            data.rnd_notifications.forEach(notification => {
-                const item = document.createElement('a');
-                item.className = `rnd-notification-item${notification.unread ? ' is-unread' : ''}`;
-                item.href = notification.open_url;
-                const dot = document.createElement('span');
-                dot.className = 'rnd-notification-dot';
-                dot.setAttribute('aria-hidden', 'true');
-                const content = document.createElement('span');
-                const title = document.createElement('strong');
-                title.textContent = notification.title;
-                const message = document.createElement('span');
-                message.textContent = notification.message;
-                const time = document.createElement('time');
-                time.textContent = notification.created_at;
-                content.append(title, message, time);
-                item.append(dot, content);
-                list.append(item);
-            });
-        }
-        const approvalList = notificationPopup.querySelector('[data-rnd-approval-list]');
-        if (!approvalList) return;
-        notificationPopup.querySelector('[data-rnd-approval-count]').textContent = data.rnd_approval_count;
-        approvalList.replaceChildren();
-        if (!data.rnd_approvals.length) {
-            const empty = document.createElement('div');
-            empty.className = 'rnd-notification-empty';
-            const title = document.createElement('strong');
-            title.textContent = 'Tidak ada approval pending';
-            const copy = document.createElement('span');
-            copy.textContent = 'Semua keputusan R&D sudah ditindaklanjuti.';
-            empty.append(title, copy);
-            approvalList.append(empty);
-            return;
-        }
-        data.rnd_approvals.forEach(approval => {
+        const appendNotification = notification => {
             const item = document.createElement('a');
-            item.className = 'rnd-notification-item rnd-approval-item';
-            item.href = approval.open_url;
+            item.className = `rnd-notification-item${notification.unread ? ' is-unread' : ''}${notification.category === 'approval' ? ' rnd-approval-item' : ''}`;
+            item.href = notification.open_url;
+            item.dataset.notificationCategory = notification.category;
             const dot = document.createElement('span');
             dot.className = 'rnd-notification-dot';
             dot.setAttribute('aria-hidden', 'true');
             const content = document.createElement('span');
             const title = document.createElement('strong');
-            title.textContent = approval.title;
+            title.textContent = notification.title;
             const message = document.createElement('span');
-            message.textContent = approval.message;
+            message.textContent = notification.message;
             const time = document.createElement('time');
-            time.textContent = approval.created_at;
+            time.textContent = notification.created_at;
             content.append(title, message, time);
             item.append(dot, content);
-            approvalList.append(item);
-        });
+            list.append(item);
+        };
+        data.rnd_approvals.forEach(approval => appendNotification({...approval, category: 'approval'}));
+        data.rnd_notifications.forEach(appendNotification);
+        const empty = document.createElement('div');
+        empty.className = 'rnd-notification-empty';
+        empty.dataset.rndNotificationEmpty = '';
+        const emptyTitle = document.createElement('strong');
+        const emptyCopy = document.createElement('span');
+        empty.append(emptyTitle, emptyCopy);
+        list.append(empty);
+        notificationPopup.querySelector('[data-rnd-approval-count]').textContent = data.rnd_approval_count;
+        notificationPopup.dispatchEvent(new CustomEvent('rnd-notifications-updated'));
     };
     let fetching = false;
     const refreshStatus = async () => {

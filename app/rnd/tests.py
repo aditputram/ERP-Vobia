@@ -304,9 +304,13 @@ class RndWorkflowTests(TestCase):
         page = self.client.get(reverse("rnd:designing"))
         self.assertContains(page, 'data-rnd-notification-open')
         self.assertContains(page, 'data-rnd-notification-badge')
+        for category in ("all", "new", "comment", "approval"):
+            self.assertContains(page, f'data-rnd-notification-tab="{category}"')
+        self.assertContains(page, 'data-notification-category="new"')
         live_status = self.client.get(reverse("dashboard:live_status")).json()
         self.assertEqual(live_status["rnd_unread_count"], 1)
         self.assertEqual(live_status["rnd_notifications"][0]["title"], "Desain baru")
+        self.assertEqual(live_status["rnd_notifications"][0]["category"], "new")
 
         opened = self.client.get(reverse("rnd:notification_open", args=[notification.id]))
         self.assertRedirects(opened, notification.target_url)
@@ -316,11 +320,25 @@ class RndWorkflowTests(TestCase):
         RndNotification.objects.create(
             recipient=self.rnd_editor,
             actor=self.rnd_approver,
-            source_key="manual:test",
-            title="Test",
-            message="Test notification",
+            source_key="manual:comment",
+            title="Komentar desain baru",
+            message="Test comment notification",
             target_url=reverse("rnd:dashboard"),
         )
+        RndNotification.objects.create(
+            recipient=self.rnd_editor,
+            actor=self.rnd_approver,
+            source_key="manual:approval",
+            title="Dokumen disetujui",
+            message="Test approval notification",
+            target_url=reverse("rnd:dashboard"),
+        )
+        staff_page = self.client.get(reverse("rnd:dashboard"))
+        self.assertContains(staff_page, 'data-notification-category="comment"')
+        self.assertContains(staff_page, 'data-notification-category="approval"')
+        self.assertContains(staff_page, "Dokumen disetujui")
+        staff_status = self.client.get(reverse("dashboard:live_status")).json()
+        self.assertEqual(staff_status["rnd_approval_count"], 1)
         marked = self.client.post(
             reverse("rnd:notifications_mark_all_read"),
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",

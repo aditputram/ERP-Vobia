@@ -94,6 +94,7 @@ def live_status(request):
             "message": notification.message,
             "created_at": timezone.localtime(notification.created_at).strftime("%d %b %Y · %H:%M"),
             "unread": notification.read_at is None,
+            "category": notification.category,
         }
         for notification in notification_context["rnd_notification_items"]
     ]

@@ -58,25 +58,58 @@
             copy.textContent = 'Aktivitas penting R&D akan muncul di sini.';
             empty.append(title, copy);
             list.append(empty);
+        } else {
+            data.rnd_notifications.forEach(notification => {
+                const item = document.createElement('a');
+                item.className = `rnd-notification-item${notification.unread ? ' is-unread' : ''}`;
+                item.href = notification.open_url;
+                const dot = document.createElement('span');
+                dot.className = 'rnd-notification-dot';
+                dot.setAttribute('aria-hidden', 'true');
+                const content = document.createElement('span');
+                const title = document.createElement('strong');
+                title.textContent = notification.title;
+                const message = document.createElement('span');
+                message.textContent = notification.message;
+                const time = document.createElement('time');
+                time.textContent = notification.created_at;
+                content.append(title, message, time);
+                item.append(dot, content);
+                list.append(item);
+            });
+        }
+        const approvalList = notificationPopup.querySelector('[data-rnd-approval-list]');
+        if (!approvalList) return;
+        notificationPopup.querySelector('[data-rnd-approval-count]').textContent = data.rnd_approval_count;
+        approvalList.replaceChildren();
+        if (!data.rnd_approvals.length) {
+            const empty = document.createElement('div');
+            empty.className = 'rnd-notification-empty';
+            const title = document.createElement('strong');
+            title.textContent = 'Tidak ada approval pending';
+            const copy = document.createElement('span');
+            copy.textContent = 'Semua keputusan R&D sudah ditindaklanjuti.';
+            empty.append(title, copy);
+            approvalList.append(empty);
             return;
         }
-        data.rnd_notifications.forEach(notification => {
+        data.rnd_approvals.forEach(approval => {
             const item = document.createElement('a');
-            item.className = `rnd-notification-item${notification.unread ? ' is-unread' : ''}`;
-            item.href = notification.open_url;
+            item.className = 'rnd-notification-item rnd-approval-item';
+            item.href = approval.open_url;
             const dot = document.createElement('span');
             dot.className = 'rnd-notification-dot';
             dot.setAttribute('aria-hidden', 'true');
             const content = document.createElement('span');
             const title = document.createElement('strong');
-            title.textContent = notification.title;
+            title.textContent = approval.title;
             const message = document.createElement('span');
-            message.textContent = notification.message;
+            message.textContent = approval.message;
             const time = document.createElement('time');
-            time.textContent = notification.created_at;
+            time.textContent = approval.created_at;
             content.append(title, message, time);
             item.append(dot, content);
-            list.append(item);
+            approvalList.append(item);
         });
     };
     let fetching = false;

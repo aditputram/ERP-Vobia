@@ -330,6 +330,20 @@ class RndWorkflowTests(TestCase):
             RndNotification.objects.filter(recipient=self.rnd_editor, read_at__isnull=True).exists()
         )
 
+        product = self._product(self._collection(code="COL-APPROVAL"), code="P-APPROVAL")
+        product.document_status = DevelopmentProduct.DocumentStatus.SUBMITTED
+        product.submitted_at = timezone.now()
+        product.submitted_by = self.rnd_editor
+        product.save(update_fields=("document_status", "submitted_at", "submitted_by", "updated_at"))
+        self.client.force_login(self.admin)
+        approval_page = self.client.get(reverse("rnd:dashboard"))
+        self.assertContains(approval_page, 'data-rnd-notification-tab="approval"')
+        self.assertContains(approval_page, "Approve dokumen")
+        self.assertContains(approval_page, product.name)
+        approval_status = self.client.get(reverse("dashboard:live_status")).json()
+        self.assertEqual(approval_status["rnd_approval_count"], 1)
+        self.assertEqual(approval_status["rnd_approvals"][0]["title"], "Approve dokumen")
+
     def test_design_gallery_navigation_expiry_and_delete(self):
         self.client.force_login(self.rnd_editor)
         for number in range(3):

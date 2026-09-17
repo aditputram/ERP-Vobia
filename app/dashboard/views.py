@@ -97,11 +97,22 @@ def live_status(request):
         }
         for notification in notification_context["rnd_notification_items"]
     ]
+    approvals = [
+        {
+            "open_url": item["target_url"],
+            "title": item["title"],
+            "message": item["message"],
+            "created_at": timezone.localtime(item["created_at"]).strftime("%d %b %Y · %H:%M"),
+        }
+        for item in notification_context["rnd_approval_items"]
+    ]
     return JsonResponse(
         {
             "chat_unread_count": chat_count,
             "rnd_unread_count": notification_context["rnd_notification_unread_count"],
             "rnd_notifications": notifications,
+            "rnd_approval_count": notification_context["rnd_approval_count"],
+            "rnd_approvals": approvals,
         }
     )
 

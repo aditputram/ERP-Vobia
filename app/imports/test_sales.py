@@ -193,10 +193,9 @@ class SalesImportWorkflowTests(TestCase):
         with self.assertRaisesMessage(ValidationError, "sudah committed"):
             void_sales_import(batch.id, self.user, "Tidak boleh.")
 
-    def test_pre_cutover_row_is_evidence_only_and_never_posts_sales_or_stock(self):
+    def test_pre_cutover_new_order_is_historical_backfill_without_stock(self):
         old_row = self.shopee_row(
             **{
-                "Nomor Referensi SKU": "LEGACY-SKU-NOT-IN-MASTER",
                 "Waktu Pesanan Dibuat": "2026-07-31 23:59",
                 "Waktu Pengiriman Diatur": "2026-07-31 23:59",
             }
@@ -208,13 +207,24 @@ class SalesImportWorkflowTests(TestCase):
         )
 
         self.assertEqual(batch.status, SalesImportBatch.Status.READY)
-        self.assertEqual(batch.out_of_scope_rows, 1)
+        self.assertEqual(batch.new_rows, 1)
+        self.assertEqual(batch.out_of_scope_rows, 0)
         self.assertEqual(batch.blocking_issue_count, 0)
-        self.assertEqual(batch.staged_rows.get().proposed_action, "OUT_OF_SCOPE")
+        staged = batch.staged_rows.get()
+        self.assertEqual(staged.proposed_action, "NEW")
+        self.assertTrue(staged.selected_source_data["historical_backfill"])
+        self.assertEqual(batch.quality_summary["historical_backfill_orders"], 1)
 
-        approve_sales_import(batch.id, self.user)
-        self.assertEqual(SalesOrder.objects.count(), 0)
-        self.assertEqual(SalesOrderLine.objects.count(), 0)
+        _, counts = approve_sales_import(batch.id, self.user)
+        order = SalesOrder.objects.get()
+        line = order.lines.get()
+        self.assertEqual(order.import_origin, SalesOrder.ImportOrigin.HISTORICAL)
+        self.assertFalse(order.affects_inventory)
+        self.assertEqual(line.total_gross_sales, Decimal("598000"))
+        self.assertEqual(line.total_net_sales, Decimal("598000"))
+        self.assertEqual(counts["historical_backfill_orders"], 1)
+        self.assertEqual(counts["historical_backfill_lines"], 1)
+        self.assertEqual(InventoryMovement.objects.count(), 0)
 
     def test_pre_cutover_historical_order_updates_status_only_without_rewriting_financials(self):
         historical_order = SalesOrder.objects.create(
@@ -637,7 +647,7 @@ class SalesImportWorkflowTests(TestCase):
         self.assertRedirects(response, reverse("imports:sales_detail", args=[batch.id]))
         batch.refresh_from_db()
         self.assertEqual(batch.status, SalesImportBatch.Status.READY)
-        self.assertEqual(batch.parser_version, "sales-v7")
+        self.assertEqual(batch.parser_version, "sales-v8")
         self.assertFalse(batch.issues.filter(code="ORDER_HEADER_CONFLICT").exists())
         approve_sales_import(batch.id, self.user)
 

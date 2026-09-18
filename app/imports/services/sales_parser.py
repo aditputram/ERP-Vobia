@@ -16,7 +16,7 @@ from sales.models import SalesOrder, SalesOrderLine
 from ..models import SalesImportBatch, SalesImportIssue, StagedSalesRow
 
 
-PARSER_VERSION = "sales-v7"
+PARSER_VERSION = "sales-v8"
 SALES_CUTOVER_DATE = date(2026, 8, 1)
 SHOPEE_CANCEL_REASON_HEADERS = ("Alasan Pembatalan",)
 SHOPEE_RETURN_STATUS_HEADERS = (
@@ -351,8 +351,8 @@ def parse_sales_batch(batch):
     pending_issues = []
     quality = Counter()
     dates = []
-    out_of_scope_ids = set()
     historical_audit_order_numbers = set()
+    historical_backfill_order_numbers = set()
 
     for row_number, raw in source_rows:
         order_number = _text(raw.get(resolved["order_number"]))
@@ -407,14 +407,15 @@ def parse_sales_batch(batch):
             cancellation_reason=cancellation_reason,
             return_status=return_status,
         )
-        is_out_of_scope = bool(
+        is_pre_cutover = bool(
             order_datetime
             and timezone.localtime(order_datetime).date() < SALES_CUTOVER_DATE
         )
-        historical_order = historical_orders.get(order_number) if is_out_of_scope else None
+        historical_order = historical_orders.get(order_number) if is_pre_cutover else None
         historical_status_audit = historical_order is not None
+        historical_backfill = is_pre_cutover and historical_order is None
         historical_status_update_allowed = historical_status_audit
-        if is_out_of_scope:
+        if historical_status_audit:
             # Financial fields from pre-cutover raw exports never rewrite the
             # immutable historical transaction snapshot. A matched historical
             # order may only refresh its current status after approval.
@@ -488,14 +489,14 @@ def parse_sales_batch(batch):
                 is_pure_cancelled = historical_is_pure_cancelled
                 historical_status_update_allowed = False
                 quality["historical_status_ignored_rows"] += 1
-        master_sku = historical_line.sku if historical_line else (None if is_out_of_scope else master_skus.get(sku_text))
-        existing_line = historical_line if historical_status_audit else (None if is_out_of_scope else existing_lines.get((order_number, sku_text)))
+        master_sku = historical_line.sku if historical_line else master_skus.get(sku_text)
+        existing_line = historical_line if historical_status_audit else existing_lines.get((order_number, sku_text))
         retail_snapshot = None
         master_retail_snapshot = None
         retail_price_special_case = False
         cogs_snapshot = None
 
-        if not is_out_of_scope:
+        if not historical_status_audit:
             for field_name, value in {
                 "order_number": order_number,
                 "status": source_status,
@@ -544,16 +545,19 @@ def parse_sales_batch(batch):
 
         if order_datetime:
             dates.append(order_datetime)
-        if is_out_of_scope:
+        if is_pre_cutover:
             quality["pre_cutover_rows"] += 1
-        elif not is_final and not is_pure_cancelled:
+        if historical_backfill:
+            quality["historical_backfill_rows"] += 1
+            historical_backfill_order_numbers.add(order_number)
+        if not is_final and not is_pure_cancelled and not historical_status_audit:
             quality["nonfinal_rows"] += 1
             quality[f"status::{normalized_status}"] += 1
-        if resolved_from_mapping and not is_out_of_scope:
+        if resolved_from_mapping and not historical_status_audit:
             quality["resolved_marketplace_sku_rows"] += 1
-        if is_pure_cancelled and not is_out_of_scope:
+        if is_pure_cancelled and not historical_status_audit:
             quality["pure_cancel_rows"] += 1
-        if normalized_status == "Retur" and not is_out_of_scope:
+        if normalized_status == "Retur" and not historical_status_audit:
             quality["return_rows"] += 1
 
         selected_data = {
@@ -568,11 +572,12 @@ def parse_sales_batch(batch):
             "shipped_time": _text(raw.get(resolved["shipped_time"])),
             "cancellation_reason": cancellation_reason,
             "return_status": return_status,
-            "import_scope": "before_cutover" if is_out_of_scope else "in_scope",
+            "import_scope": "before_cutover" if is_pre_cutover else "in_scope",
             "historical_status_audit": historical_status_audit,
+            "historical_backfill": historical_backfill,
             "historical_status_update_allowed": historical_status_update_allowed,
             "historical_order_id": str(historical_order.id) if historical_order else "",
-            "financial_snapshot_locked": is_out_of_scope,
+            "financial_snapshot_locked": historical_status_audit,
             "retail_price_rule": "transaction_special_case" if retail_price_special_case else "master_snapshot",
             "master_retail_price": str(master_retail_snapshot) if master_retail_snapshot is not None else "",
         }
@@ -603,11 +608,9 @@ def parse_sales_batch(batch):
             selected_source_data=selected_data,
         )
         staged_rows.append(staged)
-        if is_out_of_scope and not historical_status_audit:
-            out_of_scope_ids.add(staged.id)
         pending_issues.extend((staged, *issue) for issue in row_issues)
 
-        if existing_line and not is_pure_cancelled and not is_out_of_scope:
+        if existing_line and not is_pure_cancelled and not historical_status_audit:
             financial_changed = any(
                 (
                     quantity != existing_line.quantity,
@@ -626,7 +629,7 @@ def parse_sales_batch(batch):
                     )
                 )
 
-    in_scope_rows = [row for row in staged_rows if row.id not in out_of_scope_ids]
+    in_scope_rows = staged_rows
     key_counts = Counter(row.business_key for row in in_scope_rows)
     duplicate_keys = {key for key, count in key_counts.items() if count > 1}
     for row in in_scope_rows:
@@ -659,9 +662,7 @@ def parse_sales_batch(batch):
     action_counts = Counter()
     updates = []
     for row in staged_rows:
-        if row.id in out_of_scope_ids:
-            action = StagedSalesRow.ProposedAction.OUT_OF_SCOPE
-        elif row.id in blocked_ids:
+        if row.id in blocked_ids:
             action = StagedSalesRow.ProposedAction.BLOCKED
         elif (
             row.selected_source_data.get("historical_status_audit")
@@ -707,6 +708,7 @@ def parse_sales_batch(batch):
         "duplicate_business_key_count": len(duplicate_keys),
         "sales_cutover_date": str(SALES_CUTOVER_DATE),
         "historical_status_audit_orders": len(historical_audit_order_numbers),
+        "historical_backfill_orders": len(historical_backfill_order_numbers),
         "historical_evidence_only_rows": action_counts[StagedSalesRow.ProposedAction.OUT_OF_SCOPE],
         "historical_financial_snapshot_locked": True,
         "historical_inventory_posting": False,

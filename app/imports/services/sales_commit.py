@@ -86,6 +86,8 @@ def approve_sales_import(batch_id, actor):
         "unchanged": 0,
         "historical_status_audit_orders": 0,
         "historical_status_updates": 0,
+        "historical_backfill_orders": 0,
+        "historical_backfill_lines": 0,
     }
 
     for order_number, rows in order_groups.items():
@@ -96,6 +98,9 @@ def approve_sales_import(batch_id, actor):
         ).first()
         is_historical_status_audit = bool(
             representative.selected_source_data.get("historical_status_audit")
+        )
+        is_historical_backfill = bool(
+            representative.selected_source_data.get("historical_backfill")
         )
 
         if is_historical_status_audit:
@@ -198,13 +203,19 @@ def approve_sales_import(batch_id, actor):
                     None,
                 ),
                 order_date=timezone.localtime(representative.order_datetime).date(),
-                import_origin=SalesOrder.ImportOrigin.OPERATIONAL,
-                affects_inventory=True,
+                import_origin=(
+                    SalesOrder.ImportOrigin.HISTORICAL
+                    if is_historical_backfill
+                    else SalesOrder.ImportOrigin.OPERATIONAL
+                ),
+                affects_inventory=not is_historical_backfill,
                 first_seen_batch_id=batch.id,
                 latest_batch_id=batch.id,
                 **initial,
             )
             counts["orders_created"] += 1
+            if is_historical_backfill:
+                counts["historical_backfill_orders"] += 1
         else:
             order = existing_order
             if not order.source_label:
@@ -335,6 +346,8 @@ def approve_sales_import(batch_id, actor):
                     },
                 )
             counts["lines_created"] += 1
+            if is_historical_backfill:
+                counts["historical_backfill_lines"] += 1
 
         _sync_order_status(order)
         if order_created or previous_status != order.current_status:
@@ -345,6 +358,22 @@ def approve_sales_import(batch_id, actor):
                 source_status=order.source_status,
                 import_batch_id=batch.id,
                 changed_by=actor,
+            )
+
+        if order_created and is_historical_backfill:
+            record_audit(
+                actor=actor,
+                action="historical_sales_backfill_created",
+                entity_type="sales.salesorder",
+                entity_id=order.id,
+                reason="Transaksi baru pra-cutover ditambahkan untuk melengkapi histori Sales tanpa posting inventory.",
+                after_values={
+                    "order_number": order.order_number,
+                    "order_date": str(order.order_date),
+                    "line_count": order.lines.count(),
+                    "affects_inventory": False,
+                    "import_batch_id": str(batch.id),
+                },
             )
 
         if order.affects_inventory:

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{{ served_name }} · Messages{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=20260918-08">
+<header class="page-header"><div><p class="eyebrow">MESSAGES · LAMPIRAN</p><h1>{{ served_name }}</h1><p>Dikirim oleh {{ message.sender.get_full_name|default:message.sender.username }} pada {{ message.created_at|date:"d M Y H:i" }}.</p></div><a class="primary-button" href="{% url 'chat:attachment' message.id %}?download=1">Download</a></header>
+<section class="panel chat-file-viewer">{% if message.attachment_kind == 'image' %}<img src="{% url 'chat:attachment' message.id %}?raw=1" alt="{{ served_name }}">{% elif message.attachment_kind == 'pdf' %}<iframe src="{% url 'chat:attachment' message.id %}?raw=1" title="Preview {{ served_name }}"></iframe>{% else %}<div class="chat-file-placeholder"><strong>{{ message.attachment_extension }}</strong><h2>{{ served_name }}</h2><p>Dokumen ini tersedia untuk dilihat sebagai lampiran. Gunakan tombol Download untuk membukanya di aplikasi yang sesuai.</p></div>{% endif %}</section>
+{% endblock %}

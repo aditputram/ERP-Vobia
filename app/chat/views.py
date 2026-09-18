@@ -38,6 +38,7 @@ def _thread_rows(user):
         accessible_threads(user)
         .prefetch_related("participants")
         .annotate(last_message_at=Max("messages__created_at"))
+        .order_by("-updated_at")
     )
     states = {
         state.thread_id: state.last_read_at
@@ -177,9 +178,21 @@ def attachment(request, message_id):
     if not message.attachment or not _can_access(request.user, message.thread):
         raise Http404
     served_name = message.original_name or message.attachment.name.rsplit("/", 1)[-1]
-    return FileResponse(
-        message.attachment.open("rb"),
-        as_attachment=True,
-        filename=served_name,
-        content_type=guess_type(served_name)[0] or "application/octet-stream",
+    content_type = guess_type(served_name)[0] or "application/octet-stream"
+    if request.GET.get("download") == "1" or request.GET.get("raw") == "1":
+        if request.GET.get("raw") == "1" and message.attachment_kind == "document":
+            raise Http404
+        response = FileResponse(
+            message.attachment.open("rb"),
+            as_attachment=request.GET.get("download") == "1",
+            filename=served_name,
+            content_type=content_type,
+        )
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, no-store"
+        return response
+    return render(
+        request,
+        "chat/attachment_preview.html",
+        {"message": message, "served_name": served_name},
     )

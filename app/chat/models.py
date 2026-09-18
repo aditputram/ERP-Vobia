@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 
 from django.conf import settings
 from django.db import models
@@ -75,6 +76,19 @@ class ChatMessage(models.Model):
 
     def __str__(self):
         return f"{self.sender} · {self.created_at:%d %b %Y %H:%M}"
+
+    @property
+    def attachment_kind(self):
+        suffix = Path(self.original_name or self.attachment.name).suffix.lower()
+        if suffix in {".jpg", ".jpeg", ".png", ".webp"}:
+            return "image"
+        if suffix == ".pdf":
+            return "pdf"
+        return "document"
+
+    @property
+    def attachment_extension(self):
+        return Path(self.original_name or self.attachment.name).suffix.removeprefix(".").upper() or "FILE"
 
 
 class ChatReadState(models.Model):

@@ -66,6 +66,26 @@ class ChatTests(TestCase):
         self.assertContains(response, "personalMenu.contains")
         self.assertContains(response, "pointerdown")
 
+    def test_recently_active_conversation_moves_to_top(self):
+        first = ChatThread.objects.create(
+            kind=ChatThread.Kind.DIRECT,
+            key=f"direct:{self.rnd.id}:{self.marketing.id}",
+            created_by=self.rnd,
+        )
+        first.participants.add(self.rnd, self.marketing)
+        second = ChatThread.objects.create(
+            kind=ChatThread.Kind.DIRECT,
+            key=f"direct:{self.rnd.id}:{self.outsider.id}",
+            created_by=self.rnd,
+        )
+        second.participants.add(self.rnd, self.outsider)
+        self.client.force_login(self.rnd)
+
+        self.client.post(reverse("chat:thread", args=[first.id]), {"body": "Pesan terbaru"})
+        response = self.client.get(reverse("chat:inbox"))
+
+        self.assertEqual(response.context["threads"][0], first)
+
     def test_personal_chat_supports_mentions_replies_and_private_attachments(self):
         self.client.force_login(self.rnd)
         started = self.client.post(reverse("chat:start_direct", args=[self.marketing.id]))
@@ -93,6 +113,10 @@ class ChatTests(TestCase):
         thread_page = self.client.get(reverse("chat:thread", args=[thread.id]))
         self.assertContains(thread_page, 'aria-label="Balas pesan"')
         self.assertNotContains(thread_page, ">Balas</a>")
+        self.assertContains(thread_page, "Lihat lampiran")
+        self.assertContains(thread_page, "?download=1")
+        self.assertContains(thread_page, "URL.createObjectURL")
+        self.assertContains(thread_page, "data-chat-attachment-preview")
 
         replied = self.client.post(
             reverse("chat:thread", args=[thread.id]),
@@ -101,10 +125,36 @@ class ChatTests(TestCase):
         self.assertEqual(replied.status_code, 302)
         self.assertEqual(ChatMessage.objects.exclude(pk=first.pk).get().reply_to, first)
 
+        image_sent = self.client.post(
+            reverse("chat:thread", args=[thread.id]),
+            {
+                "attachment": SimpleUploadedFile(
+                    "sample.png",
+                    b"\x89PNG\r\n\x1a\nchat-test",
+                    content_type="image/png",
+                ),
+            },
+        )
+        self.assertEqual(image_sent.status_code, 302)
+        image_message = ChatMessage.objects.get(original_name="sample.png")
+        self.assertEqual(image_message.attachment_kind, "image")
+        image_page = self.client.get(reverse("chat:thread", args=[thread.id]))
+        self.assertContains(image_page, f'{reverse("chat:attachment", args=[image_message.id])}?raw=1')
+
         self.client.force_login(self.marketing)
-        self.assertEqual(self.client.get(reverse("chat:attachment", args=[first.id])).status_code, 200)
+        attachment_url = reverse("chat:attachment", args=[first.id])
+        preview = self.client.get(attachment_url)
+        self.assertContains(preview, "<iframe")
+        self.assertContains(preview, f"{attachment_url}?raw=1")
+        self.assertContains(preview, f"{attachment_url}?download=1")
+        raw = self.client.get(f"{attachment_url}?raw=1")
+        self.assertEqual(raw.status_code, 200)
+        self.assertIn("inline", raw["Content-Disposition"])
+        download = self.client.get(f"{attachment_url}?download=1")
+        self.assertEqual(download.status_code, 200)
+        self.assertIn("attachment", download["Content-Disposition"])
         self.client.force_login(self.outsider)
-        self.assertEqual(self.client.get(reverse("chat:attachment", args=[first.id])).status_code, 404)
+        self.assertEqual(self.client.get(attachment_url).status_code, 404)
 
     def test_unread_badge_clears_when_thread_is_opened(self):
         thread = ChatThread.objects.create(

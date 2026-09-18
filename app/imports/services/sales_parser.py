@@ -711,7 +711,8 @@ def parse_sales_batch(batch):
         "historical_backfill_orders": len(historical_backfill_order_numbers),
         "historical_evidence_only_rows": action_counts[StagedSalesRow.ProposedAction.OUT_OF_SCOPE],
         "historical_financial_snapshot_locked": True,
-        "historical_inventory_posting": False,
+        "historical_sales_out_recording": True,
+        "historical_fifo_posting": False,
     }
     batch.save()
     return batch

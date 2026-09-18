@@ -92,7 +92,9 @@ def run_reconciliation(actor, as_of_date=None):
             _issue(run, code="OVER_QC", entity_type="purchasing.purchaseorderline", entity_key=f"{line.po}|{line.sku.sku}", expected=line.ordered_qty, actual=inspected, difference=inspected-line.ordered_qty, message="Cumulative inspected melebihi PO Qty.")
         if received > passed:
             _issue(run, code="OVER_INBOUND", entity_type="purchasing.purchaseorderline", entity_key=f"{line.po}|{line.sku.sku}", expected=passed, actual=received, difference=received-passed, message="Cumulative received melebihi Qty QC Passed.")
-    for movement in InventoryMovement.objects.filter(direction=InventoryMovement.Direction.OUT):
+    for movement in InventoryMovement.objects.filter(
+        direction=InventoryMovement.Direction.OUT,
+    ).exclude(sales_line__order__affects_inventory=False):
         checks["fifo_allocation"] += 1
         allocated = movement.fifo_allocations.aggregate(total=Sum("allocated_qty"))["total"] or Decimal("0")
         short = movement.exceptions.filter(code=InventoryException.Code.FIFO_SHORT, status=InventoryException.Status.OPEN).aggregate(total=Sum("quantity"))["total"] or Decimal("0")

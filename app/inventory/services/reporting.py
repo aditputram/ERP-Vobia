@@ -56,7 +56,7 @@ def inventory_summary_rows(skus, *, as_of_date=None, warehouse=None):
     }
     movements = InventoryMovement.objects.filter(sku_id__in=sku_ids).exclude(
         movement_type=InventoryMovement.MovementType.OPENING
-    )
+    ).exclude(sales_line__order__affects_inventory=False)
     movements = _for_warehouse(movements, warehouse)
     if as_of_date:
         movements = movements.filter(movement_date__lte=as_of_date)
@@ -221,6 +221,7 @@ def movement_ledger_rows(skus, *, date_from=None, date_to=None, movement_type=""
                 "sku": opening.sku,
                 "quantity": abs(opening.opening_qty),
                 "signed_quantity": opening.opening_qty,
+                "balance_delta": opening.opening_qty,
                 "allocated_cost": opening.opening_qty * opening.frozen_unit_cogs,
                 "reference": "FIFO Opening EOD 2026-07-31",
                 "key": f"OPENING|20260731|{opening.sku.sku}",
@@ -232,35 +233,48 @@ def movement_ledger_rows(skus, *, date_from=None, date_to=None, movement_type=""
         )
     movements = InventoryMovement.objects.filter(sku_id__in=sku_ids).exclude(
         movement_type=InventoryMovement.MovementType.OPENING
-    ).select_related("sku__product_variant__product", "warehouse", "posted_by")
+    ).select_related(
+        "sku__product_variant__product", "warehouse", "posted_by", "sales_line__order"
+    )
     movements = _for_warehouse(movements, warehouse)
     if date_to:
         movements = movements.filter(movement_date__lte=date_to)
     for movement in movements.order_by("movement_date", "posted_at", "movement_key"):
         signed = movement.quantity if movement.direction == InventoryMovement.Direction.IN else -movement.quantity
-        running[movement.sku_id] += signed
         signed_cost = movement.allocated_cost if movement.direction == InventoryMovement.Direction.IN else -movement.allocated_cost
-        running_value[movement.sku_id] += signed_cost
+        affects_balance = not movement.sales_line_id or movement.sales_line.order.affects_inventory
         ledger.append(
             {
                 "date": movement.movement_date,
                 "posted_at": movement.posted_at,
                 "type": movement.movement_type,
-                "type_label": movement.get_movement_type_display(),
+                "type_label": (
+                    movement.get_movement_type_display()
+                    if affects_balance
+                    else f"{movement.get_movement_type_display()} · Historical"
+                ),
                 "direction": movement.direction,
                 "sku": movement.sku,
                 "quantity": movement.quantity,
                 "signed_quantity": signed,
+                "balance_delta": signed if affects_balance else ZERO,
                 "allocated_cost": movement.allocated_cost,
                 "reference": movement.source_reference,
                 "key": movement.movement_key,
-                "running_balance": running[movement.sku_id],
-                "running_value": running_value[movement.sku_id],
-                "value_delta": signed_cost,
+                "running_balance": ZERO,
+                "running_value": ZERO,
+                "value_delta": signed_cost if affects_balance else ZERO,
                 "warehouse_name": movement.warehouse.name if movement.warehouse else "Main Warehouse",
             }
         )
     ledger.sort(key=lambda row: (row["date"], row["posted_at"], row["key"]))
+    running.clear()
+    running_value.clear()
+    for row in ledger:
+        running[row["sku"].id] += row["balance_delta"]
+        running_value[row["sku"].id] += row["value_delta"]
+        row["running_balance"] = running[row["sku"].id]
+        row["running_value"] = running_value[row["sku"].id]
     if date_from:
         ledger = [row for row in ledger if row["date"] >= date_from]
     if date_to:
@@ -286,6 +300,7 @@ def parent_movement_ledger_rows(rows):
             "product_name": product.name,
             "quantity": ZERO,
             "signed_quantity": ZERO,
+            "balance_delta": ZERO,
             "allocated_cost": ZERO,
             "value_delta": ZERO,
             "reference": row["reference"],
@@ -295,6 +310,7 @@ def parent_movement_ledger_rows(rows):
         group["posted_at"] = min(group["posted_at"], row["posted_at"])
         group["quantity"] += row["quantity"]
         group["signed_quantity"] += row["signed_quantity"]
+        group["balance_delta"] += row["balance_delta"]
         group["allocated_cost"] += row["allocated_cost"]
         group["value_delta"] += row["value_delta"]
         group["sku_ids"].add(row["sku"].id)
@@ -303,7 +319,7 @@ def parent_movement_ledger_rows(rows):
     running_value = defaultdict(lambda: ZERO)
     result = []
     for row in sorted(grouped.values(), key=lambda item: (item["date"], item["posted_at"], item["type"], item["reference"], item["parent_sku"])):
-        running_qty[row["product_id"]] += row["signed_quantity"]
+        running_qty[row["product_id"]] += row["balance_delta"]
         running_value[row["product_id"]] += row["value_delta"]
         row["direction"] = "IN" if row["signed_quantity"] >= 0 else "OUT"
         row["running_balance"] = running_qty[row["product_id"]]

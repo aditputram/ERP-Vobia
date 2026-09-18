@@ -366,7 +366,7 @@ def approve_sales_import(batch_id, actor):
                 action="historical_sales_backfill_created",
                 entity_type="sales.salesorder",
                 entity_id=order.id,
-                reason="Transaksi baru pra-cutover ditambahkan untuk melengkapi histori Sales tanpa posting inventory.",
+                reason="Transaksi baru pra-cutover ditambahkan beserta Sales Out historis tanpa mengubah saldo live.",
                 after_values={
                     "order_number": order.order_number,
                     "order_date": str(order.order_date),
@@ -376,13 +376,12 @@ def approve_sales_import(batch_id, actor):
                 },
             )
 
-        if order.affects_inventory:
-            for line in order.lines.filter(is_counted=True).select_related("order", "sku"):
-                if not (order.shipped_datetime or line.is_final):
-                    continue
-                post_sales_out(line, actor)
-                if line.current_status == "Retur":
-                    create_expected_return(line)
+        for line in order.lines.filter(is_counted=True).select_related("order", "sku"):
+            if not (order.shipped_datetime or line.is_final):
+                continue
+            post_sales_out(line, actor)
+            if order.affects_inventory and line.current_status == "Retur":
+                create_expected_return(line)
 
     now = timezone.now()
     batch.status = SalesImportBatch.Status.COMMITTED

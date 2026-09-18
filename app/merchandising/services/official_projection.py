@@ -35,6 +35,7 @@ def _regular_sellable_start_dates(sku_ids, month_start, cutoff_date):
             movement_date__lt=month_start,
         )
         .exclude(movement_type=InventoryMovement.MovementType.OPENING)
+        .exclude(sales_line__order__affects_inventory=False)
         .values("sku_id", "direction")
         .annotate(total=Sum("quantity"))
     )
@@ -54,6 +55,7 @@ def _regular_sellable_start_dates(sku_ids, month_start, cutoff_date):
             movement_date__lte=cutoff_date,
         )
         .exclude(movement_type=InventoryMovement.MovementType.OPENING)
+        .exclude(sales_line__order__affects_inventory=False)
         .values("sku_id", "movement_date", "direction")
         .annotate(total=Sum("quantity"))
         .order_by("movement_date")

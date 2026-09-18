@@ -268,6 +268,32 @@ def post_sales_out(sales_line, actor):
     existing = InventoryMovement.objects.filter(movement_key=key).first()
     if existing:
         return existing
+    if not sales_line.order.affects_inventory:
+        movement = InventoryMovement.objects.create(
+            movement_key=key,
+            movement_date=sales_line.order.order_date,
+            movement_type=InventoryMovement.MovementType.SALES_OUT,
+            direction=InventoryMovement.Direction.OUT,
+            sku=sales_line.sku,
+            quantity=sales_line.quantity,
+            allocated_cost=sales_line.total_cogs or Decimal("0"),
+            source_reference=f"{sales_line.order.display_source}|{sales_line.order.order_number}",
+            sales_line=sales_line,
+            reason="Sales Out historis pra-cutover; saldo direkonsiliasi ke stock opname 31 Juli.",
+            posted_by=actor,
+        )
+        record_audit(
+            actor=actor,
+            action="historical_sales_out_recorded",
+            entity_type="inventory.inventorymovement",
+            entity_id=movement.id,
+            after_values={
+                "quantity": str(movement.quantity),
+                "allocated_cost": str(movement.allocated_cost),
+                "affects_live_balance": False,
+            },
+        )
+        return movement
     movement = InventoryMovement.objects.create(
         movement_key=key,
         movement_date=sales_line.order.order_date,
@@ -643,7 +669,10 @@ def record_physical_return(*, sales_line, received_date, quantity, warehouse, co
             after_values={"condition": condition, "quantity": str(quantity)},
         )
         return receipt, None
-    sales_movement = sales_line.inventory_movements.filter(movement_type=InventoryMovement.MovementType.SALES_OUT).first()
+    sales_movement = sales_line.inventory_movements.filter(
+        movement_type=InventoryMovement.MovementType.SALES_OUT,
+        sales_line__order__affects_inventory=True,
+    ).first()
     if sales_movement is None:
         if not sales_line.order.affects_inventory and sales_line.order.order_date <= CUTOVER_DATE:
             return receipt, _post_pre_cutover_return(receipt=receipt, actor=actor)
@@ -716,7 +745,7 @@ def record_physical_return(*, sales_line, received_date, quantity, warehouse, co
 def inventory_balance(sku, as_of_date=None):
     movements = InventoryMovement.objects.filter(sku=sku).exclude(
         movement_type=InventoryMovement.MovementType.OPENING
-    )
+    ).exclude(sales_line__order__affects_inventory=False)
     if as_of_date is not None:
         movements = movements.filter(movement_date__lte=as_of_date)
     opening = FIFOOpeningSnapshot.objects.filter(sku=sku)

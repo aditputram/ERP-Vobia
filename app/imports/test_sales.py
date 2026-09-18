@@ -15,6 +15,8 @@ from openpyxl import Workbook
 
 from master_data.models import Category, MarketplaceSKUMapping, Product, ProductStatus, ProductVariant, SKU
 from inventory.models import FIFOOpeningImportBatch, InventoryMovement
+from inventory.services.fifo import inventory_balance, post_opening
+from inventory.services.reporting import movement_ledger_rows
 from audit.models import AuditEvent
 from .models import RawFile, SalesImportIssue
 from sales.models import SalesOrder, SalesOrderLine
@@ -193,11 +195,17 @@ class SalesImportWorkflowTests(TestCase):
         with self.assertRaisesMessage(ValidationError, "sudah committed"):
             void_sales_import(batch.id, self.user, "Tidak boleh.")
 
-    def test_pre_cutover_new_order_is_historical_backfill_without_stock(self):
+    def test_pre_cutover_new_order_records_sales_out_with_locked_opening(self):
+        post_opening(
+            sku=self.sku,
+            quantity=10,
+            unit_cost=Decimal("99500"),
+            actor=self.user,
+        )
         old_row = self.shopee_row(
             **{
-                "Waktu Pesanan Dibuat": "2026-07-31 23:59",
-                "Waktu Pengiriman Diatur": "2026-07-31 23:59",
+                "Waktu Pesanan Dibuat": "2026-07-15 23:59",
+                "Waktu Pengiriman Diatur": "2026-07-15 23:59",
             }
         )
         batch = create_sales_import(
@@ -224,7 +232,17 @@ class SalesImportWorkflowTests(TestCase):
         self.assertEqual(line.total_net_sales, Decimal("598000"))
         self.assertEqual(counts["historical_backfill_orders"], 1)
         self.assertEqual(counts["historical_backfill_lines"], 1)
-        self.assertEqual(InventoryMovement.objects.count(), 0)
+        movement = InventoryMovement.objects.get(
+            movement_type=InventoryMovement.MovementType.SALES_OUT
+        )
+        self.assertEqual(movement.quantity, Decimal("2"))
+        self.assertEqual(movement.allocated_cost, Decimal("199000"))
+        self.assertFalse(movement.fifo_allocations.exists())
+        self.assertEqual(inventory_balance(self.sku), Decimal("10"))
+        ledger = movement_ledger_rows([self.sku])
+        self.assertEqual(ledger[0]["type_label"], "Sales Out · Historical")
+        self.assertEqual(ledger[0]["running_balance"], Decimal("0"))
+        self.assertEqual(ledger[-1]["running_balance"], Decimal("10"))
 
     def test_pre_cutover_historical_order_updates_status_only_without_rewriting_financials(self):
         historical_order = SalesOrder.objects.create(

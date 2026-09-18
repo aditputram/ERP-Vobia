@@ -143,6 +143,8 @@ class ChatTests(TestCase):
         self.assertContains(image_page, "data-chat-image-open")
         self.assertContains(image_page, "data-chat-image-dialog")
         self.assertContains(image_page, "imageDialog.showModal()")
+        self.assertContains(image_page, "chat-dialog-close")
+        self.assertContains(image_page, "chat-dialog-download")
 
         self.client.force_login(self.marketing)
         attachment_url = reverse("chat:attachment", args=[first.id])

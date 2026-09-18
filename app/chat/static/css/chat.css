@@ -54,6 +54,9 @@
 .chat-image-dialog > div { display: grid; min-height: 0; place-items: center; padding: 14px; overflow: auto; }
 .chat-image-dialog > div img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
 .chat-image-dialog footer { justify-content: flex-end; }
+.chat-dialog-close, .chat-dialog-download { min-width: 92px; padding: 9px 14px; border-radius: 8px; font-size: 11px; font-weight: 850; text-align: center; cursor: pointer; }
+.chat-dialog-close { border: 1px solid rgba(255,255,255,.48); color: white; background: transparent; }
+.chat-dialog-download { border: 1px solid #cff35a; color: #1a1b18; background: #cff35a; text-decoration: none; }
 .chat-reply { display: grid; width: 24px; height: 24px; margin: 3px 0 -5px auto; place-items: center; border-radius: 50%; color: var(--lime-dark); font-size: 16px; font-weight: 850; text-decoration: none; }
 .chat-reply:hover { background: rgba(155,189,38,.14); }
 .chat-composer { padding: 12px 16px; border-top: 1px solid var(--line); background: white; }

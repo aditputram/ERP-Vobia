@@ -2,7 +2,7 @@
 {% load static %}
 {% block title %}Messages{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=20260918-10">
+<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=20260918-11">
 <header class="page-header chat-page-header"><div><p class="eyebrow">SPACE · MESSAGES</p><h1>Messages</h1><p>Room kerja per modul dan chat personal lintas tim.</p></div></header>
 
 <section class="chat-shell">
@@ -23,7 +23,7 @@
         {% else %}<div class="chat-empty"><strong>Belum ada percakapan</strong><p>Mulai personal chat dengan pengguna aktif.</p></div>{% endif %}
     </article>
 </section>
-<dialog class="chat-image-dialog" data-chat-image-dialog aria-label="Preview foto"><header><strong data-chat-image-title>Preview foto</strong><button type="button" data-chat-image-close aria-label="Tutup preview">×</button></header><div><img data-chat-image-full alt=""></div><footer><a class="secondary-button compact" data-chat-image-download href="#">Download</a></footer></dialog>
+<dialog class="chat-image-dialog" data-chat-image-dialog aria-label="Preview foto"><header><strong data-chat-image-title>Preview foto</strong><button type="button" data-chat-image-close aria-label="Tutup preview">×</button></header><div><img data-chat-image-full alt=""></div><footer><button class="chat-dialog-close" type="button" data-chat-image-close>Close</button><a class="chat-dialog-download" data-chat-image-download href="#">Download</a></footer></dialog>
 <script>
 const stream=document.querySelector('[data-chat-stream]');
 if(stream&&!new URLSearchParams(location.search).has('q'))stream.scrollTop=stream.scrollHeight;
@@ -35,7 +35,7 @@ const imageFull=imageDialog?.querySelector('[data-chat-image-full]');
 const imageTitle=imageDialog?.querySelector('[data-chat-image-title]');
 const imageDownload=imageDialog?.querySelector('[data-chat-image-download]');
 document.querySelectorAll('[data-chat-image-open]').forEach(button=>button.addEventListener('click',()=>{if(!imageDialog)return;imageFull.src=button.dataset.imageSrc;imageFull.alt=button.dataset.imageName||'Preview foto';imageTitle.textContent=button.dataset.imageName||'Preview foto';imageDownload.href=button.dataset.downloadUrl;imageDialog.showModal();}));
-imageDialog?.querySelector('[data-chat-image-close]')?.addEventListener('click',()=>imageDialog.close());
+imageDialog?.querySelectorAll('[data-chat-image-close]').forEach(button=>button.addEventListener('click',()=>imageDialog.close()));
 imageDialog?.addEventListener('click',event=>{if(event.target===imageDialog)imageDialog.close();});
 imageDialog?.addEventListener('close',()=>imageFull?.removeAttribute('src'));
 document.querySelectorAll('[data-reply-url]').forEach(message=>{

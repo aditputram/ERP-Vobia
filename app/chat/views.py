@@ -1,23 +1,84 @@
+import json
 import re
 from mimetypes import guess_type
+from urllib.parse import urlsplit
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.db.models import Max, Q
-from django.http import FileResponse, Http404, HttpResponseBadRequest, HttpResponseForbidden
+from django.http import FileResponse, Http404, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from accounts.access import module_level
 
 from .forms import ChatMessageForm
-from .models import ChatMessage, ChatReadState, ChatThread, accessible_threads
+from .models import ChatMessage, ChatReadState, ChatThread, PushSubscription, accessible_threads
+from .push import send_web_push
 
 
 MENTION_PATTERN = re.compile(r"(?<!\w)@([\w.-]{1,150})")
+PUSH_ENDPOINT_HOSTS = {
+    "fcm.googleapis.com",
+    "updates.push.services.mozilla.com",
+    "web.push.apple.com",
+}
+
+
+@never_cache
+def service_worker(request):
+    response = render(request, "chat/service_worker.js", content_type="application/javascript")
+    response["Service-Worker-Allowed"] = "/"
+    response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
+
+@login_required
+@require_GET
+def push_config(request):
+    public_key = settings.WEB_PUSH_VAPID_PUBLIC_KEY
+    return JsonResponse({"enabled": bool(public_key), "public_key": public_key})
+
+
+@login_required
+@require_POST
+def push_subscribe(request):
+    try:
+        payload = json.loads(request.body)
+        endpoint = payload["endpoint"].strip()
+        keys = payload["keys"]
+        p256dh = keys["p256dh"].strip()
+        auth = keys["auth"].strip()
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return JsonResponse({"error": "Subscription browser tidak valid."}, status=400)
+    endpoint_host = urlsplit(endpoint).hostname or ""
+    trusted_endpoint = endpoint_host in PUSH_ENDPOINT_HOSTS or endpoint_host.endswith(".notify.windows.com")
+    if not trusted_endpoint or len(endpoint) > 2048 or not p256dh or not auth:
+        return JsonResponse({"error": "Subscription browser tidak valid."}, status=400)
+    if len(p256dh) > 255 or len(auth) > 255:
+        return JsonResponse({"error": "Kunci subscription tidak valid."}, status=400)
+    PushSubscription.objects.update_or_create(
+        endpoint=endpoint,
+        defaults={"user": request.user, "p256dh": p256dh, "auth": auth},
+    )
+    return JsonResponse({"subscribed": True})
+
+
+@login_required
+@require_POST
+def push_unsubscribe(request):
+    try:
+        endpoint = json.loads(request.body)["endpoint"].strip()
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return JsonResponse({"error": "Subscription browser tidak valid."}, status=400)
+    PushSubscription.objects.filter(user=request.user, endpoint=endpoint).delete()
+    return JsonResponse({"subscribed": False})
 
 
 def _can_access(user, thread):
@@ -105,6 +166,20 @@ def inbox(request, thread_id=None):
                 user=request.user,
                 defaults={"last_read_at": message.created_at},
             )
+            if selected.kind == ChatThread.Kind.DIRECT:
+                recipient_ids = [user.pk for user in thread_members if user.pk != request.user.pk]
+            else:
+                recipient_ids = list(message.mentions.exclude(pk=request.user.pk).values_list("pk", flat=True))
+            if recipient_ids:
+                transaction.on_commit(
+                    lambda recipients=recipient_ids, message_id=message.id: send_web_push(
+                        recipients,
+                        title="Pesan baru di Vobia Space",
+                        body="Buka Space untuk melihat pesan.",
+                        url=reverse("chat:inbox"),
+                        tag=f"chat:{message_id}",
+                    )
+                )
             target = reverse("chat:thread", args=[selected.id])
             return redirect(f"{target}?embed=1" if embedded else target)
 

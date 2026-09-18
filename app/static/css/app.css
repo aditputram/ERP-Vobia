@@ -964,8 +964,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .rnd-notification-tabs button.is-active { border-bottom-color: var(--lime-dark); color: var(--ink); }
 .rnd-notification-tabs span { display: inline-grid; min-width: 18px; margin-left: 3px; padding: 2px 5px; place-items: center; border-radius: 999px; color: #435800; background: #edf6cf; font-size: 8px; }
 .rnd-notification-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--line); color: var(--muted); background: white; font-size: 9px; }
+.rnd-notification-actions { display: flex; gap: 10px; align-items: center; }
 .rnd-notification-toolbar form { margin: 0; }
 .rnd-notification-toolbar button { padding: 0; border: 0; color: var(--lime-dark); background: none; font-size: 9px; font-weight: 850; cursor: pointer; }
+.rnd-notification-toolbar button.is-active { color: #587000; }
+.rnd-notification-toolbar button:disabled { cursor: default; opacity: .65; }
 .rnd-notification-list { overflow-y: auto; }
 .rnd-notification-item { position: relative; display: grid; grid-template-columns: 9px minmax(0, 1fr); gap: 8px; padding: 13px 17px; border-bottom: 1px solid var(--line); color: inherit; background: white; text-decoration: none; }
 .rnd-notification-item[hidden], .rnd-notification-empty[hidden] { display: none; }

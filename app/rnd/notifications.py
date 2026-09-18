@@ -1,7 +1,9 @@
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.urls import reverse
 
 from accounts.access import module_level
+from chat.push import send_web_push
 
 from .models import Collection, DesignAsset, DevelopmentProduct, RndNotification
 
@@ -109,4 +111,16 @@ def create_notifications_for_audit(event):
         )
         for user in recipients
     ]
-    return len(RndNotification.objects.bulk_create(notifications, ignore_conflicts=True))
+    created = RndNotification.objects.bulk_create(notifications, ignore_conflicts=True)
+    if event.action in APPROVAL_ACTIONS and created:
+        recipient_ids = [notification.recipient_id for notification in created]
+        transaction.on_commit(
+            lambda recipients=recipient_ids, source=event.id: send_web_push(
+                recipients,
+                title="Approval R&D baru",
+                body="Buka Space untuk melihat aktivitas approval.",
+                url=reverse("rnd:dashboard"),
+                tag=f"rnd-approval:{source}",
+            )
+        )
+    return len(created)

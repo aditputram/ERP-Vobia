@@ -3,6 +3,7 @@ from django.shortcuts import render
 from django.urls import include, path
 
 from .health import healthz
+from chat.views import service_worker
 
 admin.site.site_header = "Vobia ERP Administration"
 admin.site.site_title = "Vobia ERP"
@@ -10,6 +11,7 @@ admin.site.index_title = "Administrasi data"
 
 urlpatterns = [
     path("healthz", healthz, name="healthz"),
+    path("service-worker.js", service_worker, name="service_worker"),
     path("terms/", lambda request: render(request, "legal/terms.html"), name="terms"),
     path("privacy/", lambda request: render(request, "legal/privacy.html"), name="privacy"),
     path("admin/", admin.site.urls),

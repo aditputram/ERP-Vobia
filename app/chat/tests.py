@@ -1,4 +1,5 @@
 import tempfile
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -6,7 +7,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from .context_processors import unread_chat
-from .models import ChatMessage, ChatReadState, ChatThread, ensure_module_rooms
+from .models import ChatMessage, ChatReadState, ChatThread, PushSubscription, ensure_module_rooms
 
 
 class ChatTests(TestCase):
@@ -197,3 +198,73 @@ class ChatTests(TestCase):
         )
 
         self.assertRedirects(response, f"{reverse('chat:thread', args=[thread.id])}?embed=1")
+
+    @override_settings(WEB_PUSH_VAPID_PUBLIC_KEY="public-test-key")
+    def test_browser_can_register_push_subscription_and_load_service_worker(self):
+        worker = self.client.get(reverse("service_worker"))
+        self.assertEqual(worker.status_code, 200)
+        self.assertEqual(worker["Service-Worker-Allowed"], "/")
+        self.assertContains(worker, "showNotification")
+
+        self.client.force_login(self.rnd)
+        config = self.client.get(reverse("chat:push_config")).json()
+        self.assertEqual(config, {"enabled": True, "public_key": "public-test-key"})
+        response = self.client.post(
+            reverse("chat:push_subscribe"),
+            data={
+                "endpoint": "https://fcm.googleapis.com/subscription-1",
+                "keys": {"p256dh": "browser-key", "auth": "browser-auth"},
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        subscription = PushSubscription.objects.get()
+        self.assertEqual(subscription.user, self.rnd)
+
+        self.client.force_login(self.rnd_peer)
+        self.client.post(
+            reverse("chat:push_subscribe"),
+            data={
+                "endpoint": "https://fcm.googleapis.com/subscription-1",
+                "keys": {"p256dh": "new-browser-key", "auth": "new-browser-auth"},
+            },
+            content_type="application/json",
+        )
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.user, self.rnd_peer)
+
+    @override_settings(WEB_PUSH_VAPID_PRIVATE_KEY="private-test-key")
+    @patch("chat.push.webpush")
+    def test_pushes_personal_chat_and_group_mentions_only(self, webpush_mock):
+        PushSubscription.objects.create(
+            user=self.marketing,
+            endpoint="https://fcm.googleapis.com/marketing",
+            p256dh="marketing-key",
+            auth="marketing-auth",
+        )
+        PushSubscription.objects.create(
+            user=self.rnd_peer,
+            endpoint="https://fcm.googleapis.com/rnd-peer",
+            p256dh="rnd-key",
+            auth="rnd-auth",
+        )
+        direct = ChatThread.objects.create(
+            kind=ChatThread.Kind.DIRECT,
+            key=f"direct:{self.rnd.id}:{self.marketing.id}",
+            created_by=self.rnd,
+        )
+        direct.participants.add(self.rnd, self.marketing)
+        self.client.force_login(self.rnd)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("chat:thread", args=[direct.id]), {"body": "Isi privat"})
+        self.assertEqual(webpush_mock.call_count, 1)
+        self.assertEqual(webpush_mock.call_args.kwargs["data"].count("Isi privat"), 0)
+
+        room = ChatThread.objects.get(key="module:rnd")
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("chat:thread", args=[room.id]), {"body": "Tanpa mention"})
+        self.assertEqual(webpush_mock.call_count, 1)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("chat:thread", args=[room.id]), {"body": "Halo @rnd.peer"})
+        self.assertEqual(webpush_mock.call_count, 2)
+        self.assertEqual(webpush_mock.call_args.kwargs["subscription_info"]["endpoint"], "https://fcm.googleapis.com/rnd-peer")

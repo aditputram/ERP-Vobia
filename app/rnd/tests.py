@@ -2,6 +2,7 @@ import tempfile
 from io import BytesIO
 from decimal import Decimal
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -15,6 +16,7 @@ from reportlab.pdfgen import canvas
 
 from audit.models import AuditEvent
 from audit.services import record_audit
+from chat.models import PushSubscription
 from master_data.models import Product
 
 from .models import (
@@ -30,6 +32,7 @@ from .models import (
     MarketingRecommendation,
     RndNotification,
 )
+from .notifications import create_notifications_for_audit
 
 
 class RndWorkflowTests(TestCase):
@@ -370,6 +373,31 @@ class RndWorkflowTests(TestCase):
         approval_status = self.client.get(reverse("dashboard:live_status")).json()
         self.assertEqual(approval_status["rnd_approval_count"], 1)
         self.assertEqual(approval_status["rnd_approvals"][0]["title"], "Approve dokumen")
+
+    @override_settings(WEB_PUSH_VAPID_PRIVATE_KEY="private-test-key")
+    @patch("rnd.notifications.send_web_push")
+    def test_approval_activity_sends_generic_laptop_notification(self, send_push_mock):
+        product = self._product(self._collection(code="COL-PUSH"), code="P-PUSH")
+        event = AuditEvent.objects.create(
+            actor=self.rnd_approver,
+            action="rnd_product_document_submitted",
+            entity_type="rnd.development_product",
+            entity_id=str(product.id),
+            after_values={"product_name": product.name},
+        )
+        PushSubscription.objects.create(
+            user=self.rnd_editor,
+            endpoint="https://fcm.googleapis.com/rnd-editor",
+            p256dh="rnd-key",
+            auth="rnd-auth",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(create_notifications_for_audit(event), 2)
+
+        send_push_mock.assert_called_once()
+        self.assertIn(self.rnd_editor.id, send_push_mock.call_args.args[0])
+        self.assertEqual(send_push_mock.call_args.kwargs["title"], "Approval R&D baru")
+        self.assertNotIn(product.name, send_push_mock.call_args.kwargs["body"])
 
     def test_design_gallery_navigation_expiry_and_delete(self):
         self.client.force_login(self.rnd_editor)

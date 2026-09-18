@@ -1,6 +1,11 @@
+import base64
+import hashlib
+import hmac
 import os
 from pathlib import Path
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from django.core.exceptions import ImproperlyConfigured
 
 
@@ -193,6 +198,36 @@ TIKTOK_CONNECTION_DIR = Path(
 )
 TIKTOK_LIVE_ENABLED = env_bool("TIKTOK_LIVE_ENABLED", False)
 SOCIAL_SYNC_SECRET = os.getenv("SOCIAL_SYNC_SECRET", "").strip()
+_P256_ORDER = int("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", 16)
+_push_seed = hmac.new(
+    SECRET_KEY.encode(), b"vobia-space-web-push-v1", hashlib.sha256
+).digest()
+_push_private = ec.derive_private_key(
+    int.from_bytes(_push_seed, "big") % (_P256_ORDER - 1) + 1,
+    ec.SECP256R1(),
+)
+_generated_push_private = base64.urlsafe_b64encode(
+    _push_private.private_bytes(
+        serialization.Encoding.DER,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+).rstrip(b"=").decode()
+_generated_push_public = base64.urlsafe_b64encode(
+    _push_private.public_key().public_bytes(
+        serialization.Encoding.X962,
+        serialization.PublicFormat.UncompressedPoint,
+    )
+).rstrip(b"=").decode()
+WEB_PUSH_VAPID_PUBLIC_KEY = os.getenv(
+    "WEB_PUSH_VAPID_PUBLIC_KEY", _generated_push_public
+).strip()
+WEB_PUSH_VAPID_PRIVATE_KEY = os.getenv(
+    "WEB_PUSH_VAPID_PRIVATE_KEY", _generated_push_private
+).strip()
+WEB_PUSH_VAPID_SUBJECT = os.getenv(
+    "WEB_PUSH_VAPID_SUBJECT", "mailto:it@vobia.id"
+).strip()
 MEDIA_ROOT = PRIVATE_UPLOAD_ROOT
 MASTER_IMPORT_MAX_BYTES = 25 * 1024 * 1024
 MASTER_IMPORT_MAX_ROWS = 5000

@@ -7,9 +7,14 @@ from django.db import models
 
 
 class Campaign(models.Model):
+    class Type(models.TextChoices):
+        GRAND = "GRAND", "Grand Campaign"
+        MINI = "MINI", "Mini Campaign"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=180)
     description = models.TextField()
+    campaign_type = models.CharField(max_length=10, choices=Type.choices, default=Type.GRAND)
     campaign_plan_url = models.URLField(max_length=500, blank=True)
     creative_asset_url = models.URLField(max_length=500, blank=True)
     cover = models.FileField(upload_to="campaign_covers/", blank=True)

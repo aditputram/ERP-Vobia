@@ -51,8 +51,12 @@ def _sync_actual_spent(campaign):
 @login_required
 def campaign_list(request):
     request.session["active_module"] = "marketing"
-    campaigns = Campaign.objects.order_by("-created_at")
-    return render(request, "dashboard/campaign_list.html", {"campaigns": campaigns})
+    campaigns = list(Campaign.objects.order_by("-created_at"))
+    campaign_groups = [
+        ("Grand Campaign", [item for item in campaigns if item.campaign_type == Campaign.Type.GRAND]),
+        ("Mini Campaign", [item for item in campaigns if item.campaign_type == Campaign.Type.MINI]),
+    ]
+    return render(request, "dashboard/campaign_list.html", {"campaigns": campaigns, "campaign_groups": campaign_groups})
 
 
 @login_required

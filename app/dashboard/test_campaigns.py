@@ -67,6 +67,7 @@ class CampaignTests(TestCase):
         self.campaign.save(update_fields=("cover",))
         form = CampaignForm(data={
             "name": self.campaign.name, "description": self.campaign.description,
+            "campaign_type": Campaign.Type.GRAND,
             "campaign_plan_url": self.campaign.campaign_plan_url,
             "creative_asset_url": "https://drive.google.com/drive/folders/creative",
             "approval_date": "2026-01-01", "sample_date": "2026-01-02",
@@ -78,6 +79,7 @@ class CampaignTests(TestCase):
     def test_campaign_cover_is_optimized_and_versioned_card_is_cached(self):
         form = CampaignForm(data={
             "name": self.campaign.name, "description": self.campaign.description,
+            "campaign_type": Campaign.Type.GRAND,
             "campaign_plan_url": self.campaign.campaign_plan_url,
             "creative_asset_url": "",
             "approval_date": "2026-01-01", "sample_date": "2026-01-02",
@@ -114,8 +116,20 @@ class CampaignTests(TestCase):
             prelaunch_date=date(2026, 1, 4), launch_date=date(2025, 1, 5),
             budget=0, created_by=self.user,
         )
+        mini = Campaign.objects.create(
+            name="Mini", description="Mini campaign", campaign_type=Campaign.Type.MINI,
+            approval_date=date(2026, 1, 1), sample_date=date(2026, 1, 2),
+            creative_date=date(2026, 1, 3), prelaunch_date=date(2026, 1, 4),
+            launch_date=date(2026, 1, 5), budget=0, created_by=self.user,
+        )
         response = self.client.get(reverse("dashboard:campaign_list"))
-        self.assertEqual(list(response.context["campaigns"]), [newest, self.campaign])
+        self.assertEqual(response.context["campaigns"], [mini, newest, self.campaign])
+        self.assertEqual(response.context["campaign_groups"], [
+            ("Grand Campaign", [newest, self.campaign]),
+            ("Mini Campaign", [mini]),
+        ])
+        self.assertContains(response, "Grand Campaign")
+        self.assertContains(response, "Mini Campaign")
 
     @patch("dashboard.campaigns.get_report", return_value=(None, ""))
     def test_calendar_month_and_sales_window_report(self, report):
@@ -204,7 +218,8 @@ class CampaignTests(TestCase):
 
     def test_create_snapshots_target_and_timeline_validation(self):
         response = self.client.post(reverse("dashboard:campaign_create"), {
-            "name": "New", "description": "New campaign", "campaign_plan_url": "https://example.com/moodboard", "approval_date": "2026-02-01", "sample_date": "2026-02-02",
+            "name": "New", "description": "New campaign", "campaign_type": Campaign.Type.MINI,
+            "campaign_plan_url": "https://example.com/moodboard", "approval_date": "2026-02-01", "sample_date": "2026-02-02",
             "creative_date": "2026-02-03", "prelaunch_date": "2026-02-04", "launch_date": "2026-02-05",
             "budget": "Rp. 1.000.000", "actual_spent": "0", "products-TOTAL_FORMS": "1", "products-INITIAL_FORMS": "0",
             "products-MIN_NUM_FORMS": "1", "products-MAX_NUM_FORMS": "1000", "products-0-product": str(self.product.id),
@@ -214,6 +229,7 @@ class CampaignTests(TestCase):
         item = Campaign.objects.get(name="New").products.get()
         self.assertEqual(item.campaign.actual_spent, Decimal("0"))
         self.assertEqual(item.campaign.budget, Decimal("1000000"))
+        self.assertEqual(item.campaign.campaign_type, Campaign.Type.MINI)
         self.assertEqual(item.campaign.campaign_plan_url, "https://example.com/moodboard")
         self.assertEqual(item.target_gross_sales, Decimal("500000"))
         self.assertEqual(item.retail_price_snapshot, Decimal("100000"))
@@ -222,6 +238,7 @@ class CampaignTests(TestCase):
         item = self.campaign.products.get()
         response = self.client.post(reverse("dashboard:campaign_edit", args=[self.campaign.id]), {
             "name": self.campaign.name, "description": self.campaign.description,
+            "campaign_type": Campaign.Type.GRAND,
             "campaign_plan_url": self.campaign.campaign_plan_url, "approval_date": "2026-01-01",
             "sample_date": "2026-01-02", "creative_date": "2026-01-03", "prelaunch_date": "2026-01-05",
             "launch_date": "2026-01-10", "budget": "Rp. 1.000.000",

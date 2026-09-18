@@ -33,7 +33,7 @@ class CampaignForm(forms.ModelForm):
             "actual_creative_date", "actual_prelaunch_date", "actual_launch_date",
         )
         labels = {
-            "name": "Campaign Name", "description": "Campaign Description",
+            "name": "Campaign Name", "description": "Campaign Description", "campaign_type": "Tipe Campaign",
             "approval_date": "Approval Campaign Plan", "sample_date": "Product Marketing Sample",
             "creative_date": "Creative Production", "prelaunch_date": "Pre Launch",
             "launch_date": "Launch", "budget": "Campaign Budget",

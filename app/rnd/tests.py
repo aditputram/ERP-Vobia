@@ -176,6 +176,15 @@ class RndWorkflowTests(TestCase):
         self.assertContains(response, 'class="rnd-collection-cover-item"', count=4)
         self.assertNotContains(response, reverse("rnd:product_file", args=[products[4].id, "product-cover"]))
 
+    def test_collection_dashboard_orders_latest_collection_number_first(self):
+        latest = self._collection(code="COL-010")
+        older = self._collection(code="COL-009")
+
+        self.client.force_login(self.rnd_editor)
+        response = self.client.get(reverse("rnd:dashboard"))
+
+        self.assertEqual(list(response.context["collections"]), [latest, older])
+
     def test_designing_upload_and_approve_only_recommendation(self):
         self.client.force_login(self.rnd_editor)
         page = self.client.get(reverse("rnd:designing"))

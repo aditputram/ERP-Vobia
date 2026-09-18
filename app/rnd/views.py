@@ -1,6 +1,7 @@
 from datetime import timedelta
 from io import BytesIO
 from mimetypes import guess_type
+from re import findall
 from uuid import uuid4
 
 from django.contrib import messages
@@ -149,14 +150,22 @@ def dashboard(request):
             filter=Q(products__development_stage=DevelopmentProduct.DevelopmentStage.FINAL),
         ),
     )
+    collection_count = collections.count()
+    development_count = collections.filter(development_started_at__isnull=False).count()
+    marketing_review_count = collections.filter(status=Collection.Status.MARKETING_REVIEW).count()
+    collections = sorted(
+        collections,
+        key=lambda collection: tuple(map(int, findall(r"\d+", collection.code))) or (0,),
+        reverse=True,
+    )
     return render(
         request,
         "rnd/dashboard.html",
         {
             "collections": collections,
-            "collection_count": collections.count(),
-            "development_count": collections.filter(development_started_at__isnull=False).count(),
-            "marketing_review_count": collections.filter(status=Collection.Status.MARKETING_REVIEW).count(),
+            "collection_count": collection_count,
+            "development_count": development_count,
+            "marketing_review_count": marketing_review_count,
         },
     )
 

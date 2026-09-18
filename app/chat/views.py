@@ -173,6 +173,7 @@ def start_direct(request, user_id):
 
 
 @login_required
+@xframe_options_sameorigin
 def attachment(request, message_id):
     message = get_object_or_404(ChatMessage.objects.select_related("thread"), pk=message_id)
     if not message.attachment or not _can_access(request.user, message.thread):

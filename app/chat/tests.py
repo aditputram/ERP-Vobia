@@ -150,6 +150,7 @@ class ChatTests(TestCase):
         raw = self.client.get(f"{attachment_url}?raw=1")
         self.assertEqual(raw.status_code, 200)
         self.assertIn("inline", raw["Content-Disposition"])
+        self.assertEqual(raw["X-Frame-Options"], "SAMEORIGIN")
         download = self.client.get(f"{attachment_url}?download=1")
         self.assertEqual(download.status_code, 200)
         self.assertIn("attachment", download["Content-Disposition"])

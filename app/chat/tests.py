@@ -140,6 +140,9 @@ class ChatTests(TestCase):
         self.assertEqual(image_message.attachment_kind, "image")
         image_page = self.client.get(reverse("chat:thread", args=[thread.id]))
         self.assertContains(image_page, f'{reverse("chat:attachment", args=[image_message.id])}?raw=1')
+        self.assertContains(image_page, "data-chat-image-open")
+        self.assertContains(image_page, "data-chat-image-dialog")
+        self.assertContains(image_page, "imageDialog.showModal()")
 
         self.client.force_login(self.marketing)
         attachment_url = reverse("chat:attachment", args=[first.id])

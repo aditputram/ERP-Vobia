@@ -2058,7 +2058,7 @@ class MerchandisingReportViewTests(TestCase):
         self.assertTrue(payload["selected_subcategory_valid"])
         self.assertEqual(payload["products"], [{"id": str(essential_product.id), "name": "Essential Shirt"}])
 
-    def test_new_master_product_is_available_in_planning_builder_by_default(self):
+    def test_new_master_product_requires_all_filter_while_active_stays_default(self):
         product = Product.objects.create(
             code="NEW-MASTER-PRODUCT",
             name="New Master Product",
@@ -2073,18 +2073,21 @@ class MerchandisingReportViewTests(TestCase):
             current_master_cogs=Decimal("100000"),
         )
         response = self.client.get("/merchandising/planning-builder/filter-options/")
-        self.assertIn(
+        self.assertNotIn(
             {"id": str(product.id), "name": "New Master Product"},
             response.json()["products"],
         )
         self.assertEqual(
             self.client.get("/merchandising/planning-builder/").context["builder_form"]["planning_activity"].value(),
-            "ALL",
+            "ACTIVE",
         )
 
         product.name = "Updated Master Product"
         product.save(update_fields=["name"])
-        response = self.client.get("/merchandising/planning-builder/filter-options/")
+        response = self.client.get(
+            "/merchandising/planning-builder/filter-options/",
+            {"planning_activity": "ALL"},
+        )
         self.assertIn(
             {"id": str(product.id), "name": "Updated Master Product"},
             response.json()["products"],
@@ -2112,6 +2115,7 @@ class MerchandisingReportViewTests(TestCase):
                 "target_month": target_month.strftime("%Y-%m"),
                 "scope_type": ProjectionRule.ScopeType.PRODUCT,
                 "product": [product.id],
+                "planning_activity": "ALL",
                 "method": ProjectionRule.Method.SAME_AS_LAST_MONTH,
                 "action": "preview",
             },

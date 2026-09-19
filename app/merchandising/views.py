@@ -787,7 +787,7 @@ def planning_filter_options(request):
     product_status_id = request.GET.get("product_status", "").strip()
     category_id = request.GET.get("category", "").strip()
     subcategory_id = request.GET.get("subcategory", "").strip()
-    planning_activity = request.GET.get("planning_activity", "ALL").strip()
+    planning_activity = request.GET.get("planning_activity", "ACTIVE").strip()
     target_month = None
     raw_target_month = request.GET.get("target_month", "").strip()
     if raw_target_month:
@@ -796,7 +796,7 @@ def planning_filter_options(request):
         except ValueError:
             target_month = None
     if planning_activity not in {"ACTIVE", "INACTIVE", "ALL"}:
-        planning_activity = "ALL"
+        planning_activity = "ACTIVE"
     products = filter_products_by_planning_activity(
         Product.objects.filter(is_active=True),
         planning_activity,

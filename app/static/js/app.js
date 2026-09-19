@@ -366,7 +366,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (statusSelect.value) params.set('product_status', statusSelect.value);
       if (previousCategory) params.set('category', previousCategory);
       if (previousSubcategory) params.set('subcategory', previousSubcategory);
-      params.set('planning_activity', activitySelect.value || 'ALL');
+      params.set('planning_activity', activitySelect.value || 'ACTIVE');
       if (targetMonthSelect.value) params.set('target_month', targetMonthSelect.value);
       try {
         const response = await fetch(`${endpoint}?${params.toString()}`, {

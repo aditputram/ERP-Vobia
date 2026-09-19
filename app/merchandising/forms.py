@@ -79,7 +79,7 @@ class ProjectionBuilderForm(forms.Form):
     planning_activity = forms.ChoiceField(
         label="Planning activity",
         choices=PlanningActivity.choices,
-        initial=PlanningActivity.ACTIVE,
+        initial=PlanningActivity.ALL,
         required=False,
     )
     product = forms.ModelMultipleChoiceField(
@@ -102,7 +102,7 @@ class ProjectionBuilderForm(forms.Form):
         category = cleaned.get("category")
         subcategory = cleaned.get("subcategory")
         selected_products = cleaned.get("product")
-        planning_activity = cleaned.get("planning_activity") or self.PlanningActivity.ACTIVE
+        planning_activity = cleaned.get("planning_activity") or self.PlanningActivity.ALL
         method = cleaned.get("method")
         parameter = cleaned.get("parameter")
         if method == ProjectionRule.Method.SAME_AS_LAST_MONTH:

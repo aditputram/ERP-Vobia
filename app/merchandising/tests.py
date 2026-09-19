@@ -2058,6 +2058,70 @@ class MerchandisingReportViewTests(TestCase):
         self.assertTrue(payload["selected_subcategory_valid"])
         self.assertEqual(payload["products"], [{"id": str(essential_product.id), "name": "Essential Shirt"}])
 
+    def test_new_master_product_is_available_in_planning_builder_by_default(self):
+        product = Product.objects.create(
+            code="NEW-MASTER-PRODUCT",
+            name="New Master Product",
+            status=self.product.status,
+            category=self.product.category,
+        )
+        variant = ProductVariant.objects.create(product=product, name="Black", color="Black")
+        SKU.objects.create(
+            sku="NEW-MASTER-SKU",
+            product_variant=variant,
+            current_retail_price=Decimal("200000"),
+            current_master_cogs=Decimal("100000"),
+        )
+        response = self.client.get("/merchandising/planning-builder/filter-options/")
+        self.assertIn(
+            {"id": str(product.id), "name": "New Master Product"},
+            response.json()["products"],
+        )
+        self.assertEqual(
+            self.client.get("/merchandising/planning-builder/").context["builder_form"]["planning_activity"].value(),
+            "ALL",
+        )
+
+        product.name = "Updated Master Product"
+        product.save(update_fields=["name"])
+        response = self.client.get("/merchandising/planning-builder/filter-options/")
+        self.assertIn(
+            {"id": str(product.id), "name": "Updated Master Product"},
+            response.json()["products"],
+        )
+        self.assertNotIn(
+            {"id": str(product.id), "name": "Updated Master Product"},
+            self.client.get(
+                "/merchandising/planning-builder/filter-options/",
+                {"planning_activity": "ACTIVE"},
+            ).json()["products"],
+        )
+
+        target_month = timezone.localdate().replace(day=1)
+        scenario = ProjectionScenario.objects.create(
+            name="New Master Planning",
+            start_month=target_month,
+            end_month=target_month,
+            created_by=self.user,
+        )
+        preview = self.client.post(
+            "/merchandising/planning-builder/",
+            {
+                "form_name": "builder",
+                "scenario": scenario.id,
+                "target_month": target_month.strftime("%Y-%m"),
+                "scope_type": ProjectionRule.ScopeType.PRODUCT,
+                "product": [product.id],
+                "method": ProjectionRule.Method.SAME_AS_LAST_MONTH,
+                "action": "preview",
+            },
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(
+            [row["sku"].sku for row in preview.context["preview_rows"]],
+            ["NEW-MASTER-SKU"],
+        )
+
     def test_all_products_respects_subcategory_intersection(self):
         category = Category.objects.create(code="SUBCAT-FILTER", name="Subcategory Filter")
         tops = Subcategory.objects.create(category=category, code="TOPS", name="Tops")

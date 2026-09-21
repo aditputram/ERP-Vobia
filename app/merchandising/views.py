@@ -1188,6 +1188,7 @@ def update_scenario_draft(request, scenario_id):
             messages.info(request, "Tidak ada perubahan pada Scenario Draft.")
             draft_url = reverse("merchandising:planning_builder")
             return redirect(f"{draft_url}?view_draft={scenario.id}#draft-projection")
+    draft_preserved_after_failed_approval = False
     try:
         if action == "approve":
             approve_scenario(
@@ -1214,7 +1215,22 @@ def update_scenario_draft(request, scenario_id):
                 "Scenario Draft tersimpan. Penyesuaian Sales dan Incoming tetap dapat diedit sebelum approval.",
             )
     except (ValidationError, ArithmeticError, TypeError, ValueError) as exc:
-        messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
+        error_message = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+        if action == "approve":
+            try:
+                save_scenario_draft(
+                    scenario.id,
+                    request.user,
+                    sales_values=sales_values,
+                    incoming_values=incoming_values,
+                    reason=reason,
+                )
+                draft_preserved_after_failed_approval = True
+            except (ValidationError, ArithmeticError, TypeError, ValueError):
+                pass
+        if draft_preserved_after_failed_approval:
+            error_message += " Angka edit terakhir tetap tersimpan sebagai Draft."
+        messages.error(request, error_message)
     draft_url = reverse("merchandising:planning_builder")
     return redirect(f"{draft_url}?view_draft={scenario.id}#draft-projection")
 

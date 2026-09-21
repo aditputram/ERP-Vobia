@@ -400,6 +400,27 @@ def approve_scenario(scenario_id, actor, sales_values=None, incoming_values=None
     }
     if len(plans_by_projection) != len(projections):
         raise ValidationError("Incoming Plan belum lengkap untuk seluruh Draft Projection.")
+    insufficient_incoming = [
+        (projection, plans_by_projection[projection.id])
+        for projection in projections
+        if plans_by_projection[projection.id].approval_status
+        != IncomingPlan.ApprovalStatus.APPROVED
+        and plans_by_projection[projection.id].proposed_incoming
+        < plans_by_projection[projection.id].minimum_incoming
+    ]
+    if insufficient_incoming:
+        examples = ", ".join(
+            f"{projection.sku.sku} {projection.month:%b %Y} "
+            f"(Incoming {plan.proposed_incoming:.0f}, minimum {plan.minimum_incoming:.0f})"
+            for projection, plan in insufficient_incoming[:5]
+        )
+        remainder = len(insufficient_incoming) - 5
+        if remainder > 0:
+            examples += f", dan {remainder} SKU-bulan lainnya"
+        raise ValidationError(
+            "Scenario belum dapat di-approve karena Incoming masih membuat Ending Stock negatif: "
+            f"{examples}. Draft edit terakhir tetap dapat disimpan."
+        )
     for projection in projections:
         if projection.approval_status != SalesProjection.ApprovalStatus.APPROVED:
             approve_sales_projection(projection.id, projection.proposed_qty, actor, reason)

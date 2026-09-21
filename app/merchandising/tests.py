@@ -682,6 +682,31 @@ class MerchandisingWorkflowTests(TestCase):
         self.assertEqual(plan.proposed_incoming, Decimal("20"))
         self.assertEqual(plan.approval_status, IncomingPlan.ApprovalStatus.DRAFT)
 
+    def test_scenario_approval_explains_incoming_that_would_make_ending_negative(self):
+        projection = self._projection()
+        projection.beginning_qty = Decimal("30")
+        projection.save(update_fields=["beginning_qty"])
+        save_scenario_draft(
+            self.scenario.id,
+            self.user,
+            sales_values={str(projection.id): "100"},
+            incoming_values={str(projection.id): "20"},
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            f"{self.sku.sku} Sep 2026 (Incoming 20, minimum",
+        ):
+            approve_scenario(self.scenario.id, self.user)
+
+        self.scenario.refresh_from_db()
+        projection.refresh_from_db()
+        plan = IncomingPlan.objects.get(sales_projection=projection)
+        self.assertEqual(self.scenario.status, ProjectionScenario.Status.DRAFT)
+        self.assertEqual(projection.approval_status, SalesProjection.ApprovalStatus.DRAFT)
+        self.assertEqual(projection.proposed_qty, Decimal("100"))
+        self.assertEqual(plan.proposed_incoming, Decimal("20"))
+
     def test_superadmin_can_revise_and_reapprove_approved_scenario_with_audit(self):
         superadmin = User.objects.create_superuser(
             username="owner",
@@ -2031,6 +2056,41 @@ class MerchandisingReportViewTests(TestCase):
         scenario = ProjectionScenario.objects.get(name="October Planning UAT")
         self.assertEqual(scenario.start_month, date(2026, 10, 1))
         self.assertEqual(scenario.end_month, date(2026, 12, 1))
+
+    def test_failed_scenario_approval_keeps_submitted_edits_as_draft(self):
+        scenario = ProjectionScenario.objects.create(
+            name="Approval Keeps Draft Values",
+            start_month=date(2026, 9, 1),
+            end_month=date(2026, 9, 1),
+            created_by=self.user,
+        )
+        projection = SalesProjection.objects.create(
+            scenario=scenario,
+            month=date(2026, 9, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("0"),
+            system_recommendation=Decimal("10"),
+        )
+
+        response = self.client.post(
+            f"/merchandising/planning-builder/scenario/{scenario.id}/draft/",
+            {
+                "action": "approve",
+                f"sales_qty_{projection.id}": "100000",
+                f"incoming_qty_{projection.id}": "20",
+            },
+            follow=True,
+        )
+
+        scenario.refresh_from_db()
+        projection.refresh_from_db()
+        plan = IncomingPlan.objects.get(sales_projection=projection)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(scenario.status, ProjectionScenario.Status.DRAFT)
+        self.assertEqual(projection.proposed_qty, Decimal("100000"))
+        self.assertEqual(plan.proposed_incoming, Decimal("20"))
+        self.assertContains(response, "Angka edit terakhir tetap tersimpan sebagai Draft")
+        self.assertContains(response, self.sku.sku)
 
     def test_cancel_preview_discards_unsaved_builder_result(self):
         scenario = ProjectionScenario.objects.create(

@@ -178,16 +178,48 @@ class FinanceJournalTests(TestCase):
             retail_price_snapshot=Decimal("100000"),
             total_gross_sales=Decimal("200000"),
             total_net_sales=Decimal("180000"),
+            total_cogs=Decimal("120000"),
+        )
+        older_order = SalesOrder.objects.create(
+            source=SalesOrder.Source.TIKTOK,
+            source_label="TikTok",
+            order_number="FINANCE-SALES-OLDER",
+            order_datetime=timezone.make_aware(datetime(2026, 8, 10, 10, 0)),
+            order_date=date(2026, 8, 10),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=older_order,
+            sku_code_snapshot="FINANCE-SKU-OLDER",
+            product_name_snapshot="Older Finance Product",
+            quantity=1,
+            net_unit_price=Decimal("75000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("100000"),
+            total_net_sales=Decimal("75000"),
+            total_cogs=Decimal("50000"),
         )
         self.client.force_login(self.user)
 
-        response = self.client.get(reverse("finance:feature", args=["sales-invoice"]))
+        response = self.client.get(
+            reverse("finance:feature", args=["sales-invoice"]),
+            {"period_type": "month", "period": "2026-09", "source": "Shopee"},
+        )
 
-        self.assertEqual(response.context["metrics"], (("Invoice/order", 1),))
+        self.assertEqual(response.context["sales_totals"]["orders"], 1)
+        self.assertEqual(response.context["sales_totals"]["cogs"], Decimal("120000"))
+        self.assertEqual(response.context["selected_sources"], ["Shopee"])
         self.assertContains(response, "FINANCE-SALES-001")
+        self.assertNotContains(response, "FINANCE-SALES-OLDER")
         self.assertContains(response, "Shopee")
-        self.assertContains(response, "200000")
-        self.assertContains(response, "180000")
+        self.assertContains(response, "200.000")
+        self.assertContains(response, "180.000")
+        self.assertContains(response, "120.000")
+        self.assertContains(response, "COGS")
         self.assertNotContains(response, "Buat Sales Invoice")
 
     def test_finance_workspace_respects_exact_tab_permission(self):

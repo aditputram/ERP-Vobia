@@ -5,8 +5,9 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import DecimalField, ExpressionWrapper, F, Q, Sum
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
 from django.http import HttpResponseForbidden, HttpResponseNotAllowed
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -350,17 +351,77 @@ def feature(request, slug):
     }
 
     if slug in {"sales-invoice", "sales-invoice-list"}:
-        from sales.models import SalesOrder
+        from sales.models import SalesOrder, SalesOrderLine
+        from sales.views import (
+            _apply_source_filters,
+            _pareto_period_bounds,
+            _pareto_period_options,
+            _source_options,
+        )
 
-        orders = SalesOrder.objects.annotate(
+        all_lines = SalesOrderLine.objects.filter(is_counted=True)
+        latest = all_lines.order_by("-order__order_date").values_list("order__order_date", flat=True).first() or today
+        earliest = all_lines.order_by("order__order_date").values_list("order__order_date", flat=True).first() or latest
+        period_options = _pareto_period_options(earliest, latest)
+        period_type = request.GET.get("period_type", "custom")
+        if period_type not in {*period_options, "custom"}:
+            period_type = "custom"
+        if period_type == "custom":
+            period_value = ""
+            start = _selected_date(request, "date_from", latest.replace(day=1))
+            end = _selected_date(request, "date_to", latest)
+            if start > end:
+                start, end = end, start
+        else:
+            valid_periods = {item["value"] for item in period_options[period_type]}
+            period_value = request.GET.get("period", "")
+            if period_value not in valid_periods:
+                period_value = period_options[period_type][-1]["value"]
+            start, end = _pareto_period_bounds(period_type, period_value)
+
+        source_groups = [
+            item for item in request.GET.getlist("source_group")
+            if item in {"Marketplace", "Other"}
+        ]
+        source_options = _source_options(all_lines, source_groups)
+        allowed_sources = {item["value"] for item in source_options}
+        sources = [
+            item for item in request.GET.getlist("source")
+            if item and item in allowed_sources
+        ]
+        lines = _apply_source_filters(all_lines, sources, source_groups).filter(
+            order__order_date__range=(start, end)
+        )
+        totals = lines.aggregate(
+            orders=Count("order_id", distinct=True),
+            gross=Sum("total_gross_sales"),
+            net=Sum("total_net_sales"),
+            cogs=Sum("total_cogs"),
+        )
+        orders = SalesOrder.objects.filter(id__in=lines.values("order_id")).annotate(
             gross=Sum("lines__total_gross_sales", filter=Q(lines__is_counted=True)),
             net=Sum("lines__total_net_sales", filter=Q(lines__is_counted=True)),
-        )[:200]
+            cogs=Sum("lines__total_cogs", filter=Q(lines__is_counted=True)),
+        ).order_by("-order_datetime", "source", "order_number")
+        page = Paginator(orders, 100).get_page(request.GET.get("page"))
+        pagination_query = request.GET.copy()
+        pagination_query.pop("page", None)
         context.update(
-            columns=("Tanggal", "Source", "No. Pesanan", "Status", "Gross", "Net"),
-            rows=[(row.order_date, row.display_source, row.order_number, row.current_status, row.gross or 0, row.net or 0) for row in orders],
-            metrics=(("Invoice/order", SalesOrder.objects.count()),),
-            data_note="Menggunakan transaksi canonical dari modul Sales. Posting jurnal Finance akan diaktifkan terpisah sesuai cutover 31 Agustus 2026.",
+            sales_invoice=True,
+            sales_orders=page.object_list,
+            page=page,
+            pagination_prefix=f"{pagination_query.urlencode()}&" if pagination_query else "",
+            date_from=start,
+            date_to=end,
+            period_type=period_type,
+            period_value=period_value,
+            period_options=period_options,
+            source_groups=("Marketplace", "Other"),
+            source_options=source_options,
+            selected_sources=sources,
+            selected_source_groups=source_groups,
+            sales_totals={key: value or 0 for key, value in totals.items()},
+            data_note="Menggunakan transaksi dan COGS snapshot canonical dari modul Sales. Posting jurnal Finance akan diaktifkan terpisah sesuai cutover 31 Agustus 2026.",
         )
     elif spec["workflow"]:
         journals = JournalEntry.objects.filter(source_metadata__workflow=spec["workflow"]).prefetch_related("lines")[:200]

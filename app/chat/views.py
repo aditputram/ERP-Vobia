@@ -26,6 +26,7 @@ from .push import send_web_push
 MENTION_PATTERN = re.compile(r"(?<!\w)@([\w.-]{1,150})")
 PUSH_ENDPOINT_HOSTS = {
     "fcm.googleapis.com",
+    "jmt17.google.com",
     "updates.push.services.mozilla.com",
     "web.push.apple.com",
 }
@@ -57,9 +58,10 @@ def push_subscribe(request):
         auth = keys["auth"].strip()
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return JsonResponse({"error": "Subscription browser tidak valid."}, status=400)
-    endpoint_host = urlsplit(endpoint).hostname or ""
+    endpoint_url = urlsplit(endpoint)
+    endpoint_host = endpoint_url.hostname or ""
     trusted_endpoint = endpoint_host in PUSH_ENDPOINT_HOSTS or endpoint_host.endswith(".notify.windows.com")
-    if not trusted_endpoint or len(endpoint) > 2048 or not p256dh or not auth:
+    if endpoint_url.scheme != "https" or not trusted_endpoint or len(endpoint) > 2048 or not p256dh or not auth:
         return JsonResponse({"error": "Subscription browser tidak valid."}, status=400)
     if len(p256dh) > 255 or len(auth) > 255:
         return JsonResponse({"error": "Kunci subscription tidak valid."}, status=400)

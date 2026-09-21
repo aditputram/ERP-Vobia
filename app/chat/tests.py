@@ -253,6 +253,26 @@ class ChatTests(TestCase):
         self.assertEqual(response.json(), {"subscribed": False})
         self.assertFalse(PushSubscription.objects.filter(pk=subscription.pk).exists())
 
+        response = self.client.post(
+            reverse("chat:push_subscribe"),
+            data={
+                "endpoint": "https://jmt17.google.com/fcm/send/browser-subscription",
+                "keys": {"p256dh": "browser-key", "auth": "browser-auth"},
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(PushSubscription.objects.filter(user=self.rnd_peer).exists())
+        response = self.client.post(
+            reverse("chat:push_subscribe"),
+            data={
+                "endpoint": "http://jmt17.google.com/fcm/send/insecure",
+                "keys": {"p256dh": "browser-key", "auth": "browser-auth"},
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
     @override_settings(WEB_PUSH_VAPID_PRIVATE_KEY="private-test-key")
     @patch("chat.push.webpush")
     def test_pushes_personal_chat_and_group_mentions_only(self, webpush_mock):

@@ -349,7 +349,20 @@ def feature(request, slug):
         "data_note": "Flow input dan approval akan mengikuti detail kerja tim Finance sebelum diaktifkan.",
     }
 
-    if spec["workflow"]:
+    if slug in {"sales-invoice", "sales-invoice-list"}:
+        from sales.models import SalesOrder
+
+        orders = SalesOrder.objects.annotate(
+            gross=Sum("lines__total_gross_sales", filter=Q(lines__is_counted=True)),
+            net=Sum("lines__total_net_sales", filter=Q(lines__is_counted=True)),
+        )[:200]
+        context.update(
+            columns=("Tanggal", "Source", "No. Pesanan", "Status", "Gross", "Net"),
+            rows=[(row.order_date, row.display_source, row.order_number, row.current_status, row.gross or 0, row.net or 0) for row in orders],
+            metrics=(("Invoice/order", SalesOrder.objects.count()),),
+            data_note="Menggunakan transaksi canonical dari modul Sales. Posting jurnal Finance akan diaktifkan terpisah sesuai cutover 31 Agustus 2026.",
+        )
+    elif spec["workflow"]:
         journals = JournalEntry.objects.filter(source_metadata__workflow=spec["workflow"]).prefetch_related("lines")[:200]
         context.update(
             columns=("Tanggal", "No. Jurnal", "Keterangan", "Nilai", "Status"),
@@ -399,19 +412,6 @@ def feature(request, slug):
                 metrics=(("Total SKU", SKU.objects.count()),),
                 data_note="Menggunakan Bank Data canonical; perubahan master tetap dilakukan dari Master Data.",
             )
-    elif slug in {"sales-invoice", "sales-invoice-list"}:
-        from sales.models import SalesOrder
-
-        orders = SalesOrder.objects.annotate(
-            gross=Sum("lines__total_gross_sales", filter=Q(lines__is_counted=True)),
-            net=Sum("lines__total_net_sales", filter=Q(lines__is_counted=True)),
-        )[:200]
-        context.update(
-            columns=("Tanggal", "Source", "No. Pesanan", "Status", "Gross", "Net"),
-            rows=[(row.order_date, row.display_source, row.order_number, row.current_status, row.gross or 0, row.net or 0) for row in orders],
-            metrics=(("Invoice/order", SalesOrder.objects.count()),),
-            data_note="Daftar awal memakai canonical Sales order. Nomor invoice Finance dan jurnal piutang belum dibuat otomatis.",
-        )
     elif slug in {"sales-return", "sales-return-per-item"}:
         from sales.models import SalesOrderLine
 

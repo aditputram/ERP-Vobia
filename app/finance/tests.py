@@ -1,4 +1,5 @@
-from datetime import date
+import uuid
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from openpyxl import Workbook
 
 from audit.models import AuditEvent
@@ -151,6 +153,42 @@ class FinanceJournalTests(TestCase):
         for slug in FEATURES:
             with self.subTest(slug=slug):
                 self.assertEqual(self.client.get(reverse("finance:feature", args=[slug])).status_code, 200)
+
+    def test_sales_invoice_uses_canonical_sales_transactions(self):
+        from sales.models import SalesOrder, SalesOrderLine
+
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="FINANCE-SALES-001",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 10, 10, 0)),
+            order_date=date(2026, 9, 10),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku_code_snapshot="FINANCE-SKU-001",
+            product_name_snapshot="Finance Sales Product",
+            quantity=2,
+            net_unit_price=Decimal("90000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("200000"),
+            total_net_sales=Decimal("180000"),
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("finance:feature", args=["sales-invoice"]))
+
+        self.assertEqual(response.context["metrics"], (("Invoice/order", 1),))
+        self.assertContains(response, "FINANCE-SALES-001")
+        self.assertContains(response, "Shopee")
+        self.assertContains(response, "200000")
+        self.assertContains(response, "180000")
+        self.assertNotContains(response, "Buat Sales Invoice")
 
     def test_finance_workspace_respects_exact_tab_permission(self):
         user = get_user_model().objects.create_user(

@@ -989,7 +989,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .chat-popup::backdrop { background: rgba(18, 19, 16, .38); backdrop-filter: blur(2px); }
 .chat-popup > header { display: flex; align-items: center; justify-content: space-between; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line); }
 .chat-popup > header strong { font-size: 16px; }
+.chat-popup > header .chat-popup-actions { display: flex; align-items: center; gap: 8px; }
 .chat-popup > header button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 50%; color: var(--ink); background: #f1f1eb; font-size: 20px; cursor: pointer; }
+.chat-popup > header .chat-push-button { display: block; width: auto; height: 30px; padding: 0 10px; border-radius: 8px; color: #4f6300; background: #eef7d4; font-size: 10px; font-weight: 750; white-space: nowrap; }
+.chat-popup > header .chat-push-button.is-active { color: #536b00; background: #f4f8e9; }
+.chat-popup > header .chat-push-button:disabled { cursor: default; }
 .chat-popup iframe { width: 100%; height: 100%; border: 0; background: #f8f8f4; }
 .user-access-form { display: grid; gap: 24px; }
 .user-identity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }

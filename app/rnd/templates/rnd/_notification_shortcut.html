@@ -16,7 +16,6 @@
     <div class="rnd-notification-toolbar">
         <span><strong data-rnd-unread-copy>{{ rnd_notification_unread_count }}</strong> belum dibaca</span>
         <div class="rnd-notification-actions">
-            <button type="button" data-push-enable data-config-url="{% url 'chat:push_config' %}" data-subscribe-url="{% url 'chat:push_subscribe' %}">Aktifkan notif laptop</button>
             <form method="post" action="{% url 'rnd:notifications_mark_all_read' %}" data-rnd-mark-all{% if not rnd_notification_unread_count %} hidden{% endif %}>
                 {% csrf_token %}
                 <button type="submit">Tandai semua dibaca</button>
@@ -90,83 +89,5 @@
         popup.querySelector('[data-rnd-unread-copy]').textContent = '0';
         form.hidden = true;
     });
-})();
-</script>
-<script>
-(() => {
-    const button = document.querySelector('[data-push-enable]');
-    if (!button) return;
-    const csrfToken = document.querySelector('[data-rnd-mark-all] input[name="csrfmiddlewaretoken"]')?.value;
-    const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
-    const decodeKey = value => {
-        const padding = '='.repeat((4 - value.length % 4) % 4);
-        const raw = atob((value + padding).replace(/-/g, '+').replace(/_/g, '/'));
-        return Uint8Array.from([...raw].map(character => character.charCodeAt(0)));
-    };
-    const setActive = () => {
-        button.textContent = 'Notif laptop aktif';
-        button.classList.add('is-active');
-        button.disabled = true;
-    };
-    const subscribe = async requestPermission => {
-        if (!supported) {
-            button.textContent = 'Browser belum mendukung';
-            button.disabled = true;
-            return;
-        }
-        if (requestPermission && Notification.permission === 'default') {
-            await Notification.requestPermission();
-        }
-        if (Notification.permission !== 'granted') {
-            button.textContent = Notification.permission === 'denied' ? 'Notif laptop diblokir' : 'Aktifkan notif laptop';
-            return;
-        }
-        button.disabled = true;
-        button.textContent = 'Mengaktifkan…';
-        try {
-            const configResponse = await fetch(button.dataset.configUrl, {headers: {'X-Requested-With': 'XMLHttpRequest'}});
-            const config = await configResponse.json();
-            if (!config.enabled) throw new Error('Web Push belum dikonfigurasi.');
-            const registration = await navigator.serviceWorker.register('/service-worker.js');
-            const serverKey = decodeKey(config.public_key);
-            let subscription = await registration.pushManager.getSubscription();
-            const currentKey = subscription?.options?.applicationServerKey;
-            if (subscription && currentKey) {
-                const currentBytes = new Uint8Array(currentKey);
-                const sameKey = currentBytes.length === serverKey.length && currentBytes.every((value, index) => value === serverKey[index]);
-                if (!sameKey) {
-                    await subscription.unsubscribe();
-                    subscription = null;
-                }
-            }
-            if (!subscription) {
-                subscription = await registration.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: serverKey,
-                });
-            }
-            const response = await fetch(button.dataset.subscribeUrl, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
-                body: JSON.stringify(subscription.toJSON()),
-            });
-            if (!response.ok) throw new Error('Subscription gagal disimpan.');
-            setActive();
-        } catch (error) {
-            button.disabled = false;
-            button.textContent = 'Coba aktifkan lagi';
-            console.warn(error);
-        }
-    };
-    if (!supported) {
-        button.textContent = 'Browser belum mendukung';
-        button.disabled = true;
-    } else if (Notification.permission === 'denied') {
-        button.textContent = 'Notif laptop diblokir';
-        button.disabled = true;
-    } else if (Notification.permission === 'granted') {
-        subscribe(false);
-    }
-    button.addEventListener('click', () => subscribe(true));
 })();
 </script>

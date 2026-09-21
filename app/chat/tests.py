@@ -67,6 +67,16 @@ class ChatTests(TestCase):
         self.assertContains(response, "personalMenu.contains")
         self.assertContains(response, "pointerdown")
 
+    def test_laptop_notification_activation_is_in_message_popup_for_all_users(self):
+        for user in (self.marketing, self.rnd):
+            self.client.force_login(user)
+            response = self.client.get(reverse("dashboard:index"))
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, 'class="chat-push-button"')
+            self.assertEqual(response.content.count(b"type=\"button\" data-push-enable"), 1)
+            self.assertContains(response, 'data-config-url="/messages/push/config/"')
+            self.assertContains(response, 'data-subscribe-url="/messages/push/subscribe/"')
+
     def test_recently_active_conversation_moves_to_top(self):
         first = ChatThread.objects.create(
             kind=ChatThread.Kind.DIRECT,

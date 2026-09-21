@@ -2092,6 +2092,7 @@ class MerchandisingReportViewTests(TestCase):
         self.assertContains(response, "Angka edit terakhir tetap tersimpan sebagai Draft")
         self.assertContains(response, self.sku.sku)
         self.assertContains(response, "data-scenario-feedback")
+        self.assertContains(response, "data-scenario-feedback-bottom")
         self.assertContains(response, "Approval belum berhasil")
 
     def test_cancel_preview_discards_unsaved_builder_result(self):

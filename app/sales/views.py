@@ -1407,8 +1407,8 @@ def _dashboard_period_trend(lines, start, end, grain):
     return rows
 
 
-def _potential_sales_rows(cutoff_date):
-    """Estimate demand through the latest data cutoff for physically sold-out products."""
+def _potential_sales_rows(cutoff_date, selected_month):
+    """Estimate monthly demand through the cutoff for physically sold-out products."""
     if not cutoff_date or cutoff_date <= CUTOVER_DATE:
         return []
     tracking_start = CUTOVER_DATE + timedelta(days=1)
@@ -1523,15 +1523,21 @@ def _potential_sales_rows(cutoff_date):
         actual_qty = Decimal(actual["actual_qty"] or 0)
         if selling_days <= 0 or actual_qty <= 0:
             continue
-        potential_qty = (
-            actual_qty / Decimal(selling_days) * Decimal((cutoff_date - selling_start).days + 1)
+        lost_start = max(selected_month, sold_out_date + timedelta(days=1))
+        lost_days = max((cutoff_date - lost_start).days + 1, 0)
+        if not lost_days:
+            continue
+        monthly_actual_qty = actual_qty if actual["sales_month"] == selected_month else Decimal("0")
+        lost_qty = (
+            actual_qty / Decimal(selling_days) * Decimal(lost_days)
         ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-        lost_qty = max(potential_qty - actual_qty, Decimal("0"))
+        potential_qty = monthly_actual_qty + lost_qty
         actual_gross = Decimal(actual["actual_gross"] or 0)
-        potential_gross = (
-            actual_gross / actual_qty * potential_qty
+        monthly_actual_gross = actual_gross if actual["sales_month"] == selected_month else Decimal("0")
+        lost_gross = (
+            actual_gross / Decimal(selling_days) * Decimal(lost_days)
         ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-        lost_gross = max(potential_gross - actual_gross, Decimal("0"))
+        potential_gross = monthly_actual_gross + lost_gross
         if lost_qty <= 0:
             continue
         rows.append({
@@ -1539,73 +1545,15 @@ def _potential_sales_rows(cutoff_date):
             "article": actual["article"] or actual["product_name"],
             "selling_start": selling_start,
             "selling_days": selling_days,
+            "selling_reference": actual["sales_month"] != selected_month,
+            "actual_qty": monthly_actual_qty,
+            "actual_gross": monthly_actual_gross,
             "potential_qty": potential_qty,
             "lost_qty": lost_qty,
             "potential_gross": potential_gross,
             "lost_gross": lost_gross,
         })
     return sorted(rows, key=lambda row: (-row["lost_qty"], row["article"].casefold()))
-
-
-def _potential_lost_monthly_rows(potential_rows, cutoff_date):
-    if not cutoff_date or cutoff_date <= CUTOVER_DATE:
-        return []
-    first_month = (CUTOVER_DATE + timedelta(days=1)).replace(day=1)
-    cutoff_month = cutoff_date.replace(day=1)
-    monthly = {}
-    current = first_month
-    while current <= cutoff_month:
-        monthly[current] = {
-            "month": current,
-            "lost_qty": Decimal("0"),
-            "lost_gross": Decimal("0"),
-            "products": {},
-        }
-        current = _shift_month(current, 1)
-
-    for row in potential_rows:
-        lost_start = row["sold_out_date"] + timedelta(days=1)
-        daily_qty = row["actual_qty"] / Decimal(row["selling_days"])
-        daily_gross = row["actual_gross"] / Decimal(row["selling_days"])
-        current = lost_start.replace(day=1)
-        while current <= cutoff_month:
-            period_start = max(current, lost_start)
-            period_end = min(_shift_month(current, 1) - timedelta(days=1), cutoff_date)
-            if period_start <= period_end:
-                lost_days = Decimal((period_end - period_start).days + 1)
-                product = monthly[current]["products"].setdefault(row["product_id"], {
-                    "article": row["article"],
-                    "lost_qty": Decimal("0"),
-                    "lost_gross": Decimal("0"),
-                })
-                product["lost_qty"] += daily_qty * lost_days
-                product["lost_gross"] += daily_gross * lost_days
-            current = _shift_month(current, 1)
-
-    rows = list(monthly.values())
-    for row in rows:
-        products = list(row["products"].values())
-        for product in products:
-            product["lost_qty"] = product["lost_qty"].quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-            product["lost_gross"] = product["lost_gross"].quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-        row["products"] = sorted(
-            products, key=lambda product: (-product["lost_qty"], product["article"].casefold())
-        )
-        row["lost_qty"] = sum((product["lost_qty"] for product in products), Decimal("0"))
-        row["lost_gross"] = sum((product["lost_gross"] for product in products), Decimal("0"))
-    if rows:
-        qty_delta = sum(
-            (row["lost_qty"] for row in potential_rows), Decimal("0")
-        ) - sum((row["lost_qty"] for row in rows), Decimal("0"))
-        gross_delta = sum(
-            (row["lost_gross"] for row in potential_rows), Decimal("0")
-        ) - sum((row["lost_gross"] for row in rows), Decimal("0"))
-        rows[-1]["lost_qty"] += qty_delta
-        rows[-1]["lost_gross"] += gross_delta
-        if rows[-1]["products"]:
-            rows[-1]["products"][0]["lost_qty"] += qty_delta
-            rows[-1]["products"][0]["lost_gross"] += gross_delta
-    return rows
 
 
 @login_required
@@ -1666,10 +1614,30 @@ def dashboard(request):
         monthly_end,
     )
     monthly_period_label = f"{date_format(monthly_start, 'M Y')} – {date_format(monthly_end, 'M Y')}"
-    potential_cutoff = min(end, latest) if start <= latest else None
-    potential_sales_rows = _potential_sales_rows(potential_cutoff)
-    potential_lost_monthly_rows = _potential_lost_monthly_rows(
-        potential_sales_rows, potential_cutoff
+    potential_month_options = []
+    potential_month = (CUTOVER_DATE + timedelta(days=1)).replace(day=1)
+    while potential_month <= latest.replace(day=1):
+        potential_month_options.append({
+            "value": potential_month.strftime("%Y-%m"),
+            "label": date_format(potential_month, "F Y"),
+        })
+        potential_month = _shift_month(potential_month, 1)
+    potential_month_value = request.GET.get(
+        "potential_month", latest.strftime("%Y-%m")
+    )
+    if potential_month_value not in {item["value"] for item in potential_month_options}:
+        potential_month_value = potential_month_options[-1]["value"] if potential_month_options else ""
+    selected_potential_month = (
+        datetime.strptime(potential_month_value, "%Y-%m").date()
+        if potential_month_value else None
+    )
+    potential_cutoff = (
+        min(latest, _shift_month(selected_potential_month, 1) - timedelta(days=1))
+        if selected_potential_month else None
+    )
+    potential_sales_rows = (
+        _potential_sales_rows(potential_cutoff, selected_potential_month)
+        if selected_potential_month else []
     )
     return render(request, "sales/dashboard.html", {
         "date_from": start,
@@ -1689,9 +1657,11 @@ def dashboard(request):
         "mtd_cutoff_day": mtd_cutoff_day,
         "mtd_cutoff_days": range(1, latest.day + 1),
         "monthly_period_label": monthly_period_label,
+        "potential_month_options": potential_month_options,
+        "potential_month_value": potential_month_value,
+        "selected_potential_month": selected_potential_month,
         "potential_sales_cutoff": potential_cutoff,
         "potential_sales_rows": potential_sales_rows,
-        "potential_lost_monthly_rows": potential_lost_monthly_rows,
         "potential_sales_total": sum(
             (row["potential_qty"] for row in potential_sales_rows), Decimal("0")
         ),

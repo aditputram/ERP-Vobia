@@ -1161,38 +1161,29 @@ class SalesReportRouteTests(TestCase):
         response = self.client.get(reverse("sales:dashboard"))
 
         row = response.context["potential_sales_rows"][0]
-        self.assertEqual(row["actual_qty"], Decimal("100"))
+        self.assertEqual(response.context["potential_month_value"], "2026-09")
+        self.assertEqual(row["actual_qty"], Decimal("0"))
         self.assertEqual(row["selling_days"], 20)
-        self.assertEqual(row["potential_qty"], Decimal("255"))
-        self.assertEqual(row["lost_qty"], Decimal("155"))
-        self.assertEqual(row["potential_gross"], Decimal("25500000"))
-        self.assertEqual(row["lost_gross"], Decimal("15500000"))
-        self.assertContains(response, "Potential 255 pcs · Rp 25.500.000")
-        self.assertContains(response, "Lost 155 pcs · Rp 15.500.000")
-        self.assertEqual(response.context["potential_lost_monthly_rows"], [
-            {
-                "month": date(2026, 8, 1),
-                "lost_qty": Decimal("55"),
-                "lost_gross": Decimal("5500000"),
-                "products": [{
-                    "article": product.name,
-                    "lost_qty": Decimal("55"),
-                    "lost_gross": Decimal("5500000"),
-                }],
-            },
-            {
-                "month": date(2026, 9, 1),
-                "lost_qty": Decimal("100"),
-                "lost_gross": Decimal("10000000"),
-                "products": [{
-                    "article": product.name,
-                    "lost_qty": Decimal("100"),
-                    "lost_gross": Decimal("10000000"),
-                }],
-            },
-        ])
-        self.assertContains(response, "Potential Lost Sales per Bulan")
-        self.assertContains(response, 'class="potential-month-toggle"', count=2)
+        self.assertTrue(row["selling_reference"])
+        self.assertEqual(row["potential_qty"], Decimal("100"))
+        self.assertEqual(row["lost_qty"], Decimal("100"))
+        self.assertEqual(row["potential_gross"], Decimal("10000000"))
+        self.assertEqual(row["lost_gross"], Decimal("10000000"))
+        self.assertContains(response, "Potential 100 pcs · Rp 10.000.000")
+        self.assertContains(response, "Lost 100 pcs · Rp 10.000.000")
+        self.assertContains(response, 'name="potential_month"')
+        self.assertContains(response, "Acuan periode sebelumnya")
+        self.assertNotContains(response, "Potential Lost Sales per Bulan")
+
+        august = self.client.get(reverse("sales:dashboard"), {"potential_month": "2026-08"})
+        august_row = august.context["potential_sales_rows"][0]
+        self.assertEqual(august.context["potential_month_value"], "2026-08")
+        self.assertEqual(august_row["actual_qty"], Decimal("100"))
+        self.assertFalse(august_row["selling_reference"])
+        self.assertEqual(august_row["potential_qty"], Decimal("155"))
+        self.assertEqual(august_row["lost_qty"], Decimal("55"))
+        self.assertEqual(august_row["potential_gross"], Decimal("15500000"))
+        self.assertEqual(august_row["lost_gross"], Decimal("5500000"))
 
         InventoryMovement.objects.create(
             movement_key="INCOMING|POTENTIAL-SEP-01",

@@ -6,7 +6,7 @@
     <header>
         <strong>Messages</strong>
         <div class="chat-popup-actions">
-            <button class="chat-push-button" type="button" data-push-enable data-config-url="{% url 'chat:push_config' %}" data-subscribe-url="{% url 'chat:push_subscribe' %}" data-unsubscribe-url="{% url 'chat:push_unsubscribe' %}">Aktifkan notif</button>
+            <button class="chat-push-button" type="button" data-push-enable data-config-url="{% url 'chat:push_config' %}" data-subscribe-url="{% url 'chat:push_subscribe' %}" data-unsubscribe-url="{% url 'chat:push_unsubscribe' %}">Aktifkan notifikasi</button>
             <button type="button" aria-label="Tutup Messages" data-chat-popup-close>×</button>
         </div>
     </header>
@@ -138,7 +138,7 @@
     };
     const setInactive = () => {
         currentSubscription = null;
-        button.textContent = 'Aktifkan notif';
+        button.textContent = 'Aktifkan notifikasi';
         button.classList.remove('is-active');
         button.disabled = false;
     };
@@ -152,7 +152,7 @@
             await Notification.requestPermission();
         }
         if (Notification.permission !== 'granted') {
-            button.textContent = Notification.permission === 'denied' ? 'Notif laptop diblokir' : 'Aktifkan notif';
+            button.textContent = Notification.permission === 'denied' ? 'Notif laptop diblokir' : 'Aktifkan notifikasi';
             return;
         }
         button.disabled = true;

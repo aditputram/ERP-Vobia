@@ -77,6 +77,7 @@ class ChatTests(TestCase):
             self.assertContains(response, 'data-config-url="/messages/push/config/"')
             self.assertContains(response, 'data-subscribe-url="/messages/push/subscribe/"')
             self.assertContains(response, 'data-unsubscribe-url="/messages/push/unsubscribe/"')
+            self.assertContains(response, '>Aktifkan notifikasi</button>')
             self.assertContains(response, "Nonaktifkan notifikasi")
             self.assertContains(response, "registration?.pushManager.getSubscription()")
 

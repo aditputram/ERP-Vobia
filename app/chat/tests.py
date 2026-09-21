@@ -76,6 +76,9 @@ class ChatTests(TestCase):
             self.assertEqual(response.content.count(b"type=\"button\" data-push-enable"), 1)
             self.assertContains(response, 'data-config-url="/messages/push/config/"')
             self.assertContains(response, 'data-subscribe-url="/messages/push/subscribe/"')
+            self.assertContains(response, 'data-unsubscribe-url="/messages/push/unsubscribe/"')
+            self.assertContains(response, "Nonaktifkan notifikasi")
+            self.assertContains(response, "registration?.pushManager.getSubscription()")
 
     def test_recently_active_conversation_moves_to_top(self):
         first = ChatThread.objects.create(
@@ -242,6 +245,13 @@ class ChatTests(TestCase):
         )
         subscription.refresh_from_db()
         self.assertEqual(subscription.user, self.rnd_peer)
+        response = self.client.post(
+            reverse("chat:push_unsubscribe"),
+            data={"endpoint": "https://fcm.googleapis.com/subscription-1"},
+            content_type="application/json",
+        )
+        self.assertEqual(response.json(), {"subscribed": False})
+        self.assertFalse(PushSubscription.objects.filter(pk=subscription.pk).exists())
 
     @override_settings(WEB_PUSH_VAPID_PRIVATE_KEY="private-test-key")
     @patch("chat.push.webpush")

@@ -6,7 +6,7 @@
     <header>
         <strong>Messages</strong>
         <div class="chat-popup-actions">
-            <button class="chat-push-button" type="button" data-push-enable data-config-url="{% url 'chat:push_config' %}" data-subscribe-url="{% url 'chat:push_subscribe' %}">Aktifkan notif</button>
+            <button class="chat-push-button" type="button" data-push-enable data-config-url="{% url 'chat:push_config' %}" data-subscribe-url="{% url 'chat:push_subscribe' %}" data-unsubscribe-url="{% url 'chat:push_unsubscribe' %}">Aktifkan notif</button>
             <button type="button" aria-label="Tutup Messages" data-chat-popup-close>×</button>
         </div>
     </header>
@@ -124,15 +124,23 @@
     if (!button) return;
     const csrfToken = popup.querySelector('input[name="csrfmiddlewaretoken"]')?.value;
     const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    let currentSubscription = null;
     const decodeKey = value => {
         const padding = '='.repeat((4 - value.length % 4) % 4);
         const raw = atob((value + padding).replace(/-/g, '+').replace(/_/g, '/'));
         return Uint8Array.from([...raw].map(character => character.charCodeAt(0)));
     };
-    const setActive = () => {
-        button.textContent = 'Notif laptop aktif';
+    const setActive = subscription => {
+        currentSubscription = subscription;
+        button.textContent = 'Nonaktifkan notifikasi';
         button.classList.add('is-active');
-        button.disabled = true;
+        button.disabled = false;
+    };
+    const setInactive = () => {
+        currentSubscription = null;
+        button.textContent = 'Aktifkan notif';
+        button.classList.remove('is-active');
+        button.disabled = false;
     };
     const subscribe = async requestPermission => {
         if (!supported) {
@@ -177,10 +185,29 @@
                 body: JSON.stringify(subscription.toJSON()),
             });
             if (!response.ok) throw new Error('Subscription gagal disimpan.');
-            setActive();
+            setActive(subscription);
         } catch (error) {
             button.disabled = false;
             button.textContent = 'Coba aktifkan lagi';
+            console.warn(error);
+        }
+    };
+    const unsubscribe = async () => {
+        if (!currentSubscription) return;
+        button.disabled = true;
+        button.textContent = 'Menonaktifkan…';
+        try {
+            await currentSubscription.unsubscribe();
+            const response = await fetch(button.dataset.unsubscribeUrl, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+                body: JSON.stringify({endpoint: currentSubscription.endpoint}),
+            });
+            if (!response.ok) throw new Error('Subscription gagal dihapus.');
+            setInactive();
+        } catch (error) {
+            button.disabled = false;
+            button.textContent = 'Coba nonaktifkan lagi';
             console.warn(error);
         }
     };
@@ -191,8 +218,12 @@
         button.textContent = 'Notif laptop diblokir';
         button.disabled = true;
     } else if (Notification.permission === 'granted') {
-        subscribe(false);
+        navigator.serviceWorker.getRegistration('/').then(registration =>
+            registration?.pushManager.getSubscription()
+        ).then(subscription => {
+            if (subscription) subscribe(false);
+        }).catch(console.warn);
     }
-    button.addEventListener('click', () => subscribe(true));
+    button.addEventListener('click', () => button.classList.contains('is-active') ? unsubscribe() : subscribe(true));
 })();
 </script>

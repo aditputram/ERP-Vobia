@@ -1174,14 +1174,25 @@ class SalesReportRouteTests(TestCase):
                 "month": date(2026, 8, 1),
                 "lost_qty": Decimal("55"),
                 "lost_gross": Decimal("5500000"),
+                "products": [{
+                    "article": product.name,
+                    "lost_qty": Decimal("55"),
+                    "lost_gross": Decimal("5500000"),
+                }],
             },
             {
                 "month": date(2026, 9, 1),
                 "lost_qty": Decimal("100"),
                 "lost_gross": Decimal("10000000"),
+                "products": [{
+                    "article": product.name,
+                    "lost_qty": Decimal("100"),
+                    "lost_gross": Decimal("10000000"),
+                }],
             },
         ])
         self.assertContains(response, "Potential Lost Sales per Bulan")
+        self.assertContains(response, 'class="potential-month-toggle"', count=2)
 
         InventoryMovement.objects.create(
             movement_key="INCOMING|POTENTIAL-SEP-01",

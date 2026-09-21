@@ -477,6 +477,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .potential-lost-monthly { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .potential-lost-monthly h3 { margin: 3px 0 2px; font-size: 15px; }
 .potential-lost-monthly > small { display: block; margin-bottom: 10px; color: var(--muted); }
+.potential-month-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.potential-month-toggle span { font-size: 14px; transition: transform .15s ease; }
+.potential-month-toggle[aria-expanded="true"] span { transform: rotate(180deg); }
+.potential-month-products > td { padding: 0 18px 12px !important; background: #fafaf7; }
+.potential-month-products table { margin: 0; background: white; }
 .scenario-row-actions { display: flex; align-items: center; gap: 7px; }
 .scenario-row-actions form { margin: 0; }
 .preview-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }

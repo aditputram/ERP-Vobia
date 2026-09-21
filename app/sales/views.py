@@ -1559,6 +1559,7 @@ def _potential_lost_monthly_rows(potential_rows, cutoff_date):
             "month": current,
             "lost_qty": Decimal("0"),
             "lost_gross": Decimal("0"),
+            "products": {},
         }
         current = _shift_month(current, 1)
 
@@ -1572,21 +1573,38 @@ def _potential_lost_monthly_rows(potential_rows, cutoff_date):
             period_end = min(_shift_month(current, 1) - timedelta(days=1), cutoff_date)
             if period_start <= period_end:
                 lost_days = Decimal((period_end - period_start).days + 1)
-                monthly[current]["lost_qty"] += daily_qty * lost_days
-                monthly[current]["lost_gross"] += daily_gross * lost_days
+                product = monthly[current]["products"].setdefault(row["product_id"], {
+                    "article": row["article"],
+                    "lost_qty": Decimal("0"),
+                    "lost_gross": Decimal("0"),
+                })
+                product["lost_qty"] += daily_qty * lost_days
+                product["lost_gross"] += daily_gross * lost_days
             current = _shift_month(current, 1)
 
     rows = list(monthly.values())
     for row in rows:
-        row["lost_qty"] = row["lost_qty"].quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-        row["lost_gross"] = row["lost_gross"].quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        products = list(row["products"].values())
+        for product in products:
+            product["lost_qty"] = product["lost_qty"].quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            product["lost_gross"] = product["lost_gross"].quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        row["products"] = sorted(
+            products, key=lambda product: (-product["lost_qty"], product["article"].casefold())
+        )
+        row["lost_qty"] = sum((product["lost_qty"] for product in products), Decimal("0"))
+        row["lost_gross"] = sum((product["lost_gross"] for product in products), Decimal("0"))
     if rows:
-        rows[-1]["lost_qty"] += sum(
+        qty_delta = sum(
             (row["lost_qty"] for row in potential_rows), Decimal("0")
         ) - sum((row["lost_qty"] for row in rows), Decimal("0"))
-        rows[-1]["lost_gross"] += sum(
+        gross_delta = sum(
             (row["lost_gross"] for row in potential_rows), Decimal("0")
         ) - sum((row["lost_gross"] for row in rows), Decimal("0"))
+        rows[-1]["lost_qty"] += qty_delta
+        rows[-1]["lost_gross"] += gross_delta
+        if rows[-1]["products"]:
+            rows[-1]["products"][0]["lost_qty"] += qty_delta
+            rows[-1]["products"][0]["lost_gross"] += gross_delta
     return rows
 
 

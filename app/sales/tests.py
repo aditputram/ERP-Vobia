@@ -1086,7 +1086,7 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(too_high.context["mtd_cutoff_day"], 15)
         self.assertEqual(invalid.context["mtd_cutoff_day"], 15)
 
-    def test_dashboard_shows_product_potential_sales_after_stock_sells_out(self):
+    def test_dashboard_carries_previous_month_stockout_through_latest_cutoff(self):
         product, sku = self._planning_product("POTENTIAL-SALES")
         FIFOOpeningSnapshot.objects.create(
             sku=sku,
@@ -1098,9 +1098,9 @@ class SalesReportRouteTests(TestCase):
         order = SalesOrder.objects.create(
             source=SalesOrder.Source.SHOPEE,
             source_label="Shopee",
-            order_number="POTENTIAL-SEP-10",
-            order_datetime=timezone.make_aware(datetime(2026, 9, 10, 10, 0)),
-            order_date=date(2026, 9, 10),
+            order_number="POTENTIAL-AUG-20",
+            order_datetime=timezone.make_aware(datetime(2026, 8, 20, 10, 0)),
+            order_date=date(2026, 8, 20),
             current_status="Selesai",
             source_status="Selesai",
             is_final=True,
@@ -1122,8 +1122,8 @@ class SalesReportRouteTests(TestCase):
             gpm=Decimal("4000000"),
         )
         InventoryMovement.objects.create(
-            movement_key="SALES|POTENTIAL-SEP-10",
-            movement_date=date(2026, 9, 10),
+            movement_key="SALES|POTENTIAL-AUG-20",
+            movement_date=date(2026, 8, 20),
             movement_type=InventoryMovement.MovementType.SALES_OUT,
             direction=InventoryMovement.Direction.OUT,
             sku=sku,
@@ -1133,18 +1133,42 @@ class SalesReportRouteTests(TestCase):
             sales_line=line,
             posted_by=self.user,
         )
+        cutoff_order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="POTENTIAL-CUTOFF-SEP-20",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 20, 10, 0)),
+            order_date=date(2026, 9, 20),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=cutoff_order,
+            sku_code_snapshot="UNMAPPED-CUTOFF",
+            product_name_snapshot="Unmapped cutoff marker",
+            quantity=1,
+            net_unit_price=Decimal("1"),
+            retail_price_snapshot=Decimal("1"),
+            total_gross_sales=Decimal("1"),
+            total_net_sales=Decimal("1"),
+            total_cogs=Decimal("0"),
+            gpm=Decimal("1"),
+        )
 
         response = self.client.get(reverse("sales:dashboard"))
 
         row = response.context["potential_sales_rows"][0]
         self.assertEqual(row["actual_qty"], Decimal("100"))
-        self.assertEqual(row["selling_days"], 10)
-        self.assertEqual(row["potential_qty"], Decimal("300"))
-        self.assertEqual(row["lost_qty"], Decimal("200"))
-        self.assertEqual(row["potential_gross"], Decimal("30000000"))
-        self.assertEqual(row["lost_gross"], Decimal("20000000"))
-        self.assertContains(response, "Potential 300 pcs · Rp 30.000.000")
-        self.assertContains(response, "Lost 200 pcs · Rp 20.000.000")
+        self.assertEqual(row["selling_days"], 20)
+        self.assertEqual(row["potential_qty"], Decimal("255"))
+        self.assertEqual(row["lost_qty"], Decimal("155"))
+        self.assertEqual(row["potential_gross"], Decimal("25500000"))
+        self.assertEqual(row["lost_gross"], Decimal("15500000"))
+        self.assertContains(response, "Potential 255 pcs · Rp 25.500.000")
+        self.assertContains(response, "Lost 155 pcs · Rp 15.500.000")
 
         product.status = ProductStatus.objects.create(code="DISCONTINUE", name="Discontinue")
         product.save(update_fields=["status", "updated_at"])

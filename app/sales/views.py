@@ -1,4 +1,3 @@
-import calendar
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
@@ -1409,19 +1408,14 @@ def _dashboard_period_trend(lines, start, end, grain):
 
 
 def _potential_sales_rows(cutoff_date):
-    """Estimate full-month demand for products that are physically sold out."""
+    """Estimate demand through the latest data cutoff for physically sold-out products."""
     if not cutoff_date or cutoff_date <= CUTOVER_DATE:
         return []
-    month_start = cutoff_date.replace(day=1)
-    month_end = date(
-        cutoff_date.year,
-        cutoff_date.month,
-        calendar.monthrange(cutoff_date.year, cutoff_date.month)[1],
-    )
+    tracking_start = CUTOVER_DATE + timedelta(days=1)
     month_lines = SalesOrderLine.objects.filter(
         is_counted=True,
         sku__isnull=False,
-        order__order_date__range=(month_start, cutoff_date),
+        order__order_date__range=(tracking_start, cutoff_date),
     ).exclude(sku__product_variant__product__status__code__iexact="DISCONTINUE")
     actuals = list(
         month_lines.values(
@@ -1451,7 +1445,7 @@ def _potential_sales_rows(cutoff_date):
     inventory_days = list(
         InventoryMovement.objects.filter(
             sku__product_variant__product_id__in=product_ids,
-            movement_date__range=(month_start, cutoff_date),
+            movement_date__range=(tracking_start, cutoff_date),
         )
         .exclude(movement_type=InventoryMovement.MovementType.OPENING)
         .exclude(sales_line__order__affects_inventory=False)
@@ -1482,8 +1476,8 @@ def _potential_sales_rows(cutoff_date):
     }
     selling_contexts = _selling_contexts(
         skus,
-        cutoff_date.year,
-        cutoff_date.month,
+        tracking_start.year,
+        tracking_start.month,
         cutoff_date,
         first_sales,
     )
@@ -1494,7 +1488,6 @@ def _potential_sales_rows(cutoff_date):
             starts_by_product.setdefault(sku.product_variant.product_id, []).append(start_date)
 
     rows = []
-    month_days = Decimal(month_end.day)
     for actual in actuals:
         balances = balances_by_product.get(actual["product_id"], [])
         start_dates = starts_by_product.get(actual["product_id"], [])
@@ -1503,7 +1496,7 @@ def _potential_sales_rows(cutoff_date):
             not balances
             or any(balance != 0 for balance in balances)
             or not start_dates
-            or sold_out_date >= month_end
+            or sold_out_date >= cutoff_date
             or latest_inventory_date.get(actual["product_id"]) != sold_out_date
             or (actual["product_id"], sold_out_date) not in sales_out_days
         ):
@@ -1514,7 +1507,7 @@ def _potential_sales_rows(cutoff_date):
         if selling_days <= 0 or actual_qty <= 0:
             continue
         potential_qty = (
-            actual_qty / Decimal(selling_days) * month_days
+            actual_qty / Decimal(selling_days) * Decimal((cutoff_date - selling_start).days + 1)
         ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         lost_qty = max(potential_qty - actual_qty, Decimal("0"))
         actual_gross = Decimal(actual["actual_gross"] or 0)

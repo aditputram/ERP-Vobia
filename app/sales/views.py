@@ -1,5 +1,6 @@
+import calendar
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
 from urllib.parse import urlencode
 
@@ -20,12 +21,16 @@ from openpyxl import Workbook
 
 from audit.services import record_audit
 from accounts.access import module_level
+from inventory.models import InventoryMovement
+from inventory.services.fifo import CUTOVER_DATE
+from inventory.services.reporting import inventory_summary_rows
 from master_data.models import Category, MarketplaceProductMapping, Product, ProductStatus, SKU, Subcategory
 from merchandising.services.planning_activity import (
     filter_products_by_planning_activity,
     planning_activity_snapshot,
 )
 from merchandising.services.builder import historical_sales_qty_for_skus, official_values_for_skus
+from merchandising.services.official_projection import _selling_contexts
 from traffic.models import TrafficProductMetric
 
 from .forms import ManualSaleHeaderForm, ManualSaleLineFormSet
@@ -1403,6 +1408,127 @@ def _dashboard_period_trend(lines, start, end, grain):
     return rows
 
 
+def _potential_sales_rows(cutoff_date):
+    """Estimate full-month demand for products that are physically sold out."""
+    if not cutoff_date or cutoff_date <= CUTOVER_DATE:
+        return []
+    month_start = cutoff_date.replace(day=1)
+    month_end = date(
+        cutoff_date.year,
+        cutoff_date.month,
+        calendar.monthrange(cutoff_date.year, cutoff_date.month)[1],
+    )
+    month_lines = SalesOrderLine.objects.filter(
+        is_counted=True,
+        sku__isnull=False,
+        order__order_date__range=(month_start, cutoff_date),
+    )
+    actuals = list(
+        month_lines.values(
+            product_id=F("sku__product_variant__product_id"),
+            article=F("sku__product_variant__product__article"),
+            product_name=F("sku__product_variant__product__name"),
+        ).annotate(
+            actual_qty=Sum("quantity"),
+            sold_out_date=Max("order__order_date"),
+        )
+    )
+    if not actuals:
+        return []
+
+    product_ids = {row["product_id"] for row in actuals}
+    skus = list(
+        SKU.objects.filter(
+            is_active=True,
+            product_variant__product_id__in=product_ids,
+        ).select_related("product_variant__product__status")
+    )
+    balances_by_product = {}
+    for row in inventory_summary_rows(skus, as_of_date=cutoff_date):
+        product_id = row["sku"].product_variant.product_id
+        balances_by_product.setdefault(product_id, []).append(row["balance"])
+    inventory_days = list(
+        InventoryMovement.objects.filter(
+            sku__product_variant__product_id__in=product_ids,
+            movement_date__range=(month_start, cutoff_date),
+        )
+        .exclude(movement_type=InventoryMovement.MovementType.OPENING)
+        .exclude(sales_line__order__affects_inventory=False)
+        .values("sku__product_variant__product_id", "movement_date")
+        .annotate(
+            sales_out_qty=Sum(
+                "quantity",
+                filter=Q(movement_type=InventoryMovement.MovementType.SALES_OUT),
+            )
+        )
+    )
+    latest_inventory_date = {}
+    sales_out_days = set()
+    for row in inventory_days:
+        product_id = row["sku__product_variant__product_id"]
+        movement_date = row["movement_date"]
+        latest_inventory_date[product_id] = max(
+            latest_inventory_date.get(product_id, movement_date), movement_date
+        )
+        if row["sales_out_qty"]:
+            sales_out_days.add((product_id, movement_date))
+
+    first_sales = {
+        row["sku_id"]: row["first_sale_date"]
+        for row in month_lines.values("sku_id").annotate(
+            first_sale_date=Min("order__order_date")
+        )
+    }
+    selling_contexts = _selling_contexts(
+        skus,
+        cutoff_date.year,
+        cutoff_date.month,
+        cutoff_date,
+        first_sales,
+    )
+    starts_by_product = {}
+    for sku in skus:
+        start_date = selling_contexts.get(sku.id, {}).get("selling_start_date")
+        if start_date:
+            starts_by_product.setdefault(sku.product_variant.product_id, []).append(start_date)
+
+    rows = []
+    month_days = Decimal(month_end.day)
+    for actual in actuals:
+        balances = balances_by_product.get(actual["product_id"], [])
+        start_dates = starts_by_product.get(actual["product_id"], [])
+        sold_out_date = actual["sold_out_date"]
+        if (
+            not balances
+            or any(balance != 0 for balance in balances)
+            or not start_dates
+            or sold_out_date >= month_end
+            or latest_inventory_date.get(actual["product_id"]) != sold_out_date
+            or (actual["product_id"], sold_out_date) not in sales_out_days
+        ):
+            continue
+        selling_start = min(start_dates)
+        selling_days = (sold_out_date - selling_start).days + 1
+        actual_qty = Decimal(actual["actual_qty"] or 0)
+        if selling_days <= 0 or actual_qty <= 0:
+            continue
+        potential_qty = (
+            actual_qty / Decimal(selling_days) * month_days
+        ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        lost_qty = max(potential_qty - actual_qty, Decimal("0"))
+        if lost_qty <= 0:
+            continue
+        rows.append({
+            **actual,
+            "article": actual["article"] or actual["product_name"],
+            "selling_start": selling_start,
+            "selling_days": selling_days,
+            "potential_qty": potential_qty,
+            "lost_qty": lost_qty,
+        })
+    return sorted(rows, key=lambda row: (-row["lost_qty"], row["article"].casefold()))
+
+
 @login_required
 def dashboard(request):
     all_lines = SalesOrderLine.objects.filter(is_counted=True)
@@ -1461,6 +1587,8 @@ def dashboard(request):
         monthly_end,
     )
     monthly_period_label = f"{date_format(monthly_start, 'M Y')} – {date_format(monthly_end, 'M Y')}"
+    potential_cutoff = min(end, latest) if start <= latest else None
+    potential_sales_rows = _potential_sales_rows(potential_cutoff)
     return render(request, "sales/dashboard.html", {
         "date_from": start,
         "date_to": end,
@@ -1479,6 +1607,14 @@ def dashboard(request):
         "mtd_cutoff_day": mtd_cutoff_day,
         "mtd_cutoff_days": range(1, latest.day + 1),
         "monthly_period_label": monthly_period_label,
+        "potential_sales_cutoff": potential_cutoff,
+        "potential_sales_rows": potential_sales_rows,
+        "potential_sales_total": sum(
+            (row["potential_qty"] for row in potential_sales_rows), Decimal("0")
+        ),
+        "potential_lost_total": sum(
+            (row["lost_qty"] for row in potential_sales_rows), Decimal("0")
+        ),
         "source_groups": ("Marketplace", "Other"),
         "source_options": source_options,
         "selected_sources": sources,

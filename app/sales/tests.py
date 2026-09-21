@@ -13,7 +13,7 @@ from openpyxl import load_workbook
 
 from accounts.models import User
 from audit.models import AuditEvent
-from inventory.models import InventoryException, InventoryMovement
+from inventory.models import FIFOOpeningSnapshot, InventoryException, InventoryMovement
 from imports.models import RawFile
 from master_data.models import Category, MarketplaceProductMapping, Product, ProductStatus, ProductVariant, SKU, Subcategory
 from merchandising.models import MerchandisingMonthlySnapshot, MerchandisingSnapshotBatch
@@ -1085,6 +1085,64 @@ class SalesReportRouteTests(TestCase):
 
         self.assertEqual(too_high.context["mtd_cutoff_day"], 15)
         self.assertEqual(invalid.context["mtd_cutoff_day"], 15)
+
+    def test_dashboard_shows_product_potential_sales_after_stock_sells_out(self):
+        product, sku = self._planning_product("POTENTIAL-SALES")
+        FIFOOpeningSnapshot.objects.create(
+            sku=sku,
+            cutover_date=date(2026, 7, 31),
+            opening_qty=Decimal("100"),
+            frozen_unit_cogs=Decimal("50000"),
+            recorded_by=self.user,
+        )
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="POTENTIAL-SEP-10",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 10, 10, 0)),
+            order_date=date(2026, 9, 10),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        line = SalesOrderLine.objects.create(
+            order=order,
+            sku=sku,
+            sku_code_snapshot=sku.sku,
+            product_name_snapshot=product.name,
+            quantity=100,
+            net_unit_price=Decimal("90000"),
+            retail_price_snapshot=Decimal("100000"),
+            sales_cogs_snapshot=Decimal("50000"),
+            total_gross_sales=Decimal("10000000"),
+            total_net_sales=Decimal("9000000"),
+            total_cogs=Decimal("5000000"),
+            gpm=Decimal("4000000"),
+        )
+        InventoryMovement.objects.create(
+            movement_key="SALES|POTENTIAL-SEP-10",
+            movement_date=date(2026, 9, 10),
+            movement_type=InventoryMovement.MovementType.SALES_OUT,
+            direction=InventoryMovement.Direction.OUT,
+            sku=sku,
+            quantity=Decimal("100"),
+            allocated_cost=Decimal("5000000"),
+            source_reference=order.order_number,
+            sales_line=line,
+            posted_by=self.user,
+        )
+
+        response = self.client.get(reverse("sales:dashboard"))
+
+        row = response.context["potential_sales_rows"][0]
+        self.assertEqual(row["actual_qty"], Decimal("100"))
+        self.assertEqual(row["selling_days"], 10)
+        self.assertEqual(row["potential_qty"], Decimal("300"))
+        self.assertEqual(row["lost_qty"], Decimal("200"))
+        self.assertContains(response, "Potential 300 pcs")
+        self.assertContains(response, "Lost 200 pcs")
 
     def test_dashboard_source_group_and_source_are_cascading_multi_filters(self):
         fixtures = (

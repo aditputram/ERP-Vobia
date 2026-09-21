@@ -1141,8 +1141,10 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(row["selling_days"], 10)
         self.assertEqual(row["potential_qty"], Decimal("300"))
         self.assertEqual(row["lost_qty"], Decimal("200"))
-        self.assertContains(response, "Potential 300 pcs")
-        self.assertContains(response, "Lost 200 pcs")
+        self.assertEqual(row["potential_gross"], Decimal("30000000"))
+        self.assertEqual(row["lost_gross"], Decimal("20000000"))
+        self.assertContains(response, "Potential 300 pcs · Rp 30.000.000")
+        self.assertContains(response, "Lost 200 pcs · Rp 20.000.000")
 
     def test_dashboard_source_group_and_source_are_cascading_multi_filters(self):
         fixtures = (

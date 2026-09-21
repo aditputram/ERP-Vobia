@@ -1430,6 +1430,7 @@ def _potential_sales_rows(cutoff_date):
             product_name=F("sku__product_variant__product__name"),
         ).annotate(
             actual_qty=Sum("quantity"),
+            actual_gross=Sum("total_gross_sales"),
             sold_out_date=Max("order__order_date"),
         )
     )
@@ -1516,6 +1517,11 @@ def _potential_sales_rows(cutoff_date):
             actual_qty / Decimal(selling_days) * month_days
         ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         lost_qty = max(potential_qty - actual_qty, Decimal("0"))
+        actual_gross = Decimal(actual["actual_gross"] or 0)
+        potential_gross = (
+            actual_gross / actual_qty * potential_qty
+        ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        lost_gross = max(potential_gross - actual_gross, Decimal("0"))
         if lost_qty <= 0:
             continue
         rows.append({
@@ -1525,6 +1531,8 @@ def _potential_sales_rows(cutoff_date):
             "selling_days": selling_days,
             "potential_qty": potential_qty,
             "lost_qty": lost_qty,
+            "potential_gross": potential_gross,
+            "lost_gross": lost_gross,
         })
     return sorted(rows, key=lambda row: (-row["lost_qty"], row["article"].casefold()))
 
@@ -1614,6 +1622,12 @@ def dashboard(request):
         ),
         "potential_lost_total": sum(
             (row["lost_qty"] for row in potential_sales_rows), Decimal("0")
+        ),
+        "potential_sales_gross_total": sum(
+            (row["potential_gross"] for row in potential_sales_rows), Decimal("0")
+        ),
+        "potential_lost_gross_total": sum(
+            (row["lost_gross"] for row in potential_sales_rows), Decimal("0")
         ),
         "source_groups": ("Marketplace", "Other"),
         "source_options": source_options,

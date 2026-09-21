@@ -1172,6 +1172,7 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(response, "Potential 100 pcs · Rp 10.000.000")
         self.assertContains(response, "Lost 100 pcs · Rp 10.000.000")
         self.assertContains(response, 'name="potential_month"')
+        self.assertContains(response, "data-preserve-scroll")
         self.assertContains(response, "Acuan periode sebelumnya")
         self.assertNotContains(response, "Potential Lost Sales per Bulan")
 

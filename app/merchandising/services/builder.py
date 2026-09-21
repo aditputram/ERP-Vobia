@@ -250,6 +250,7 @@ def build_draft_matrix(
     history_months=(),
     history_by_sku=None,
     sales_target_by_parent_month=None,
+    po_locked_projection_ids=None,
 ):
     """Pivot saved SKU-month projections into a horizontal planning matrix."""
     if grain not in {"sku", "parent_sku"}:
@@ -276,6 +277,7 @@ def build_draft_matrix(
     history_by_sku = history_by_sku or {}
     include_sales_target = sales_target_by_parent_month is not None
     sales_target_by_parent_month = sales_target_by_parent_month or {}
+    po_locked_projection_ids = set(po_locked_projection_ids or ())
     plans_by_projection = {
         plan.sales_projection_id: plan for plan in (incoming_plans or [])
     }
@@ -530,6 +532,7 @@ def build_draft_matrix(
                 product = projection.sku.product_variant.product
                 quantities = projection_quantities(projection)
                 cell["projection_id"] = projection.id
+                cell["po_locked"] = projection.id in po_locked_projection_ids
                 cell["beginning"] = projection.beginning_qty or Decimal("0")
                 cell["sales_qty"] = quantities["sales"]
                 cell["incoming_qty"] = quantities["incoming_recommendation"]

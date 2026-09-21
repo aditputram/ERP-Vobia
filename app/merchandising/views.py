@@ -68,10 +68,11 @@ from .services.workflows import (
     approve_incoming_plan,
     approve_sales_projection,
     approve_scenario,
-    open_scenario_revision,
     create_incoming_plan,
     delete_draft_scenario,
     delete_draft_scenario_items,
+    open_scenario_revision,
+    po_locked_projection_ids,
     save_scenario_draft,
     update_draft_scenario,
 )
@@ -1000,10 +1001,12 @@ def planning_builder(request):
     draft_product_count = 0
     draft_incoming_plans = []
     draft_missing_months = []
+    draft_po_locked_projection_ids = set()
     view_draft_id = request.GET.get("view_draft", "").strip()
     if view_draft_id:
         viewed_draft_scenario = ProjectionScenario.objects.filter(pk=view_draft_id).first()
         if viewed_draft_scenario:
+            draft_po_locked_projection_ids = po_locked_projection_ids(viewed_draft_scenario)
             draft_projections = list(SalesProjection.objects.filter(
                 scenario=viewed_draft_scenario,
             ).select_related(
@@ -1078,6 +1081,7 @@ def planning_builder(request):
                 history_months=draft_history_months,
                 history_by_sku=draft_history_by_sku,
                 sales_target_by_parent_month=draft_sales_target_qty,
+                po_locked_projection_ids=draft_po_locked_projection_ids,
             )
             draft_parent_matrix_rows, _, _ = build_draft_matrix(
                 draft_projections,
@@ -1089,6 +1093,7 @@ def planning_builder(request):
                 history_months=draft_history_months,
                 history_by_sku=draft_history_by_sku,
                 sales_target_by_parent_month=draft_sales_target_qty,
+                po_locked_projection_ids=draft_po_locked_projection_ids,
             )
             projected_months = {row.month for row in draft_projections}
             draft_missing_months = [
@@ -1130,6 +1135,7 @@ def planning_builder(request):
             "draft_matrix_summary": draft_matrix_summary,
             "draft_product_count": draft_product_count,
             "draft_missing_months": draft_missing_months,
+            "draft_po_locked_count": len(draft_po_locked_projection_ids),
             "scenarios": ProjectionScenario.objects.annotate(
                 projection_count=Count("projections"),
             )[:50],
@@ -1254,7 +1260,7 @@ def revise_scenario(request, scenario_id):
         )
         messages.success(
             request,
-            "Revision Draft dibuka. Angka Approved lama tersimpan di audit trail; simpan perubahan lalu approve ulang.",
+            "Revision Draft dibuka. Angka Approved lama tersimpan di audit trail; SKU-bulan yang sudah masuk PO tetap terkunci.",
         )
     except ValidationError as exc:
         messages.error(request, "; ".join(exc.messages))

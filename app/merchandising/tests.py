@@ -401,11 +401,14 @@ class MerchandisingWorkflowTests(TestCase):
             ["sales", "incoming_recommendation"],
             grain="sku",
             selected_submetrics=["qty"],
+            po_locked_projection_ids={projection.id},
         )
 
         sales_cell, incoming_cell = rows[0]["cells"]
         self.assertFalse(sales_cell["incoming_allowed"])
         self.assertFalse(incoming_cell["incoming_allowed"])
+        self.assertTrue(sales_cell["po_locked"])
+        self.assertTrue(incoming_cell["po_locked"])
         self.assertEqual(incoming_cell["value"], Decimal("0"))
 
     def test_rule_priority_product_over_category_over_status(self):
@@ -724,28 +727,31 @@ class MerchandisingWorkflowTests(TestCase):
         self.assertEqual(requirement.approved_qty, Decimal("110"))
         self.assertEqual(requirement.revision, 2)
 
-    def test_scenario_revision_requires_superadmin_reason_and_unallocated_ppic(self):
-        superadmin = User.objects.create_superuser(
-            username="owner",
-            password="test-password",
+    def test_scenario_revision_locks_only_sku_months_already_allocated_to_po(self):
+        self.scenario.end_month = date(2026, 10, 1)
+        self.scenario.save(update_fields=["end_month"])
+        september = self._projection()
+        september.beginning_qty = Decimal("30")
+        september.save(update_fields=["beginning_qty"])
+        october = SalesProjection.objects.create(
+            scenario=self.scenario,
+            month=date(2026, 10, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("30"),
+            system_recommendation=Decimal("80"),
         )
-        projection = self._projection()
-        projection.beginning_qty = Decimal("30")
-        projection.save(update_fields=["beginning_qty"])
         approve_scenario(self.scenario.id, self.user, reason="Approval awal")
 
         with self.assertRaises(ValidationError):
-            open_scenario_revision(self.scenario.id, self.user, "Koreksi")
-        with self.assertRaises(ValidationError):
-            open_scenario_revision(self.scenario.id, superadmin, "")
+            open_scenario_revision(self.scenario.id, self.user, "")
 
-        plan = IncomingPlan.objects.get(sales_projection=projection)
+        plan = IncomingPlan.objects.get(sales_projection=september)
         requirement = PPICRequirement.objects.get(incoming_plan=plan)
         supplier = Supplier.objects.create(code="SUP-REV", name="Supplier Revision")
         po = PurchaseOrder.objects.create(
             supplier=supplier,
             need_month=plan.month,
-            created_by=superadmin,
+            created_by=self.user,
         )
         PurchaseOrderLine.objects.create(
             po=po,
@@ -754,14 +760,61 @@ class MerchandisingWorkflowTests(TestCase):
             ordered_qty=Decimal("10"),
             cogs_snapshot=Decimal("100000"),
         )
-        with self.assertRaisesMessage(ValidationError, "sudah dialokasikan ke PO"):
-            open_scenario_revision(
-                self.scenario.id,
-                superadmin,
-                "Target perlu dikoreksi",
-            )
+
+        self.client.force_login(self.user)
+        approved_response = self.client.get(
+            "/merchandising/planning-builder/",
+            {"view_draft": self.scenario.id},
+        )
+        self.assertContains(approved_response, "Buka Revisi")
+        self.assertContains(approved_response, "SKU-bulan yang sudah masuk PO tidak dapat diubah")
+
+        open_scenario_revision(
+            self.scenario.id,
+            self.user,
+            "Target Oktober perlu dikoreksi",
+        )
         self.scenario.refresh_from_db()
+        september.refresh_from_db()
+        october.refresh_from_db()
+        plan.refresh_from_db()
+        october_plan = IncomingPlan.objects.get(sales_projection=october)
+        self.assertEqual(self.scenario.status, ProjectionScenario.Status.REVISION_DRAFT)
+        self.assertEqual(september.approval_status, SalesProjection.ApprovalStatus.APPROVED)
+        self.assertEqual(plan.approval_status, IncomingPlan.ApprovalStatus.APPROVED)
+        self.assertEqual(october.approval_status, SalesProjection.ApprovalStatus.DRAFT)
+        self.assertEqual(october_plan.approval_status, IncomingPlan.ApprovalStatus.DRAFT)
+
+        response = self.client.get(
+            "/merchandising/planning-builder/",
+            {"view_draft": self.scenario.id},
+        )
+        self.assertEqual(response.context["draft_po_locked_count"], 1)
+        self.assertContains(response, "1 SKU-bulan terkunci PO")
+        self.assertContains(response, 'data-po-locked="true"', count=2)
+        self.assertContains(response, "Terkunci karena SKU-bulan ini sudah masuk PO", count=2)
+
+        with self.assertRaisesMessage(ValidationError, "sudah dialokasikan ke PO"):
+            save_scenario_draft(
+                self.scenario.id,
+                self.user,
+                sales_values={str(september.id): "90"},
+            )
+
+        approve_scenario(
+            self.scenario.id,
+            self.user,
+            sales_values={str(october.id): "70"},
+            reason="Revisi Oktober",
+        )
+        self.scenario.refresh_from_db()
+        september.refresh_from_db()
+        october.refresh_from_db()
+        requirement.refresh_from_db()
         self.assertEqual(self.scenario.status, ProjectionScenario.Status.APPROVED)
+        self.assertEqual(september.final_approved_qty, Decimal("100"))
+        self.assertEqual(october.final_approved_qty, Decimal("70"))
+        self.assertEqual(requirement.approved_qty, plan.final_approved_incoming)
 
     def test_scenario_approval_rolls_back_when_a_target_month_is_missing(self):
         self.scenario.end_month = date(2026, 10, 1)

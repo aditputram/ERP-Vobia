@@ -141,12 +141,20 @@ def _whole_nonnegative(value, label):
     return value
 
 
+def po_locked_projection_ids(scenario):
+    """Return SKU-month projections already allocated to a non-cancelled PO."""
+    return set(
+        IncomingPlan.objects.filter(
+            scenario=scenario,
+            ppic_requirements__po_lines__po__status__in=("DRAFT", "RELEASED"),
+        ).values_list("sales_projection_id", flat=True).distinct()
+    )
+
+
 @transaction.atomic
 def open_scenario_revision(scenario_id, actor, reason):
-    """Reopen an approved scenario while preserving the approved values in audit."""
+    """Reopen an approved scenario while preserving PO-allocated SKU-month values."""
     reason = (reason or "").strip()
-    if not getattr(actor, "is_superuser", False):
-        raise ValidationError("Hanya Super Admin yang dapat membuka revisi Scenario Approved.")
     if not reason:
         raise ValidationError("Alasan revisi wajib diisi.")
 
@@ -166,19 +174,7 @@ def open_scenario_revision(scenario_id, actor, reason):
         .select_related("sku")
         .order_by("month", "sku__sku")
     )
-    allocated_requirements = [
-        requirement
-        for plan in plans
-        for requirement in plan.ppic_requirements.select_for_update().all()
-        if requirement.po_lines.exclude(po__status="CANCELLED").exists()
-    ]
-    if allocated_requirements:
-        labels = ", ".join(
-            sorted({f"{item.sku.sku} {item.need_month:%b %Y}" for item in allocated_requirements})
-        )
-        raise ValidationError(
-            "Revisi diblokir karena Incoming sudah dialokasikan ke PO: " + labels + "."
-        )
+    locked_ids = po_locked_projection_ids(scenario)
 
     before_values = {
         "status": scenario.status,
@@ -202,12 +198,14 @@ def open_scenario_revision(scenario_id, actor, reason):
             for item in plans
         ],
     }
-    SalesProjection.objects.filter(scenario=scenario).update(
+    SalesProjection.objects.filter(scenario=scenario).exclude(id__in=locked_ids).update(
         approval_status=SalesProjection.ApprovalStatus.DRAFT,
         approved_by=None,
         approved_at=None,
     )
-    IncomingPlan.objects.filter(scenario=scenario).update(
+    IncomingPlan.objects.filter(scenario=scenario).exclude(
+        sales_projection_id__in=locked_ids,
+    ).update(
         approval_status=IncomingPlan.ApprovalStatus.DRAFT,
         approved_by=None,
         approved_at=None,
@@ -223,7 +221,10 @@ def open_scenario_revision(scenario_id, actor, reason):
         entity_id=scenario.id,
         reason=reason,
         before_values=before_values,
-        after_values={"status": scenario.status},
+        after_values={
+            "status": scenario.status,
+            "po_locked_projection_ids": [str(item) for item in sorted(locked_ids, key=str)],
+        },
     )
     return scenario
 
@@ -236,6 +237,7 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
     scenario = ProjectionScenario.objects.select_for_update().get(pk=scenario_id)
     if not scenario.quantities_editable:
         raise ValidationError("Hanya Scenario Draft atau Revision Draft yang dapat diedit.")
+    locked_ids = po_locked_projection_ids(scenario)
     projections = list(
         SalesProjection.objects.select_for_update().filter(scenario=scenario).select_related(
             "sku__product_variant__product__status",
@@ -245,6 +247,15 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
     if not projections:
         raise ValidationError("Scenario belum memiliki Draft Projection.")
     targeted_projection_ids = set(sales_values) | set(incoming_values)
+    locked_targets = targeted_projection_ids & {str(item) for item in locked_ids}
+    if locked_targets:
+        labels = ", ".join(
+            f"{item.sku.sku} {item.month:%b %Y}"
+            for item in projections
+            if str(item.id) in locked_targets
+        )
+        raise ValidationError(f"Tidak dapat mengubah {labels}: sudah dialokasikan ke PO.")
+    projections = [projection for projection in projections if projection.id not in locked_ids]
     if targeted_projection_ids:
         projections = [
             projection
@@ -390,10 +401,12 @@ def approve_scenario(scenario_id, actor, sales_values=None, incoming_values=None
     if len(plans_by_projection) != len(projections):
         raise ValidationError("Incoming Plan belum lengkap untuk seluruh Draft Projection.")
     for projection in projections:
-        approve_sales_projection(projection.id, projection.proposed_qty, actor, reason)
+        if projection.approval_status != SalesProjection.ApprovalStatus.APPROVED:
+            approve_sales_projection(projection.id, projection.proposed_qty, actor, reason)
     for projection in projections:
         plan = plans_by_projection[projection.id]
-        approve_incoming_plan(plan.id, plan.proposed_incoming, actor, reason)
+        if plan.approval_status != IncomingPlan.ApprovalStatus.APPROVED:
+            approve_incoming_plan(plan.id, plan.proposed_incoming, actor, reason)
     scenario.status = ProjectionScenario.Status.APPROVED
     scenario.approved_by = actor
     scenario.approved_at = timezone.now()

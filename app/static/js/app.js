@@ -847,7 +847,11 @@ document.addEventListener('DOMContentLoaded', () => {
           netRate: Number(input.dataset.netRate) || 0,
         };
         if (input.matches('[data-scenario-sales-input]')) state.sales = Number(input.value) || 0;
-        if (input.matches('[data-scenario-incoming-input]')) state.incoming = input.disabled ? 0 : (Number(input.value) || 0);
+        if (input.matches('[data-scenario-incoming-input]')) {
+          state.incoming = input.dataset.poLocked === 'true'
+            ? (Number(input.value) || 0)
+            : (input.disabled ? 0 : (Number(input.value) || 0));
+        }
         states.set(id, state);
       });
       const ordered = [...states.values()].sort((left, right) => left.month.localeCompare(right.month));

@@ -471,6 +471,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .scenario-edit-form .secondary-button:disabled:hover { border-color: var(--line); color: #9a9b93; background: #eeeeea; cursor: not-allowed; opacity: .65; }
 .scenario-meta { min-height: 34px; display: grid; gap: 3px; align-content: center; }
 .scenario-meta small, .scenario-lock { white-space: nowrap; font-size: 8px; }
+.projection-table .po-locked-input:disabled { border-color: #ddd9c8; color: #777166; background: #f0eee5; cursor: not-allowed; opacity: 1; }
 .scenario-row-actions { display: flex; align-items: center; gap: 7px; }
 .scenario-row-actions form { margin: 0; }
 .preview-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }

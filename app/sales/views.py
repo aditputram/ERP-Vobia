@@ -1422,7 +1422,7 @@ def _potential_sales_rows(cutoff_date):
         is_counted=True,
         sku__isnull=False,
         order__order_date__range=(month_start, cutoff_date),
-    )
+    ).exclude(sku__product_variant__product__status__code__iexact="DISCONTINUE")
     actuals = list(
         month_lines.values(
             product_id=F("sku__product_variant__product_id"),

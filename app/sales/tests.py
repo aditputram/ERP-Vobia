@@ -1146,6 +1146,12 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(response, "Potential 300 pcs · Rp 30.000.000")
         self.assertContains(response, "Lost 200 pcs · Rp 20.000.000")
 
+        product.status = ProductStatus.objects.create(code="DISCONTINUE", name="Discontinue")
+        product.save(update_fields=["status", "updated_at"])
+        discontinued = self.client.get(reverse("sales:dashboard"))
+        self.assertEqual(discontinued.context["potential_sales_rows"], [])
+        self.assertEqual(discontinued.context["potential_sales_total"], Decimal("0"))
+
     def test_dashboard_source_group_and_source_are_cascading_multi_filters(self):
         fixtures = (
             (SalesOrder.Source.SHOPEE, "Shopee", "100000"),

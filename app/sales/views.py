@@ -1450,8 +1450,13 @@ def dashboard(request):
     monthly_start = max(earliest.replace(day=1), _shift_month(monthly_end, -11))
     monthly_lines = filtered_all_lines.filter(order__order_date__gte=_shift_month(monthly_start, -1))
     monthly_gross = _monthly_gross_chart(monthly_lines, monthly_start, monthly_end)
+    try:
+        mtd_cutoff_day = int(request.GET.get("mtd_cutoff_day", latest.day))
+    except (TypeError, ValueError):
+        mtd_cutoff_day = latest.day
+    mtd_cutoff_day = max(1, min(mtd_cutoff_day, latest.day))
     mtd_gross = _monthly_gross_chart(
-        monthly_lines.filter(order__order_date__day__lte=latest.day),
+        monthly_lines.filter(order__order_date__day__lte=mtd_cutoff_day),
         monthly_start,
         monthly_end,
     )
@@ -1471,7 +1476,8 @@ def dashboard(request):
         "source_rows": source_rows,
         "monthly_gross": monthly_gross,
         "mtd_gross": mtd_gross,
-        "mtd_cutoff_day": latest.day,
+        "mtd_cutoff_day": mtd_cutoff_day,
+        "mtd_cutoff_days": range(1, latest.day + 1),
         "monthly_period_label": monthly_period_label,
         "source_groups": ("Marketplace", "Other"),
         "source_options": source_options,

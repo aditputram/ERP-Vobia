@@ -1007,6 +1007,85 @@ class SalesReportRouteTests(TestCase):
         self.assertLess(response.content.index(b"Monthly Gross Sales"), response.content.index(b"MTD Gross Sales"))
         self.assertLess(response.content.index(b"MTD Gross Sales"), response.content.index(b"Status periode"))
 
+    def test_dashboard_mtd_gross_uses_selected_cutoff_day(self):
+        for order_day, order_number, gross in (
+            (date(2026, 8, 5), "AUG-DAY-5", "1000000000"),
+            (date(2026, 8, 10), "AUG-DAY-10", "2000000000"),
+            (date(2026, 9, 5), "SEP-DAY-5", "3000000000"),
+            (date(2026, 9, 15), "SEP-DAY-15", "4000000000"),
+        ):
+            order = SalesOrder.objects.create(
+                source=SalesOrder.Source.SHOPEE,
+                source_label="Shopee",
+                order_number=order_number,
+                order_datetime=timezone.make_aware(datetime.combine(order_day, datetime.min.time())),
+                order_date=order_day,
+                current_status="Selesai",
+                source_status="Selesai",
+                is_final=True,
+                first_seen_batch_id=uuid.uuid4(),
+                latest_batch_id=uuid.uuid4(),
+            )
+            gross_value = Decimal(gross)
+            SalesOrderLine.objects.create(
+                order=order,
+                sku_code_snapshot=order_number,
+                product_name_snapshot="MTD Cutoff Product",
+                quantity=1,
+                net_unit_price=gross_value,
+                retail_price_snapshot=gross_value,
+                sales_cogs_snapshot=Decimal("0"),
+                total_gross_sales=gross_value,
+                total_net_sales=gross_value,
+                total_cogs=Decimal("0"),
+                gpm=gross_value,
+            )
+
+        response = self.client.get(reverse("sales:dashboard"), {"mtd_cutoff_day": "9"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["mtd_cutoff_day"], 9)
+        self.assertEqual(list(response.context["mtd_cutoff_days"]), list(range(1, 16)))
+        self.assertEqual(response.context["mtd_gross"][-2]["gross_billion"], Decimal("1"))
+        self.assertEqual(response.context["mtd_gross"][-1]["gross_billion"], Decimal("3"))
+        self.assertContains(response, 'name="mtd_cutoff_day"')
+        self.assertContains(response, 'form="sales-dashboard-filter"')
+        self.assertContains(response, "Tanggal 1–9 setiap bulan")
+
+    def test_dashboard_mtd_cutoff_is_bounded_to_latest_sales_day(self):
+        order_day = date(2026, 9, 15)
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="MTD-LATEST-DAY",
+            order_datetime=timezone.make_aware(datetime.combine(order_day, datetime.min.time())),
+            order_date=order_day,
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku_code_snapshot="MTD-LATEST-DAY",
+            product_name_snapshot="MTD Latest Product",
+            quantity=1,
+            net_unit_price=Decimal("100000"),
+            retail_price_snapshot=Decimal("100000"),
+            sales_cogs_snapshot=Decimal("0"),
+            total_gross_sales=Decimal("100000"),
+            total_net_sales=Decimal("100000"),
+            total_cogs=Decimal("0"),
+            gpm=Decimal("100000"),
+        )
+
+        too_high = self.client.get(reverse("sales:dashboard"), {"mtd_cutoff_day": "31"})
+        invalid = self.client.get(reverse("sales:dashboard"), {"mtd_cutoff_day": "abc"})
+
+        self.assertEqual(too_high.context["mtd_cutoff_day"], 15)
+        self.assertEqual(invalid.context["mtd_cutoff_day"], 15)
+
     def test_dashboard_source_group_and_source_are_cascading_multi_filters(self):
         fixtures = (
             (SalesOrder.Source.SHOPEE, "Shopee", "100000"),

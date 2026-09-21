@@ -18,6 +18,7 @@ from .forms import ProjectionBuilderForm
 from .models import (
     IncomingPlan,
     IncomingCarryover,
+    IncomingMonthlyActual,
     IncomingMonthClose,
     MerchandisingMonthlySnapshot,
     MerchandisingSnapshotBatch,
@@ -294,6 +295,68 @@ class MerchandisingWorkflowTests(TestCase):
         self.assertEqual(september.beginning_qty, Decimal("100"))
         self.assertEqual(october.beginning_qty, Decimal("105"))
         self.assertEqual(october_incoming.prior_ending_qty, Decimal("105"))
+
+    def test_scenario_stock_chain_reanchors_to_closed_actual_for_current_month(self):
+        post_opening(
+            sku=self.sku,
+            quantity=100,
+            unit_cost=100000,
+            actor=self.user,
+        )
+        self.scenario.end_month = date(2026, 11, 1)
+        self.scenario.status = ProjectionScenario.Status.APPROVED
+        self.scenario.save(update_fields=["end_month", "status"])
+        projections = []
+        plans = []
+        for month, sales, incoming in (
+            (date(2026, 9, 1), 10, 20),
+            (date(2026, 10, 1), 20, 30),
+            (date(2026, 11, 1), 25, 40),
+        ):
+            projection = SalesProjection.objects.create(
+                scenario=self.scenario,
+                month=month,
+                sku=self.sku,
+                beginning_qty=Decimal("999"),
+                system_recommendation=Decimal(sales),
+                final_approved_qty=Decimal(sales),
+                approval_status=SalesProjection.ApprovalStatus.APPROVED,
+            )
+            projections.append(projection)
+            plans.append(IncomingPlan.objects.create(
+                scenario=self.scenario,
+                month=month,
+                sku=self.sku,
+                sales_projection=projection,
+                prior_ending_qty=Decimal("999"),
+                minimum_incoming=Decimal("0"),
+                recommended_incoming=Decimal(incoming),
+                final_approved_incoming=Decimal(incoming),
+                approval_status=IncomingPlan.ApprovalStatus.APPROVED,
+            ))
+
+        close = IncomingMonthClose.objects.create(
+            month=date(2026, 9, 1),
+            cutoff_date=date(2026, 9, 30),
+            closed_by=self.user,
+            evidence_reference="Stock opname September",
+        )
+        IncomingMonthlyActual.objects.create(
+            month_close=close,
+            sku=self.sku,
+            actual_ending_qty=Decimal("70"),
+        )
+
+        refresh_scenario_stock_chain(
+            projections,
+            plans,
+            today=date(2026, 10, 5),
+        )
+
+        self.assertEqual(projections[1].beginning_qty, Decimal("70"))
+        self.assertEqual(projections[2].beginning_qty, Decimal("80"))
+        self.assertEqual(projections[1].final_approved_qty, Decimal("20"))
+        self.assertEqual(plans[1].final_approved_incoming, Decimal("30"))
 
     def test_parent_preview_aggregates_children_and_recomputes_metrics(self):
         second_variant = ProductVariant.objects.create(product=self.product, name="White", color="White")

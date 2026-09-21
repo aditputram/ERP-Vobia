@@ -11,6 +11,7 @@ from master_data.models import SKU
 from sales.models import SalesOrderLine
 
 from ..models import (
+    IncomingMonthlyActual,
     IncomingPlan,
     MerchandisingMonthlySnapshot,
     MerchandisingSnapshotBatch,
@@ -870,6 +871,18 @@ def refresh_scenario_stock_chain(projections, incoming_plans, *, today=None):
     for projection in projections:
         grouped.setdefault(projection.sku_id, []).append(projection)
 
+    closed_actuals = {
+        (row.sku_id, row.month_close.month): row.actual_ending_qty
+        for row in IncomingMonthlyActual.objects.filter(
+            sku_id__in=grouped,
+            month_close__month__in={
+                previous_month(row.month)
+                for row in projections
+                if row.month <= current_month
+            },
+        ).select_related("month_close")
+    }
+
     future_skus = [
         rows[0].sku
         for rows in grouped.values()
@@ -887,6 +900,17 @@ def refresh_scenario_stock_chain(projections, incoming_plans, *, today=None):
             scenario=first.scenario,
         )
         for projection in rows:
+            if projection.month <= current_month:
+                closed_key = (projection.sku_id, previous_month(projection.month))
+                if closed_key in closed_actuals:
+                    prior_ending = closed_actuals[closed_key]
+                else:
+                    prior_ending = projected_beginning(
+                        projection.sku,
+                        projection.month,
+                        today=today,
+                        scenario=projection.scenario,
+                    )
             projection.beginning_qty = prior_ending
             plan = plans_by_projection.get(projection.id)
             if plan:

@@ -1547,6 +1547,49 @@ def _potential_sales_rows(cutoff_date):
     return sorted(rows, key=lambda row: (-row["lost_qty"], row["article"].casefold()))
 
 
+def _potential_lost_monthly_rows(potential_rows, cutoff_date):
+    if not cutoff_date or cutoff_date <= CUTOVER_DATE:
+        return []
+    first_month = (CUTOVER_DATE + timedelta(days=1)).replace(day=1)
+    cutoff_month = cutoff_date.replace(day=1)
+    monthly = {}
+    current = first_month
+    while current <= cutoff_month:
+        monthly[current] = {
+            "month": current,
+            "lost_qty": Decimal("0"),
+            "lost_gross": Decimal("0"),
+        }
+        current = _shift_month(current, 1)
+
+    for row in potential_rows:
+        lost_start = row["sold_out_date"] + timedelta(days=1)
+        daily_qty = row["actual_qty"] / Decimal(row["selling_days"])
+        daily_gross = row["actual_gross"] / Decimal(row["selling_days"])
+        current = lost_start.replace(day=1)
+        while current <= cutoff_month:
+            period_start = max(current, lost_start)
+            period_end = min(_shift_month(current, 1) - timedelta(days=1), cutoff_date)
+            if period_start <= period_end:
+                lost_days = Decimal((period_end - period_start).days + 1)
+                monthly[current]["lost_qty"] += daily_qty * lost_days
+                monthly[current]["lost_gross"] += daily_gross * lost_days
+            current = _shift_month(current, 1)
+
+    rows = list(monthly.values())
+    for row in rows:
+        row["lost_qty"] = row["lost_qty"].quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        row["lost_gross"] = row["lost_gross"].quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    if rows:
+        rows[-1]["lost_qty"] += sum(
+            (row["lost_qty"] for row in potential_rows), Decimal("0")
+        ) - sum((row["lost_qty"] for row in rows), Decimal("0"))
+        rows[-1]["lost_gross"] += sum(
+            (row["lost_gross"] for row in potential_rows), Decimal("0")
+        ) - sum((row["lost_gross"] for row in rows), Decimal("0"))
+    return rows
+
+
 @login_required
 def dashboard(request):
     all_lines = SalesOrderLine.objects.filter(is_counted=True)
@@ -1607,6 +1650,9 @@ def dashboard(request):
     monthly_period_label = f"{date_format(monthly_start, 'M Y')} – {date_format(monthly_end, 'M Y')}"
     potential_cutoff = min(end, latest) if start <= latest else None
     potential_sales_rows = _potential_sales_rows(potential_cutoff)
+    potential_lost_monthly_rows = _potential_lost_monthly_rows(
+        potential_sales_rows, potential_cutoff
+    )
     return render(request, "sales/dashboard.html", {
         "date_from": start,
         "date_to": end,
@@ -1627,6 +1673,7 @@ def dashboard(request):
         "monthly_period_label": monthly_period_label,
         "potential_sales_cutoff": potential_cutoff,
         "potential_sales_rows": potential_sales_rows,
+        "potential_lost_monthly_rows": potential_lost_monthly_rows,
         "potential_sales_total": sum(
             (row["potential_qty"] for row in potential_sales_rows), Decimal("0")
         ),

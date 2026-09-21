@@ -1169,6 +1169,19 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(row["lost_gross"], Decimal("15500000"))
         self.assertContains(response, "Potential 255 pcs · Rp 25.500.000")
         self.assertContains(response, "Lost 155 pcs · Rp 15.500.000")
+        self.assertEqual(response.context["potential_lost_monthly_rows"], [
+            {
+                "month": date(2026, 8, 1),
+                "lost_qty": Decimal("55"),
+                "lost_gross": Decimal("5500000"),
+            },
+            {
+                "month": date(2026, 9, 1),
+                "lost_qty": Decimal("100"),
+                "lost_gross": Decimal("10000000"),
+            },
+        ])
+        self.assertContains(response, "Potential Lost Sales per Bulan")
 
         InventoryMovement.objects.create(
             movement_key="INCOMING|POTENTIAL-SEP-01",

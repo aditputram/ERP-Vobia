@@ -184,7 +184,7 @@
                 headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
                 body: JSON.stringify(subscription.toJSON()),
             });
-            if (!response.ok) throw new Error('Subscription gagal disimpan.');
+            if (!response.ok) throw new Error(`Subscription gagal disimpan (HTTP ${response.status}).`);
             setActive(subscription);
         } catch (error) {
             button.disabled = false;

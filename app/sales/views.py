@@ -1535,7 +1535,7 @@ def _potential_sales_rows(cutoff_date, selected_month):
         actual_gross = Decimal(actual["actual_gross"] or 0)
         monthly_actual_gross = actual_gross if actual["sales_month"] == selected_month else Decimal("0")
         lost_gross = (
-            actual_gross / Decimal(selling_days) * Decimal(lost_days)
+            actual_gross / actual_qty * lost_qty
         ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
         potential_gross = monthly_actual_gross + lost_gross
         if lost_qty <= 0:

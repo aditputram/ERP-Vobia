@@ -1238,6 +1238,8 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(current_month["selling_days"], 12)
         self.assertEqual(current_month["potential_qty"], Decimal("13"))
         self.assertEqual(current_month["lost_qty"], Decimal("5"))
+        self.assertEqual(current_month["potential_gross"], Decimal("1300000"))
+        self.assertEqual(current_month["lost_gross"], Decimal("500000"))
 
         product.status = ProductStatus.objects.create(code="DISCONTINUE", name="Discontinue")
         product.save(update_fields=["status", "updated_at"])

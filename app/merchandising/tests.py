@@ -2091,6 +2091,8 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(plan.proposed_incoming, Decimal("20"))
         self.assertContains(response, "Angka edit terakhir tetap tersimpan sebagai Draft")
         self.assertContains(response, self.sku.sku)
+        self.assertContains(response, "data-scenario-feedback")
+        self.assertContains(response, "Approval belum berhasil")
 
     def test_cancel_preview_discards_unsaved_builder_result(self):
         scenario = ProjectionScenario.objects.create(

@@ -1417,17 +1417,20 @@ def _potential_sales_rows(cutoff_date):
         sku__isnull=False,
         order__order_date__range=(tracking_start, cutoff_date),
     ).exclude(sku__product_variant__product__status__code__iexact="DISCONTINUE")
-    actuals = list(
-        month_lines.values(
+    monthly_actuals = list(
+        month_lines.annotate(sales_month=TruncMonth("order__order_date")).values(
             product_id=F("sku__product_variant__product_id"),
             article=F("sku__product_variant__product__article"),
             product_name=F("sku__product_variant__product__name"),
+            sales_month=F("sales_month"),
         ).annotate(
             actual_qty=Sum("quantity"),
             actual_gross=Sum("total_gross_sales"),
             sold_out_date=Max("order__order_date"),
-        )
+        ).order_by("sales_month")
     )
+    actuals_by_product = {row["product_id"]: row for row in monthly_actuals}
+    actuals = list(actuals_by_product.values())
     if not actuals:
         return []
 
@@ -1469,18 +1472,32 @@ def _potential_sales_rows(cutoff_date):
             sales_out_days.add((product_id, movement_date))
 
     first_sales = {
-        row["sku_id"]: row["first_sale_date"]
-        for row in month_lines.values("sku_id").annotate(
+        (row["sales_month"], row["sku_id"]): row["first_sale_date"]
+        for row in month_lines.annotate(sales_month=TruncMonth("order__order_date"))
+        .values("sales_month", "sku_id")
+        .annotate(
             first_sale_date=Min("order__order_date")
         )
     }
-    selling_contexts = _selling_contexts(
-        skus,
-        tracking_start.year,
-        tracking_start.month,
-        cutoff_date,
-        first_sales,
-    )
+    skus_by_sales_month = {}
+    for sku in skus:
+        sales_month = actuals_by_product[sku.product_variant.product_id]["sales_month"]
+        skus_by_sales_month.setdefault(sales_month, []).append(sku)
+
+    selling_contexts = {}
+    for sales_month, month_skus in skus_by_sales_month.items():
+        month_end = min(cutoff_date, _shift_month(sales_month, 1) - timedelta(days=1))
+        selling_contexts.update(_selling_contexts(
+            month_skus,
+            sales_month.year,
+            sales_month.month,
+            month_end,
+            {
+                sku.id: first_sales[(sales_month, sku.id)]
+                for sku in month_skus
+                if (sales_month, sku.id) in first_sales
+            },
+        ))
     starts_by_product = {}
     for sku in skus:
         start_date = selling_contexts.get(sku.id, {}).get("selling_start_date")

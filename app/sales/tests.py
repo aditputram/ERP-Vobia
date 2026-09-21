@@ -1170,6 +1170,60 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(response, "Potential 255 pcs · Rp 25.500.000")
         self.assertContains(response, "Lost 155 pcs · Rp 15.500.000")
 
+        InventoryMovement.objects.create(
+            movement_key="INCOMING|POTENTIAL-SEP-01",
+            movement_date=date(2026, 9, 1),
+            movement_type=InventoryMovement.MovementType.INCOMING,
+            direction=InventoryMovement.Direction.IN,
+            sku=sku,
+            quantity=Decimal("8"),
+            source_reference="POTENTIAL-RESTOCK",
+            posted_by=self.user,
+        )
+        september_order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="POTENTIAL-SEP-12",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 12, 10, 0)),
+            order_date=date(2026, 9, 12),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        september_line = SalesOrderLine.objects.create(
+            order=september_order,
+            sku=sku,
+            sku_code_snapshot=sku.sku,
+            product_name_snapshot=product.name,
+            quantity=8,
+            net_unit_price=Decimal("90000"),
+            retail_price_snapshot=Decimal("100000"),
+            sales_cogs_snapshot=Decimal("50000"),
+            total_gross_sales=Decimal("800000"),
+            total_net_sales=Decimal("720000"),
+            total_cogs=Decimal("400000"),
+            gpm=Decimal("320000"),
+        )
+        InventoryMovement.objects.create(
+            movement_key="SALES|POTENTIAL-SEP-12",
+            movement_date=date(2026, 9, 12),
+            movement_type=InventoryMovement.MovementType.SALES_OUT,
+            direction=InventoryMovement.Direction.OUT,
+            sku=sku,
+            quantity=Decimal("8"),
+            allocated_cost=Decimal("400000"),
+            source_reference=september_order.order_number,
+            sales_line=september_line,
+            posted_by=self.user,
+        )
+        current_month = self.client.get(reverse("sales:dashboard")).context["potential_sales_rows"][0]
+        self.assertEqual(current_month["actual_qty"], Decimal("8"))
+        self.assertEqual(current_month["selling_days"], 12)
+        self.assertEqual(current_month["potential_qty"], Decimal("13"))
+        self.assertEqual(current_month["lost_qty"], Decimal("5"))
+
         product.status = ProductStatus.objects.create(code="DISCONTINUE", name="Discontinue")
         product.save(update_fields=["status", "updated_at"])
         discontinued = self.client.get(reverse("sales:dashboard"))

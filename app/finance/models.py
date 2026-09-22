@@ -162,9 +162,11 @@ class ProductSalesAccount(models.Model):
             self.sales_account.account_type != "REVE"
             or not self.sales_account.is_active
             or not self.sales_account.is_postable
+            or not self.sales_account.parent_id
+            or self.sales_account.parent.code != "4100"
         ):
             raise ValidationError(
-                {"sales_account": "Pilih akun transaksi Pendapatan yang masih aktif."}
+                {"sales_account": "Pilih akun transaksi aktif di bawah Sales A/C."}
             )
 
     def __str__(self):

@@ -361,6 +361,7 @@ def sales_settings(request):
                     account_type="REVE",
                     is_active=True,
                     is_postable=True,
+                    parent__code="4100",
                 )
                 setting = current or ProductSalesAccount(product=product)
                 setting.sales_account = account
@@ -437,7 +438,7 @@ def sales_settings(request):
         {
             "page": page,
             "account_options": Account.objects.filter(
-                account_type="REVE", is_active=True, is_postable=True
+                account_type="REVE", is_active=True, is_postable=True, parent__code="4100"
             ).select_related("parent").order_by("code"),
             "status_options": status_options,
             "category_options": category_options,

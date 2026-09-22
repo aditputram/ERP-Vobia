@@ -279,10 +279,7 @@ class FinanceJournalTests(TestCase):
             status=seasonal,
             category=pants,
         )
-        revenue, _ = Account.objects.update_or_create(
-            code="499999",
-            defaults={"name": "Product Sales Revenue", "account_type": "REVE", "is_postable": True, "is_active": True},
-        )
+        revenue = Account.objects.get(code="410001")
         self.client.force_login(self.user)
 
         page = self.client.get(reverse("finance:sales_settings"), {"product_status": regular.id})

@@ -16,6 +16,7 @@ FINANCE_NAV_SECTIONS = (
     )},
     {"key": "sales", "label": "Sales", "items": (
         ("sales_invoice", "Sales Invoice", "sales-invoice"),
+        ("sales_settings", "Sales Setting", None),
         ("sales_return", "Sales Return", "sales-return"),
         ("sales_receipt", "Sales Receipt", "sales-receipt"),
         ("customers", "Master Customer", "customers"),
@@ -70,6 +71,7 @@ FINANCE_NAV_SECTIONS = (
 ROUTES = {
     "accounts": "finance:accounts",
     "journals": "finance:journals",
+    "sales_settings": "finance:sales_settings",
     "profit_loss": "finance:profit_loss",
     "balance_sheet": "finance:balance_sheet",
     "trial_balance": "finance:trial_balance",

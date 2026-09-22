@@ -933,6 +933,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .delivery-order-detail { padding: 16px; }
 .delivery-order-product-table { min-width: 1120px; }
 .delivery-order-product-table input, .delivery-order-product-table select { width: 100%; min-height: 34px; padding: 6px 7px; border: 1px solid var(--line); border-radius: 7px; background: white; color: var(--ink); }
+.finance-sales-settings-table { min-width: 1080px; }
+.finance-sales-settings-form { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 7px; align-items: center; }
+.finance-sales-settings-form select { width: 100%; min-height: 34px; padding: 6px 7px; border: 1px solid var(--line); border-radius: 7px; background: white; color: var(--ink); }
 .delivery-order-product-table th:nth-child(1) { width: 105px; }
 .delivery-order-product-table th:nth-child(2) { width: 180px; }
 .delivery-order-product-table th:nth-child(3) { width: 65px; }

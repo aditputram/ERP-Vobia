@@ -18,7 +18,13 @@ from accounts.access import can_access_tab, module_level
 
 from .catalog import FEATURES, FINANCE_NAV_SECTIONS
 from .forms import AccountForm, JournalEntryForm, JournalLineFormSet
-from .models import Account, FINANCE_CUTOVER_DATE, FINANCE_OPENING_DATE, JournalEntry
+from .models import (
+    Account,
+    FINANCE_CUTOVER_DATE,
+    FINANCE_OPENING_DATE,
+    JournalEntry,
+    ProductSalesAccount,
+)
 from .services import (
     account_balances,
     account_opening_balance,
@@ -328,6 +334,126 @@ def _money_rows(rows, account_types):
         for row in rows
         if row["account"].is_postable and row["account"].account_type in account_types and row["net"]
     ]
+
+
+@login_required
+def sales_settings(request):
+    if not can_access_tab(request.user, "finance", "sales_settings"):
+        return HttpResponseForbidden("Akun ini tidak memiliki akses ke tab tersebut.")
+    can_edit = request.user.is_superuser or module_level(request.user, "finance") in {"edit", "approve"}
+
+    from master_data.models import Category, Product, ProductStatus, Subcategory
+
+    if request.method == "POST":
+        if not can_edit:
+            return HttpResponseForbidden("Akun ini hanya memiliki akses lihat.")
+        product = get_object_or_404(Product, pk=request.POST.get("product_id"))
+        account_id = request.POST.get("sales_account_id", "").strip()
+        with transaction.atomic():
+            current = ProductSalesAccount.objects.select_related("sales_account").filter(product=product).first()
+            before_values = {
+                "sales_account": current.sales_account.code if current else "",
+            }
+            if account_id:
+                account = get_object_or_404(
+                    Account,
+                    pk=account_id,
+                    account_type="REVE",
+                    is_active=True,
+                    is_postable=True,
+                )
+                setting = current or ProductSalesAccount(product=product)
+                setting.sales_account = account
+                setting.full_clean()
+                setting.save()
+                after_values = {"sales_account": account.code}
+            else:
+                if current:
+                    current.delete()
+                after_values = {"sales_account": ""}
+            record_audit(
+                actor=request.user,
+                action="finance_sales_account_mapping_updated",
+                entity_type="master_data.product",
+                entity_id=product.id,
+                before_values=before_values,
+                after_values=after_values,
+            )
+        messages.success(request, f"Sales Account untuk {product.name} berhasil disimpan.")
+        return redirect(request.get_full_path())
+
+    products = Product.objects.select_related("status", "category", "subcategory")
+    status_options = ProductStatus.objects.filter(products__isnull=False).distinct().order_by("name")
+    selected_status = request.GET.get("product_status", "")
+    if selected_status and not status_options.filter(pk=selected_status).exists():
+        selected_status = ""
+
+    category_options = Category.objects.filter(products__isnull=False)
+    if selected_status:
+        category_options = category_options.filter(products__status_id=selected_status)
+    category_options = category_options.distinct().order_by("name")
+    selected_category = request.GET.get("category", "")
+    if selected_category and not category_options.filter(pk=selected_category).exists():
+        selected_category = ""
+
+    subcategory_options = Subcategory.objects.filter(products__isnull=False)
+    if selected_status:
+        subcategory_options = subcategory_options.filter(products__status_id=selected_status)
+    if selected_category:
+        subcategory_options = subcategory_options.filter(category_id=selected_category)
+    subcategory_options = subcategory_options.distinct().order_by("name")
+    selected_subcategory = request.GET.get("subcategory", "")
+    if selected_subcategory and not subcategory_options.filter(pk=selected_subcategory).exists():
+        selected_subcategory = ""
+
+    if selected_status:
+        products = products.filter(status_id=selected_status)
+    if selected_category:
+        products = products.filter(category_id=selected_category)
+    if selected_subcategory:
+        products = products.filter(subcategory_id=selected_subcategory)
+    query = request.GET.get("q", "").strip()
+    if query:
+        products = products.filter(
+            Q(code__icontains=query)
+            | Q(parent_sku__icontains=query)
+            | Q(article__icontains=query)
+            | Q(name__icontains=query)
+        )
+
+    filtered_count = products.count()
+    mapped_count = ProductSalesAccount.objects.filter(product__in=products).count()
+    products = products.select_related("finance_sales_setting__sales_account").order_by("name", "code")
+    page = Paginator(products, 100).get_page(request.GET.get("page"))
+    for product in page.object_list:
+        setting = getattr(product, "finance_sales_setting", None)
+        product.sales_account_id = setting.sales_account_id if setting else None
+
+    pagination_query = request.GET.copy()
+    pagination_query.pop("page", None)
+    return render(
+        request,
+        "finance/sales_settings.html",
+        {
+            "page": page,
+            "account_options": Account.objects.filter(
+                account_type="REVE", is_active=True, is_postable=True
+            ).select_related("parent").order_by("code"),
+            "status_options": status_options,
+            "category_options": category_options,
+            "subcategory_options": subcategory_options,
+            "selected_status": selected_status,
+            "selected_category": selected_category,
+            "selected_subcategory": selected_subcategory,
+            "query": query,
+            "filtered_count": filtered_count,
+            "mapped_count": mapped_count,
+            "total_products": Product.objects.count(),
+            "can_edit": can_edit,
+            "current_query": request.GET.urlencode(),
+            "pagination_prefix": f"{pagination_query.urlencode()}&" if pagination_query else "",
+        },
+    )
 
 
 @login_required

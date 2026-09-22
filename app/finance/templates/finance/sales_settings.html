@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Sales Setting · Finance{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">SALES</p><h1>Sales Setting</h1></div></header>
+<form method="get" class="panel report-filter" data-auto-submit data-preserve-scroll>
+    <label>Status Produk<select name="product_status"><option value="">Semua Status</option>{% for option in status_options %}<option value="{{ option.id }}" {% if selected_status == option.id|stringformat:'s' %}selected{% endif %}>{{ option.name }}</option>{% endfor %}</select></label>
+    <label>Category<select name="category"><option value="">Semua Category</option>{% for option in category_options %}<option value="{{ option.id }}" {% if selected_category == option.id|stringformat:'s' %}selected{% endif %}>{{ option.name }}</option>{% endfor %}</select></label>
+    <label>Subcategory<select name="subcategory"><option value="">Semua Subcategory</option>{% for option in subcategory_options %}<option value="{{ option.id }}" {% if selected_subcategory == option.id|stringformat:'s' %}selected{% endif %}>{{ option.name }}</option>{% endfor %}</select></label>
+    <label>Cari Produk<input type="search" name="q" value="{{ query }}" placeholder="Nama, article, atau parent SKU" data-auto-search></label>
+    <a class="secondary-button" href="{% url 'finance:sales_settings' %}">Reset</a>
+</form>
+<section class="metric-grid three section-gap"><article class="metric-card"><span>Total Product</span><strong>{{ total_products|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Hasil Filter</span><strong>{{ filtered_count|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Sudah Dipetakan</span><strong>{{ mapped_count|floatformat:"0g" }}</strong></article></section>
+<section class="panel section-gap">
+    <div class="panel-header"><div><h2>Mapping Product ke Sales Account</h2><p>Setiap SKU size mengikuti akun penjualan Product/Parent SKU yang sama.</p></div></div>
+    <div class="table-wrap warehouse-table-wrap"><table class="finance-sales-settings-table"><thead><tr><th>Parent SKU</th><th>Product</th><th>Status</th><th>Category</th><th>Subcategory</th><th>Sales Account</th></tr></thead><tbody>
+    {% for product in page.object_list %}<tr><td><span class="code-label">{{ product.parent_sku|default:product.code }}</span></td><td><strong>{{ product.name }}</strong>{% if product.article %}<br><small>{{ product.article }}</small>{% endif %}</td><td>{{ product.status.name }}</td><td>{{ product.category.name }}</td><td>{{ product.subcategory.name|default:"—" }}</td><td>{% if can_edit %}<form method="post" action="{% if current_query %}?{{ current_query }}{% endif %}" class="finance-sales-settings-form" data-preserve-scroll>{% csrf_token %}<input type="hidden" name="product_id" value="{{ product.id }}"><select name="sales_account_id" aria-label="Sales Account {{ product.name }}"><option value="">Belum ditentukan</option>{% for account in account_options %}<option value="{{ account.id }}" {% if product.sales_account_id == account.id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select><button class="secondary-button compact" type="submit">Simpan</button></form>{% else %}{% if product.sales_account_id %}{% for account in account_options %}{% if product.sales_account_id == account.id %}{{ account.code }} · {{ account.name }}{% endif %}{% endfor %}{% else %}Belum ditentukan{% endif %}{% endif %}</td></tr>{% empty %}<tr><td colspan="6"><div class="empty-state">Tidak ada Product yang cocok dengan filter.</div></td></tr>{% endfor %}
+    </tbody></table></div>
+    {% if page.has_other_pages %}<nav class="pagination"><span>Page {{ page.number|floatformat:"0g" }} / {{ page.paginator.num_pages|floatformat:"0g" }}</span><div>{% if page.has_previous %}<a href="?{{ pagination_prefix }}page={{ page.previous_page_number }}">Sebelumnya</a>{% endif %}{% if page.has_next %}<a href="?{{ pagination_prefix }}page={{ page.next_page_number }}">Berikutnya</a>{% endif %}</div></nav>{% endif %}
+</section>
+{% endblock %}

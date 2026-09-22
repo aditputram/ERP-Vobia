@@ -136,3 +136,36 @@ class JournalLine(models.Model):
 
     def __str__(self):
         return f"{self.entry.number} · {self.line_number}"
+
+
+class ProductSalesAccount(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    product = models.OneToOneField(
+        "master_data.Product",
+        on_delete=models.PROTECT,
+        related_name="finance_sales_setting",
+    )
+    sales_account = models.ForeignKey(
+        Account,
+        on_delete=models.PROTECT,
+        related_name="product_sales_settings",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("product__name",)
+
+    def clean(self):
+        super().clean()
+        if self.sales_account_id and (
+            self.sales_account.account_type != "REVE"
+            or not self.sales_account.is_active
+            or not self.sales_account.is_postable
+        ):
+            raise ValidationError(
+                {"sales_account": "Pilih akun transaksi Pendapatan yang masih aktif."}
+            )
+
+    def __str__(self):
+        return f"{self.product} → {self.sales_account}"

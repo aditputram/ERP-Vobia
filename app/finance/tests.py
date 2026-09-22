@@ -12,10 +12,11 @@ from django.utils import timezone
 from openpyxl import Workbook
 
 from audit.models import AuditEvent
+from master_data.models import Category, Product, ProductStatus, Subcategory
 
 from .importers import stage_finance_cutover
 from .catalog import FEATURES
-from .models import Account, JournalEntry, JournalLine
+from .models import Account, JournalEntry, JournalLine, ProductSalesAccount
 from .services import account_balances, post_journal
 
 
@@ -256,6 +257,66 @@ class FinanceJournalTests(TestCase):
 
         self.assertEqual(self.client.get(reverse("finance:feature", args=["other-payment"])).status_code, 200)
         self.assertEqual(self.client.get(reverse("finance:feature", args=["other-deposit"])).status_code, 403)
+
+    def test_sales_settings_filters_and_saves_product_revenue_account(self):
+        regular = ProductStatus.objects.create(code="FIN-REG", name="Regular Finance")
+        seasonal = ProductStatus.objects.create(code="FIN-SEA", name="Seasonal Finance")
+        shirts = Category.objects.create(code="FIN-SHIRT", name="Finance Shirts")
+        pants = Category.objects.create(code="FIN-PANTS", name="Finance Pants")
+        oxford = Subcategory.objects.create(category=shirts, code="FIN-OXF", name="Finance Oxford")
+        product = Product.objects.create(
+            code="FIN-PRODUCT-1",
+            parent_sku="FIN-PARENT-1",
+            name="Finance Product One",
+            status=regular,
+            category=shirts,
+            subcategory=oxford,
+        )
+        Product.objects.create(
+            code="FIN-PRODUCT-2",
+            parent_sku="FIN-PARENT-2",
+            name="Finance Product Two",
+            status=seasonal,
+            category=pants,
+        )
+        revenue, _ = Account.objects.update_or_create(
+            code="499999",
+            defaults={"name": "Product Sales Revenue", "account_type": "REVE", "is_postable": True, "is_active": True},
+        )
+        self.client.force_login(self.user)
+
+        page = self.client.get(reverse("finance:sales_settings"), {"product_status": regular.id})
+
+        self.assertContains(page, "Finance Product One")
+        self.assertNotContains(page, "Finance Product Two")
+        self.assertContains(page, "Finance Shirts")
+        self.assertNotContains(page, "Finance Pants")
+
+        response = self.client.post(
+            f"{reverse('finance:sales_settings')}?product_status={regular.id}",
+            {"product_id": product.id, "sales_account_id": revenue.id},
+        )
+
+        self.assertRedirects(response, f"{reverse('finance:sales_settings')}?product_status={regular.id}")
+        self.assertEqual(ProductSalesAccount.objects.get(product=product).sales_account, revenue)
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="finance_sales_account_mapping_updated",
+                entity_id=product.id,
+            ).exists()
+        )
+
+    def test_sales_settings_viewer_cannot_change_mapping(self):
+        viewer = get_user_model().objects.create_user(
+            username="finance-settings-viewer",
+            password="test",
+            module_access={"finance": "view"},
+            tab_access={"finance": ["sales_settings"]},
+        )
+        self.client.force_login(viewer)
+
+        self.assertEqual(self.client.get(reverse("finance:sales_settings")).status_code, 200)
+        self.assertEqual(self.client.post(reverse("finance:sales_settings"), {}).status_code, 403)
 
     def test_cash_workspace_prefills_matching_journal_workflow(self):
         self.client.force_login(self.user)

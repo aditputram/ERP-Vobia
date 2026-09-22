@@ -315,6 +315,47 @@ class FinanceJournalTests(TestCase):
         self.assertEqual(self.client.get(reverse("finance:sales_settings")).status_code, 200)
         self.assertEqual(self.client.post(reverse("finance:sales_settings"), {}).status_code, 403)
 
+    def test_sales_settings_bulk_updates_selected_products(self):
+        regular = ProductStatus.objects.create(code="FIN-BULK", name="Regular Finance Bulk")
+        category = Category.objects.create(code="FIN-BULK-CAT", name="Finance Bulk Category")
+        products = [
+            Product.objects.create(
+                code=f"FIN-BULK-{index}",
+                parent_sku=f"FIN-BULK-PARENT-{index}",
+                name=f"Finance Bulk Product {index}",
+                status=regular,
+                category=category,
+            )
+            for index in range(1, 3)
+        ]
+        revenue = Account.objects.get(code="410001")
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("finance:sales_settings"),
+            {
+                "action": "bulk_update",
+                "product_ids": [product.id for product in products],
+                "sales_account_id": revenue.id,
+            },
+        )
+
+        self.assertRedirects(response, reverse("finance:sales_settings"))
+        self.assertEqual(
+            ProductSalesAccount.objects.filter(product__in=products, sales_account=revenue).count(),
+            2,
+        )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                action="finance_sales_account_mapping_updated",
+                entity_id__in=[product.id for product in products],
+            ).count(),
+            2,
+        )
+        page = self.client.get(reverse("finance:sales_settings"), {"q": "Finance Bulk Product"})
+        self.assertContains(page, "Ubah Massal")
+        self.assertContains(page, "data-sales-select-all")
+
     def test_cash_workspace_prefills_matching_journal_workflow(self):
         self.client.force_login(self.user)
 

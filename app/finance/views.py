@@ -347,8 +347,54 @@ def sales_settings(request):
     if request.method == "POST":
         if not can_edit:
             return HttpResponseForbidden("Akun ini hanya memiliki akses lihat.")
-        product = get_object_or_404(Product, pk=request.POST.get("product_id"))
+        action = request.POST.get("action", "single_update")
         account_id = request.POST.get("sales_account_id", "").strip()
+        if action == "bulk_update":
+            product_ids = list(dict.fromkeys(request.POST.getlist("product_ids")))
+            if not product_ids:
+                messages.error(request, "Pilih minimal satu Product untuk diubah massal.")
+                return redirect(request.get_full_path())
+            account = get_object_or_404(
+                Account,
+                pk=account_id,
+                account_type="REVE",
+                is_active=True,
+                is_postable=True,
+                parent__code="4100",
+            )
+            selected_products = list(Product.objects.filter(pk__in=product_ids).order_by("name", "code"))
+            if len(selected_products) != len(product_ids):
+                messages.error(request, "Sebagian Product yang dipilih tidak ditemukan.")
+                return redirect(request.get_full_path())
+            with transaction.atomic():
+                current_settings = {
+                    str(setting.product_id): setting
+                    for setting in ProductSalesAccount.objects.select_related("sales_account").filter(
+                        product_id__in=product_ids
+                    )
+                }
+                for product in selected_products:
+                    setting = current_settings.get(str(product.id))
+                    before_values = {"sales_account": setting.sales_account.code if setting else ""}
+                    setting = setting or ProductSalesAccount(product=product)
+                    setting.sales_account = account
+                    setting.full_clean()
+                    setting.save()
+                    record_audit(
+                        actor=request.user,
+                        action="finance_sales_account_mapping_updated",
+                        entity_type="master_data.product",
+                        entity_id=product.id,
+                        before_values=before_values,
+                        after_values={"sales_account": account.code},
+                    )
+            messages.success(
+                request,
+                f"Sales Account untuk {len(selected_products)} Product berhasil diubah massal.",
+            )
+            return redirect(request.get_full_path())
+
+        product = get_object_or_404(Product, pk=request.POST.get("product_id"))
         with transaction.atomic():
             current = ProductSalesAccount.objects.select_related("sales_account").filter(product=product).first()
             before_values = {

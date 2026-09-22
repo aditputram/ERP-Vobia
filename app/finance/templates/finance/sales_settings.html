@@ -11,10 +11,32 @@
 </form>
 <section class="metric-grid three section-gap"><article class="metric-card"><span>Total Product</span><strong>{{ total_products|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Hasil Filter</span><strong>{{ filtered_count|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Sudah Dipetakan</span><strong>{{ mapped_count|floatformat:"0g" }}</strong></article></section>
 <section class="panel section-gap">
-    <div class="panel-header"><div><h2>Mapping Product ke Sales Account</h2><p>Setiap SKU size mengikuti akun penjualan Product/Parent SKU yang sama.</p></div></div>
-    <div class="table-wrap warehouse-table-wrap"><table class="finance-sales-settings-table"><thead><tr><th>Parent SKU</th><th>Product</th><th>Status</th><th>Category</th><th>Subcategory</th><th>Sales Account</th></tr></thead><tbody>
-    {% for product in page.object_list %}<tr><td><span class="code-label">{{ product.parent_sku|default:product.code }}</span></td><td><strong>{{ product.name }}</strong>{% if product.article %}<br><small>{{ product.article }}</small>{% endif %}</td><td>{{ product.status.name }}</td><td>{{ product.category.name }}</td><td>{{ product.subcategory.name|default:"—" }}</td><td>{% if can_edit %}<form method="post" action="{% if current_query %}?{{ current_query }}{% endif %}" class="finance-sales-settings-form" data-preserve-scroll>{% csrf_token %}<input type="hidden" name="product_id" value="{{ product.id }}"><select name="sales_account_id" aria-label="Sales Account {{ product.name }}"><option value="">Belum ditentukan</option>{% for account in account_options %}<option value="{{ account.id }}" {% if product.sales_account_id == account.id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select><button class="secondary-button compact" type="submit">Simpan</button></form>{% else %}{% if product.sales_account_id %}{% for account in account_options %}{% if product.sales_account_id == account.id %}{{ account.code }} · {{ account.name }}{% endif %}{% endfor %}{% else %}Belum ditentukan{% endif %}{% endif %}</td></tr>{% empty %}<tr><td colspan="6"><div class="empty-state">Tidak ada Product yang cocok dengan filter.</div></td></tr>{% endfor %}
+    <div class="panel-header"><div><h2>Mapping Product ke Sales Account</h2><p>Setiap SKU size mengikuti akun penjualan Product/Parent SKU yang sama.</p></div>{% if can_edit %}<form id="finance-sales-bulk-form" method="post" action="{% if current_query %}?{{ current_query }}{% endif %}" class="finance-sales-bulk-form" data-sales-bulk-form data-preserve-scroll hidden onsubmit="return confirm('Ubah Sales Account untuk seluruh Product yang dipilih?');">{% csrf_token %}<input type="hidden" name="action" value="bulk_update"><span><strong data-sales-bulk-count>0</strong> Product terpilih</span><select name="sales_account_id" aria-label="Sales Account untuk ubah massal" required><option value="">Pilih Sales Account</option>{% for account in account_options %}<option value="{{ account.id }}">{{ account.code }} · {{ account.name }}</option>{% endfor %}</select><button class="primary-button compact" type="submit">Ubah Massal</button></form>{% endif %}</div>
+    <div class="table-wrap warehouse-table-wrap"><table class="finance-sales-settings-table"><thead><tr>{% if can_edit %}<th><label class="finance-sales-select-all"><input type="checkbox" data-sales-select-all><span>Pilih semua</span></label></th>{% endif %}<th>Parent SKU</th><th>Product</th><th>Status</th><th>Category</th><th>Subcategory</th><th>Sales Account</th></tr></thead><tbody>
+    {% for product in page.object_list %}<tr>{% if can_edit %}<td><input type="checkbox" name="product_ids" value="{{ product.id }}" form="finance-sales-bulk-form" aria-label="Pilih {{ product.name }}" data-sales-product-checkbox></td>{% endif %}<td><span class="code-label">{{ product.parent_sku|default:product.code }}</span></td><td><strong>{{ product.name }}</strong>{% if product.article %}<br><small>{{ product.article }}</small>{% endif %}</td><td>{{ product.status.name }}</td><td>{{ product.category.name }}</td><td>{{ product.subcategory.name|default:"—" }}</td><td>{% if can_edit %}<form method="post" action="{% if current_query %}?{{ current_query }}{% endif %}" class="finance-sales-settings-form" data-preserve-scroll>{% csrf_token %}<input type="hidden" name="product_id" value="{{ product.id }}"><select name="sales_account_id" aria-label="Sales Account {{ product.name }}"><option value="">Belum ditentukan</option>{% for account in account_options %}<option value="{{ account.id }}" {% if product.sales_account_id == account.id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select><button class="secondary-button compact" type="submit">Simpan</button></form>{% else %}{% if product.sales_account_id %}{% for account in account_options %}{% if product.sales_account_id == account.id %}{{ account.code }} · {{ account.name }}{% endif %}{% endfor %}{% else %}Belum ditentukan{% endif %}{% endif %}</td></tr>{% empty %}<tr><td colspan="{% if can_edit %}7{% else %}6{% endif %}"><div class="empty-state">Tidak ada Product yang cocok dengan filter.</div></td></tr>{% endfor %}
     </tbody></table></div>
     {% if page.has_other_pages %}<nav class="pagination"><span>Page {{ page.number|floatformat:"0g" }} / {{ page.paginator.num_pages|floatformat:"0g" }}</span><div>{% if page.has_previous %}<a href="?{{ pagination_prefix }}page={{ page.previous_page_number }}">Sebelumnya</a>{% endif %}{% if page.has_next %}<a href="?{{ pagination_prefix }}page={{ page.next_page_number }}">Berikutnya</a>{% endif %}</div></nav>{% endif %}
 </section>
+{% if can_edit %}<script>
+(() => {
+    const bulkForm = document.querySelector("[data-sales-bulk-form]");
+    const selectAll = document.querySelector("[data-sales-select-all]");
+    const productCheckboxes = [...document.querySelectorAll("[data-sales-product-checkbox]")];
+    if (!bulkForm || !selectAll) return;
+    const count = bulkForm.querySelector("[data-sales-bulk-count]");
+    const syncBulkForm = () => {
+        const selectedCount = productCheckboxes.filter((checkbox) => checkbox.checked).length;
+        bulkForm.hidden = selectedCount === 0;
+        count.textContent = selectedCount;
+        selectAll.checked = productCheckboxes.length > 0 && selectedCount === productCheckboxes.length;
+        selectAll.indeterminate = selectedCount > 0 && selectedCount < productCheckboxes.length;
+    };
+    selectAll.addEventListener("change", () => {
+        productCheckboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; });
+        syncBulkForm();
+    });
+    productCheckboxes.forEach((checkbox) => checkbox.addEventListener("change", syncBulkForm));
+    syncBulkForm();
+})();
+</script>{% endif %}
 {% endblock %}

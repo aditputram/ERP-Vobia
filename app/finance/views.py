@@ -265,7 +265,11 @@ def trial_balance(request):
 def balance_sheet(request):
     as_of = _selected_date(request, "as_of", date.today())
     include_draft = request.GET.get("mode") == "preview"
-    rows = account_balances(end_date=as_of, include_draft=include_draft)
+    rows = account_balances(
+        end_date=as_of,
+        include_draft=include_draft,
+        include_opening_draft=True,
+    )
     groups = {
         "assets": [dict(row, amount=row["net"]) for row in rows if row["account"].is_postable and row["account"].account_type in {"BANK", "AREC", "INTR", "OASS", "OCAS", "FASS", "DEPR"} and row["net"]],
         "liabilities": [dict(row, amount=-row["net"]) for row in rows if row["account"].is_postable and row["account"].account_type in {"APAY", "OCLY", "LTLY"} and row["net"]],

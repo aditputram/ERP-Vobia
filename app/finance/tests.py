@@ -143,6 +143,29 @@ class FinanceJournalTests(TestCase):
         self.assertContains(response, "Inventory")
         self.assertEqual(response.context["difference"], Decimal("0"))
 
+    def test_balance_sheet_uses_draft_opening_but_excludes_other_drafts(self):
+        inventory, _ = Account.objects.update_or_create(
+            code="110401",
+            defaults={"name": "Opening Inventory", "account_type": "INTR", "is_postable": True},
+        )
+        opening = JournalEntry.objects.get(number="OPENING-20260831")
+        opening.lines.all().delete()
+        opening.status = JournalEntry.Status.DRAFT
+        opening.save(update_fields=("status",))
+        JournalLine.objects.create(entry=opening, line_number=1, account=inventory, debit=50, credit=0)
+        JournalLine.objects.create(entry=opening, line_number=2, account=self.capital, debit=0, credit=50)
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("finance:balance_sheet"),
+            {"as_of": "2026-09-22", "mode": "posted"},
+        )
+
+        self.assertContains(response, "Opening Inventory")
+        self.assertEqual(response.context["totals"]["assets"], Decimal("50"))
+        self.assertEqual(response.context["totals"]["equity"], Decimal("50"))
+        self.assertEqual(response.context["difference"], Decimal("0"))
+
     def test_regular_user_does_not_gain_finance_access_by_default(self):
         user = get_user_model().objects.create_user(username="legacy", password="test")
         self.client.force_login(user)

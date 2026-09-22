@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Max, Sum
+from django.db.models import Max, Q, Sum
 from django.utils import timezone
 
 from audit.services import record_audit
@@ -139,12 +139,18 @@ def account_balances(
     start_date=None,
     end_date=None,
     include_draft=False,
+    include_opening_draft=False,
     exclude_opening=False,
     source=None,
 ):
     entries = JournalEntry.objects.all()
     if not include_draft:
-        entries = entries.filter(status=JournalEntry.Status.POSTED)
+        if include_opening_draft:
+            entries = entries.filter(
+                Q(status=JournalEntry.Status.POSTED) | Q(source=JournalEntry.Source.OPENING)
+            )
+        else:
+            entries = entries.filter(status=JournalEntry.Status.POSTED)
     if exclude_opening:
         entries = entries.exclude(source=JournalEntry.Source.OPENING)
     if source:

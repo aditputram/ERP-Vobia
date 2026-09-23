@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Max, Q, Sum
+from django.db.models import Exists, Max, OuterRef, Q, Sum
 from django.utils import timezone
 
 from audit.services import record_audit
@@ -262,10 +262,13 @@ def create_sales_journal_draft(
     from master_data.models import SKU
     from sales.models import SalesOrderLine
 
-    sales_lines = SalesOrderLine.objects.select_for_update().filter(
+    allocated_sales_lines = SalesJournalAllocation.objects.filter(sales_line_id=OuterRef("pk"))
+    sales_lines = SalesOrderLine.objects.annotate(
+        _has_finance_allocation=Exists(allocated_sales_lines)
+    ).select_for_update().filter(
         is_counted=True,
         order__order_date__range=(start_date, end_date),
-        finance_journal_allocation__isnull=True,
+        _has_finance_allocation=False,
     )
     source_groups = tuple(dict.fromkeys(group for group in source_groups if group in {"Marketplace", "Other"}))
     sources = tuple(dict.fromkeys(source for source in sources if source))

@@ -209,6 +209,7 @@ class ChatTests(TestCase):
         self.assertContains(embedded, "composer.requestSubmit()")
         self.assertContains(embedded, "!event.shiftKey")
         self.assertContains(embedded, "requestAnimationFrame")
+        self.assertContains(embedded, "ResizeObserver")
         self.assertContains(embedded, "body?.focus({preventScroll:true})")
 
         response = self.client.post(

@@ -28,6 +28,16 @@
 const stream=document.querySelector('[data-chat-stream]');
 const chatParams=new URLSearchParams(location.search);
 const scrollToLatest=()=>{if(stream&&!chatParams.has('q'))stream.scrollTop=stream.scrollHeight;};
+const settleOnLatest=()=>{
+    if(!stream||chatParams.has('q'))return;
+    const observer=new ResizeObserver(scrollToLatest);
+    [...stream.children].forEach(message=>observer.observe(message));
+    const stop=()=>observer.disconnect();
+    stream.addEventListener('wheel',stop,{once:true,passive:true});
+    stream.addEventListener('pointerdown',stop,{once:true});
+    setTimeout(stop,3000);
+    requestAnimationFrame(scrollToLatest);
+};
 const personalMenu=document.querySelector('[data-personal-menu]');
 document.addEventListener('click',event=>{if(personalMenu?.open&&!personalMenu.contains(event.target))personalMenu.open=false;});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&personalMenu?.open)personalMenu.open=false;});
@@ -50,7 +60,8 @@ document.querySelectorAll('[data-reply-url]').forEach(message=>{
 const composer=document.querySelector('#chat-composer');
 const body=composer?.querySelector('#id_body');
 if(stream&&!chatParams.has('q')){
-    requestAnimationFrame(()=>{scrollToLatest();body?.focus({preventScroll:true});});
+    settleOnLatest();
+    requestAnimationFrame(()=>body?.focus({preventScroll:true}));
     addEventListener('load',scrollToLatest,{once:true});
 }
 const attachmentInput=composer?.querySelector('#id_attachment');

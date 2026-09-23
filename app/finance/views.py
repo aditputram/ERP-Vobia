@@ -600,6 +600,47 @@ def feature(request, slug):
             sales_totals={key: value or 0 for key, value in totals.items()},
             data_note="Menggunakan transaksi dan COGS snapshot canonical dari modul Sales. Posting jurnal Finance akan diaktifkan terpisah sesuai cutover 31 Agustus 2026.",
         )
+    elif slug in {"sales-return", "sales-return-per-item"}:
+        from inventory.models import PhysicalReturnReceipt
+
+        received_returns = PhysicalReturnReceipt.objects.select_related(
+            "sales_line__order",
+            "warehouse",
+            "recorded_by",
+        ).order_by("-received_date", "-created_at")
+        totals = received_returns.aggregate(receipts=Count("id"), quantity=Sum("quantity"))
+        context.update(
+            columns=(
+                "Tanggal Receive",
+                "Source",
+                "No. Pesanan",
+                "SKU",
+                "Product",
+                "Qty Receive",
+                "Status Receive",
+                "Warehouse",
+                "Received By",
+            ),
+            rows=[
+                (
+                    receipt.received_date,
+                    receipt.sales_line.order.display_source,
+                    receipt.sales_line.order.order_number,
+                    receipt.sales_line.sku_code_snapshot,
+                    receipt.sales_line.product_name_snapshot,
+                    receipt.quantity,
+                    receipt.get_condition_display(),
+                    receipt.warehouse.name,
+                    receipt.recorded_by.get_full_name() or receipt.recorded_by.username,
+                )
+                for receipt in received_returns[:300]
+            ],
+            metrics=(
+                ("Return received", totals["receipts"] or 0),
+                ("Qty received", totals["quantity"] or 0),
+            ),
+            data_note="Hanya Sales Return yang sudah diterima tim Warehouse. Status Receive mengikuti kondisi yang dicatat di Return Log.",
+        )
     elif spec["workflow"]:
         journals = JournalEntry.objects.filter(source_metadata__workflow=spec["workflow"]).prefetch_related("lines")[:200]
         context.update(
@@ -650,27 +691,6 @@ def feature(request, slug):
                 metrics=(("Total SKU", SKU.objects.count()),),
                 data_note="Menggunakan Bank Data canonical; perubahan master tetap dilakukan dari Master Data.",
             )
-    elif slug in {"sales-return", "sales-return-per-item"}:
-        from sales.models import SalesOrderLine
-
-        lines = SalesOrderLine.objects.filter(current_status__iexact="Retur").select_related("order")[:300]
-        context.update(
-            columns=("Tanggal", "Source", "No. Pesanan", "SKU", "Product", "Qty", "Net"),
-            rows=[
-                (
-                    row.order.order_date,
-                    row.order.display_source,
-                    row.order.order_number,
-                    row.sku_code_snapshot,
-                    row.product_name_snapshot,
-                    row.quantity,
-                    row.total_net_sales,
-                )
-                for row in lines
-            ],
-            metrics=(("Baris return", SalesOrderLine.objects.filter(current_status__iexact="Retur").count()),),
-            data_note="Return mengikuti status canonical Sales; pengakuan kas/piutang menunggu workflow Finance.",
-        )
     elif slug in {"purchase-invoice", "purchase-invoice-list"}:
         from purchasing.models import PurchaseOrder
 

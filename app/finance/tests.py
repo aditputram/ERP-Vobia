@@ -246,6 +246,63 @@ class FinanceJournalTests(TestCase):
         self.assertContains(response, "COGS")
         self.assertNotContains(response, "Buat Sales Invoice")
 
+    def test_sales_return_only_shows_returns_received_by_warehouse(self):
+        from inventory.models import PhysicalReturnReceipt
+        from master_data.models import Warehouse
+        from sales.models import SalesOrder, SalesOrderLine
+
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="FINANCE-RETURN-001",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 12, 10, 0)),
+            order_date=date(2026, 9, 12),
+            current_status="Retur",
+            source_status="Retur",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        received_line = SalesOrderLine.objects.create(
+            order=order,
+            sku_code_snapshot="FINANCE-RETURN-RECEIVED",
+            product_name_snapshot="Received Return Product",
+            current_status="Retur",
+            quantity=2,
+            net_unit_price=Decimal("90000"),
+            total_net_sales=Decimal("180000"),
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku_code_snapshot="FINANCE-RETURN-PENDING",
+            product_name_snapshot="Pending Return Product",
+            current_status="Retur",
+            quantity=1,
+            net_unit_price=Decimal("80000"),
+            total_net_sales=Decimal("80000"),
+        )
+        warehouse = Warehouse.objects.create(code="FIN-RET-WH", name="Finance Return Warehouse")
+        PhysicalReturnReceipt.objects.create(
+            sales_line=received_line,
+            received_date=date(2026, 9, 15),
+            quantity=2,
+            warehouse=warehouse,
+            condition=PhysicalReturnReceipt.Condition.SELLABLE,
+            recorded_by=self.user,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("finance:feature", args=["sales-return"]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "FINANCE-RETURN-RECEIVED")
+        self.assertContains(response, "Received Return Product")
+        self.assertContains(response, "Sellable")
+        self.assertContains(response, "Finance Return Warehouse")
+        self.assertNotContains(response, "FINANCE-RETURN-PENDING")
+        self.assertNotContains(response, "Buat Sales Return")
+        self.assertEqual(response.context["metrics"], (("Return received", 1), ("Qty received", Decimal("2"))))
+
     def test_finance_workspace_respects_exact_tab_permission(self):
         user = get_user_model().objects.create_user(
             username="cashier",

@@ -7,7 +7,7 @@
     <header>
         <strong>Messages</strong>
         <div class="chat-popup-actions">
-            <button class="chat-push-button" type="button" data-push-enable data-config-url="{% url 'chat:push_config' %}" data-subscribe-url="{% url 'chat:push_subscribe' %}" data-unsubscribe-url="{% url 'chat:push_unsubscribe' %}">Aktifkan notifikasi</button>
+            <button class="chat-push-button is-active" type="button" data-push-enable data-push-preference="vobiaPushDisabled:{{ request.user.pk }}" data-config-url="{% url 'chat:push_config' %}" data-subscribe-url="{% url 'chat:push_subscribe' %}" data-unsubscribe-url="{% url 'chat:push_unsubscribe' %}">Nonaktifkan notifikasi</button>
             <button type="button" aria-label="Tutup Messages" data-chat-popup-close>×</button>
         </div>
     </header>
@@ -197,6 +197,8 @@
     if (!button) return;
     const csrfToken = popup.querySelector('input[name="csrfmiddlewaretoken"]')?.value;
     const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    const preferenceKey = button.dataset.pushPreference;
+    const disabledByUser = () => localStorage.getItem(preferenceKey) === '1';
     let currentSubscription = null;
     const decodeKey = value => {
         const padding = '='.repeat((4 - value.length % 4) % 4);
@@ -205,12 +207,14 @@
     };
     const setActive = subscription => {
         currentSubscription = subscription;
+        localStorage.removeItem(preferenceKey);
         button.textContent = 'Nonaktifkan notifikasi';
         button.classList.add('is-active');
         button.disabled = false;
     };
-    const setInactive = () => {
+    const setInactive = remember => {
         currentSubscription = null;
+        if (remember) localStorage.setItem(preferenceKey, '1');
         button.textContent = 'Aktifkan notifikasi';
         button.classList.remove('is-active');
         button.disabled = false;
@@ -269,7 +273,7 @@
         }
     };
     const unsubscribe = async () => {
-        if (!currentSubscription) return;
+        if (!currentSubscription) { setInactive(true); return; }
         button.disabled = true;
         button.textContent = 'Menonaktifkan…';
         try {
@@ -280,7 +284,7 @@
                 body: JSON.stringify({endpoint: currentSubscription.endpoint}),
             });
             if (!response.ok) throw new Error('Subscription gagal dihapus.');
-            setInactive();
+            setInactive(true);
         } catch (error) {
             button.disabled = false;
             button.textContent = 'Coba nonaktifkan lagi';
@@ -290,15 +294,22 @@
     if (!supported) {
         button.textContent = 'Browser belum mendukung';
         button.disabled = true;
+    } else if (disabledByUser()) {
+        setInactive(false);
     } else if (Notification.permission === 'denied') {
         button.textContent = 'Notif laptop diblokir';
         button.disabled = true;
     } else if (Notification.permission === 'granted') {
-        navigator.serviceWorker.getRegistration('/').then(registration =>
-            registration?.pushManager.getSubscription()
-        ).then(subscription => {
-            if (subscription) subscribe(false);
-        }).catch(console.warn);
+        subscribe(false);
+    } else {
+        const activateDefaultNotifications = event => {
+            if (button.contains(event.target)) return;
+            document.removeEventListener('pointerdown', activateDefaultNotifications);
+            document.removeEventListener('keydown', activateDefaultNotifications);
+            if (!disabledByUser()) subscribe(true);
+        };
+        document.addEventListener('pointerdown', activateDefaultNotifications);
+        document.addEventListener('keydown', activateDefaultNotifications);
     }
     button.addEventListener('click', () => button.classList.contains('is-active') ? unsubscribe() : subscribe(true));
 })();

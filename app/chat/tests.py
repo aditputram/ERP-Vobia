@@ -67,19 +67,23 @@ class ChatTests(TestCase):
         self.assertContains(response, "personalMenu.contains")
         self.assertContains(response, "pointerdown")
 
-    def test_laptop_notification_activation_is_in_message_popup_for_all_users(self):
+    def test_laptop_notifications_default_active_in_message_popup_for_all_users(self):
         for user in (self.marketing, self.rnd):
             self.client.force_login(user)
             response = self.client.get(reverse("dashboard:index"))
             self.assertEqual(response.status_code, 200)
-            self.assertContains(response, 'class="chat-push-button"')
+            self.assertContains(response, 'class="chat-push-button is-active"')
             self.assertEqual(response.content.count(b"type=\"button\" data-push-enable"), 1)
+            self.assertContains(response, f'data-push-preference="vobiaPushDisabled:{user.pk}"')
             self.assertContains(response, 'data-config-url="/messages/push/config/"')
             self.assertContains(response, 'data-subscribe-url="/messages/push/subscribe/"')
             self.assertContains(response, 'data-unsubscribe-url="/messages/push/unsubscribe/"')
-            self.assertContains(response, '>Aktifkan notifikasi</button>')
+            self.assertContains(response, '>Nonaktifkan notifikasi</button>')
             self.assertContains(response, "Nonaktifkan notifikasi")
-            self.assertContains(response, "registration?.pushManager.getSubscription()")
+            self.assertContains(response, "disabledByUser()")
+            self.assertContains(response, "localStorage.setItem(preferenceKey, '1')")
+            self.assertContains(response, "activateDefaultNotifications")
+            self.assertContains(response, "subscribe(false)")
             self.assertContains(response, "playNotificationSound")
 
     def test_recently_active_conversation_moves_to_top(self):

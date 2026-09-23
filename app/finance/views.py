@@ -389,6 +389,66 @@ def _profit_loss_data(start, end, accounts):
     }
 
 
+def _sales_dimension_data(start, end, dimension, report):
+    allocations = SalesJournalAllocation.objects.filter(entry__entry_date__range=(start, end))
+    if dimension == "category":
+        values = allocations.values("sales_line__category_snapshot").annotate(
+            gross=Sum("gross_sales"), net=Sum("net_sales"), cogs=Sum("cogs")
+        )
+    else:
+        values = allocations.values(
+            "sales_line__order__source_label", "sales_line__order__source"
+        ).annotate(gross=Sum("gross_sales"), net=Sum("net_sales"), cogs=Sum("cogs"))
+
+    grouped = {}
+    for value in values:
+        label = (
+            value.get("sales_line__category_snapshot")
+            if dimension == "category"
+            else value.get("sales_line__order__source_label") or value.get("sales_line__order__source")
+        ) or "Tanpa kategori/source"
+        row = grouped.setdefault(
+            label,
+            {"label": label, "gross": Decimal("0"), "discount": Decimal("0"), "net": Decimal("0"), "cogs": Decimal("0")},
+        )
+        row["gross"] += value["gross"] or Decimal("0")
+        row["net"] += value["net"] or Decimal("0")
+        row["cogs"] += value["cogs"] or Decimal("0")
+        row["discount"] += (value["gross"] or Decimal("0")) - (value["net"] or Decimal("0"))
+
+    official = {
+        "gross": report["gross_sales_total"],
+        "discount": -sum(
+            (
+                row["amount"]
+                for row in report["revenue"]
+                if row["account"].code == "4401" or getattr(row["account"].parent, "code", None) == "4401"
+            ),
+            Decimal("0"),
+        ),
+        "cogs": sum(
+            (row["amount"] for row in report["expense"] if row["account"].account_type == "COGS"),
+            Decimal("0"),
+        ),
+    }
+    official["net"] = official["gross"] - official["discount"]
+    allocated = {
+        key: sum((row[key] for row in grouped.values()), Decimal("0"))
+        for key in ("gross", "discount", "net", "cogs")
+    }
+    residual = {key: official[key] - allocated[key] for key in allocated}
+    if any(residual.values()):
+        grouped["Jurnal tanpa dimensi"] = {"label": "Jurnal tanpa dimensi", **residual}
+
+    rows = sorted(grouped.values(), key=lambda row: row["label"])
+    for row in rows:
+        row["gross_profit"] = row["net"] - row["cogs"]
+        row["gpm_rate"] = row["gross_profit"] / row["net"] * 100 if row["net"] else None
+    official["gross_profit"] = official["net"] - official["cogs"]
+    official["gpm_rate"] = official["gross_profit"] / official["net"] * 100 if official["net"] else None
+    return rows, official
+
+
 def _comparison_groups(reports, key):
     group_definitions = {}
     for report in reports:
@@ -425,6 +485,9 @@ def profit_loss(request):
     mode = request.GET.get("mode", "standard")
     if mode not in {"standard", "multi_period", "multi_year"}:
         mode = "standard"
+    sales_view = request.GET.get("sales_view", "default")
+    if sales_view not in {"default", "category", "source"} or mode != "standard":
+        sales_view = "default"
 
     start = _selected_date(request, "start", date(today.year, today.month, 1))
     end = _selected_date(request, "end", today)
@@ -496,6 +559,18 @@ def profit_loss(request):
     }
     if report:
         context.update(report)
+        context["sales_view"] = sales_view
+        if sales_view != "default":
+            context["sales_dimension_label"] = "Kategori" if sales_view == "category" else "Source"
+            context["sales_dimension_rows"], context["sales_dimension_total"] = _sales_dimension_data(
+                start, end, sales_view, report
+            )
+            context["other_revenue_groups"] = [
+                group for group in report["revenue_groups"] if group["account"].code not in {"4100", "4401"}
+            ]
+            context["other_expense_groups"] = [
+                group for group in report["expense_groups"] if group["account"].account_type != "COGS"
+            ]
     return render(
         request,
         "finance/profit_loss.html",

@@ -568,6 +568,28 @@ class FinanceJournalTests(TestCase):
         self.assertContains(response, "Subtotal Beban Pokok Penjualan")
         self.assertContains(response, "Total Pendapatan Bersih")
 
+        category_view = self.client.get(
+            reverse("finance:profit_loss"),
+            {"start": "2026-09-01", "end": "2026-09-30", "sales_view": "category"},
+        )
+        category_row = category_view.context["sales_dimension_rows"][0]
+        self.assertEqual(category_view.context["sales_view"], "category")
+        self.assertEqual(category_row["label"], "Finance T-Shirt")
+        self.assertEqual(category_row["gross"], Decimal("200000"))
+        self.assertEqual(category_row["discount"], Decimal("20000"))
+        self.assertEqual(category_row["net"], Decimal("180000"))
+        self.assertEqual(category_row["cogs"], Decimal("120000"))
+        self.assertContains(category_view, "Rincian Sales per Kategori")
+
+        source_view = self.client.get(
+            reverse("finance:profit_loss"),
+            {"start": "2026-09-01", "end": "2026-09-30", "sales_view": "source"},
+        )
+        source_row = source_view.context["sales_dimension_rows"][0]
+        self.assertEqual(source_row["label"], "Shopee")
+        self.assertEqual(source_view.context["sales_dimension_total"]["gross_profit"], Decimal("60000"))
+        self.assertContains(source_view, "Rincian Sales per Source")
+
         multi_period = self.client.get(
             reverse("finance:profit_loss"),
             {"mode": "multi_period", "start_month": "2026-08", "end_month": "2026-09"},

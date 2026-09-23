@@ -603,13 +603,22 @@ def feature(request, slug):
     elif slug in {"sales-return", "sales-return-per-item"}:
         from inventory.models import PhysicalReturnReceipt
 
+        receipt_status = request.GET.get("receipt_status", "")
+        receipt_statuses = dict(PhysicalReturnReceipt.Condition.choices)
+        if receipt_status not in receipt_statuses:
+            receipt_status = ""
         received_returns = PhysicalReturnReceipt.objects.select_related(
             "sales_line__order",
             "warehouse",
             "recorded_by",
         ).order_by("-received_date", "-created_at")
+        if receipt_status:
+            received_returns = received_returns.filter(condition=receipt_status)
         totals = received_returns.aggregate(receipts=Count("id"), quantity=Sum("quantity"))
         context.update(
+            sales_return=True,
+            receipt_status=receipt_status,
+            receipt_status_options=PhysicalReturnReceipt.Condition.choices,
             columns=(
                 "Tanggal Receive",
                 "Source",
@@ -628,7 +637,7 @@ def feature(request, slug):
                     receipt.sales_line.order.order_number,
                     receipt.sales_line.sku_code_snapshot,
                     receipt.sales_line.product_name_snapshot,
-                    receipt.quantity,
+                    int(receipt.quantity),
                     receipt.get_condition_display(),
                     receipt.warehouse.name,
                     receipt.recorded_by.get_full_name() or receipt.recorded_by.username,

@@ -272,14 +272,23 @@ class FinanceJournalTests(TestCase):
             net_unit_price=Decimal("90000"),
             total_net_sales=Decimal("180000"),
         )
+        damaged_line = SalesOrderLine.objects.create(
+            order=order,
+            sku_code_snapshot="FINANCE-RETURN-DAMAGED",
+            product_name_snapshot="Damaged Return Product",
+            current_status="Retur",
+            quantity=1,
+            net_unit_price=Decimal("80000"),
+            total_net_sales=Decimal("80000"),
+        )
         SalesOrderLine.objects.create(
             order=order,
             sku_code_snapshot="FINANCE-RETURN-PENDING",
             product_name_snapshot="Pending Return Product",
             current_status="Retur",
             quantity=1,
-            net_unit_price=Decimal("80000"),
-            total_net_sales=Decimal("80000"),
+            net_unit_price=Decimal("70000"),
+            total_net_sales=Decimal("70000"),
         )
         warehouse = Warehouse.objects.create(code="FIN-RET-WH", name="Finance Return Warehouse")
         PhysicalReturnReceipt.objects.create(
@@ -290,6 +299,14 @@ class FinanceJournalTests(TestCase):
             condition=PhysicalReturnReceipt.Condition.SELLABLE,
             recorded_by=self.user,
         )
+        PhysicalReturnReceipt.objects.create(
+            sales_line=damaged_line,
+            received_date=date(2026, 9, 16),
+            quantity=1,
+            warehouse=warehouse,
+            condition=PhysicalReturnReceipt.Condition.DAMAGED,
+            recorded_by=self.user,
+        )
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("finance:feature", args=["sales-return"]))
@@ -298,10 +315,22 @@ class FinanceJournalTests(TestCase):
         self.assertContains(response, "FINANCE-RETURN-RECEIVED")
         self.assertContains(response, "Received Return Product")
         self.assertContains(response, "Sellable")
+        self.assertContains(response, "Damaged Return Product")
+        self.assertContains(response, "Damaged")
         self.assertContains(response, "Finance Return Warehouse")
         self.assertNotContains(response, "FINANCE-RETURN-PENDING")
         self.assertNotContains(response, "Buat Sales Return")
-        self.assertEqual(response.context["metrics"], (("Return received", 1), ("Qty received", Decimal("2"))))
+        self.assertEqual(response.context["rows"][1][5], 2)
+        self.assertNotContains(response, "2,0000")
+        self.assertEqual(response.context["metrics"], (("Return received", 2), ("Qty received", Decimal("3"))))
+
+        sellable_response = self.client.get(
+            reverse("finance:feature", args=["sales-return"]),
+            {"receipt_status": PhysicalReturnReceipt.Condition.SELLABLE},
+        )
+        self.assertContains(sellable_response, "Received Return Product")
+        self.assertNotContains(sellable_response, "Damaged Return Product")
+        self.assertEqual(sellable_response.context["metrics"], (("Return received", 1), ("Qty received", Decimal("2"))))
 
     def test_finance_workspace_respects_exact_tab_permission(self):
         user = get_user_model().objects.create_user(

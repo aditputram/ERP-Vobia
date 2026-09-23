@@ -200,11 +200,16 @@ class ChatTests(TestCase):
     def test_embedded_chat_stays_embedded_after_sending(self):
         self.client.force_login(self.rnd)
         thread = ChatThread.objects.get(key="module:rnd")
+        blank = self.client.get(f"{reverse('chat:inbox')}?embed=1")
+        self.assertIsNone(blank.context["selected"])
+        self.assertContains(blank, "Pilih percakapan")
 
         embedded = self.client.get(f"{reverse('chat:thread', args=[thread.id])}?embed=1")
         self.assertEqual(embedded.headers["X-Frame-Options"], "SAMEORIGIN")
         self.assertContains(embedded, "composer.requestSubmit()")
         self.assertContains(embedded, "!event.shiftKey")
+        self.assertContains(embedded, "requestAnimationFrame")
+        self.assertContains(embedded, "body?.focus({preventScroll:true})")
 
         response = self.client.post(
             f"{reverse('chat:thread', args=[thread.id])}?embed=1",

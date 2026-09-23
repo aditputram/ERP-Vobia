@@ -129,7 +129,7 @@ def inbox(request, thread_id=None):
     selected = (
         next((thread for thread in threads if thread.pk == thread_id), None)
         if thread_id
-        else (threads[0] if threads else None)
+        else (None if embedded else (threads[0] if threads else None))
     )
     if thread_id and not selected:
         thread = get_object_or_404(ChatThread, pk=thread_id)

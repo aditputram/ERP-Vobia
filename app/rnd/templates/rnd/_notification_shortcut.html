@@ -27,6 +27,7 @@
         <a class="rnd-notification-item rnd-approval-item" href="{{ item.target_url }}" data-notification-category="approval">
             <span class="rnd-notification-dot" aria-hidden="true"></span>
             <span><strong>{{ item.title }}</strong><span>{{ item.message }}</span><time>{{ item.created_at|date:"d M Y · H:i" }}</time></span>
+            {% if item.thumbnail_url %}<img class="rnd-notification-thumbnail" src="{{ item.thumbnail_url }}" alt="" loading="lazy" decoding="async">{% endif %}
         </a>
         {% endfor %}
         {% for notification in rnd_notification_items %}
@@ -37,6 +38,7 @@
                 <span>{{ notification.message }}</span>
                 <time>{{ notification.created_at|date:"d M Y · H:i" }}</time>
             </span>
+            {% if notification.thumbnail_url %}<img class="rnd-notification-thumbnail" src="{{ notification.thumbnail_url }}" alt="" loading="lazy" decoding="async">{% endif %}
         </a>
         {% endfor %}
         <div class="rnd-notification-empty" data-rnd-notification-empty{% if rnd_notification_items or rnd_approval_items %} hidden{% endif %}><strong>Belum ada notifikasi</strong><span>Aktivitas penting R&amp;D akan muncul di sini.</span></div>

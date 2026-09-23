@@ -121,6 +121,7 @@ def live_status(request):
             "created_at": timezone.localtime(notification.created_at).strftime("%d %b %Y · %H:%M"),
             "unread": notification.read_at is None,
             "category": notification.category,
+            "thumbnail_url": notification.thumbnail_url,
         }
         for notification in notification_context["rnd_notification_items"]
     ]
@@ -130,6 +131,7 @@ def live_status(request):
             "title": item["title"],
             "message": item["message"],
             "created_at": timezone.localtime(item["created_at"]).strftime("%d %b %Y · %H:%M"),
+            "thumbnail_url": item["thumbnail_url"],
         }
         for item in notification_context["rnd_approval_items"]
     ]

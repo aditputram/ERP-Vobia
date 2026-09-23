@@ -97,6 +97,15 @@
             time.textContent = notification.created_at;
             content.append(title, message, time);
             item.append(dot, content);
+            if (notification.thumbnail_url) {
+                const thumbnail = document.createElement('img');
+                thumbnail.className = 'rnd-notification-thumbnail';
+                thumbnail.src = notification.thumbnail_url;
+                thumbnail.alt = '';
+                thumbnail.loading = 'lazy';
+                thumbnail.decoding = 'async';
+                item.append(thumbnail);
+            }
             list.append(item);
         };
         data.rnd_approvals.forEach(approval => appendNotification({...approval, category: 'approval'}));

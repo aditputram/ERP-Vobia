@@ -319,10 +319,16 @@ class RndWorkflowTests(TestCase):
         for category in ("all", "new", "comment", "approval"):
             self.assertContains(page, f'data-rnd-notification-tab="{category}"')
         self.assertContains(page, 'data-notification-category="new"')
+        self.assertContains(page, 'class="rnd-notification-thumbnail"')
+        self.assertContains(page, f'{reverse("rnd:design_file", args=[design.id])}?size=card')
         live_status = self.client.get(reverse("dashboard:live_status")).json()
         self.assertEqual(live_status["rnd_unread_count"], 1)
         self.assertEqual(live_status["rnd_notifications"][0]["title"], "Desain baru")
         self.assertEqual(live_status["rnd_notifications"][0]["category"], "new")
+        self.assertEqual(
+            live_status["rnd_notifications"][0]["thumbnail_url"],
+            f'{reverse("rnd:design_file", args=[design.id])}?size=card',
+        )
 
         opened = self.client.get(reverse("rnd:notification_open", args=[notification.id]))
         self.assertRedirects(opened, notification.target_url)

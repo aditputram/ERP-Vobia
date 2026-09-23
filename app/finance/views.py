@@ -714,93 +714,16 @@ def feature(request, slug):
         can_create_sales_journal = request.user.is_superuser or module_level(
             request.user, "finance"
         ) in {"edit", "approve"}
-        sales_account_options = list(
-            Account.objects.filter(
-                account_type="REVE",
-                is_active=True,
-                is_postable=True,
-                parent__code="4100",
-            ).order_by("code")
-        )
-        cogs_account_options = list(
-            Account.objects.filter(account_type="COGS", is_active=True, is_postable=True).order_by("code")
-        )
-        discount_account_options = list(
-            Account.objects.filter(
-                account_type="REVE",
-                is_active=True,
-                is_postable=True,
-                parent__code="4401",
-            ).exclude(code="440103").order_by("code")
-        )
         receipt_account_options = list(
             Account.objects.filter(
                 account_type__in={"AREC", "BANK"}, is_active=True, is_postable=True
             ).order_by("code")
         )
-        inventory_account_options = list(
-            Account.objects.filter(account_type="INTR", is_active=True, is_postable=True).order_by("code")
-        )
-        category_labels = list(
-            all_lines.exclude(category_snapshot="")
-            .order_by("category_snapshot")
-            .values_list("category_snapshot", flat=True)
-            .distinct()
-        )
-        if all_lines.filter(category_snapshot="").exists():
-            category_labels.append("Tanpa Kategori")
-        source_labels = sorted(
-            {
-                order.display_source
-                for order in SalesOrder.objects.filter(lines__is_counted=True).distinct()
-            }
-        )
-        default_cogs_id = cogs_account_options[0].id if len(cogs_account_options) == 1 else None
-        category_groups = []
-        for label in category_labels:
-            mapped_ids = set(
-                ProductSalesAccount.objects.filter(
-                    product__category__name=label
-                ).values_list("sales_account_id", flat=True)
-            )
-            category_groups.append(
-                {
-                    "label": label,
-                    "sales_default_id": next(iter(mapped_ids)) if len(mapped_ids) == 1 else None,
-                    "cogs_default_id": default_cogs_id,
-                }
-            )
-        source_groups_for_journal = [
-            {"label": label, "sales_default_id": None, "cogs_default_id": default_cogs_id}
-            for label in source_labels
-        ]
 
         open_sales_journal_modal = False
         if request.method == "POST" and request.POST.get("action") == "create_sales_journal":
             if not can_create_sales_journal:
                 return HttpResponseForbidden("Akun ini tidak memiliki akses membuat jurnal Sales.")
-
-            def posted_mapping(prefix):
-                return {
-                    label: account_id
-                    for label, account_id in zip(
-                        request.POST.getlist(f"{prefix}_label"),
-                        request.POST.getlist(f"{prefix}_account"),
-                    )
-                }
-
-            sales_mode = request.POST.get("sales_mode", "category")
-            cogs_mode = request.POST.get("cogs_mode", "total")
-            sales_account_ids = (
-                {"Total": request.POST.get("sales_total_account", "")}
-                if sales_mode == "total"
-                else posted_mapping(f"sales_{sales_mode}")
-            )
-            cogs_account_ids = (
-                {"Total": request.POST.get("cogs_total_account", "")}
-                if cogs_mode == "total"
-                else posted_mapping(f"cogs_{cogs_mode}")
-            )
             journal_start = parse_date(request.POST.get("journal_start", ""))
             journal_end = parse_date(request.POST.get("journal_end", ""))
             try:
@@ -809,13 +732,7 @@ def feature(request, slug):
                 entry = create_sales_journal_draft(
                     start_date=journal_start,
                     end_date=journal_end,
-                    sales_mode=sales_mode,
-                    cogs_mode=cogs_mode,
-                    sales_account_ids=sales_account_ids,
-                    cogs_account_ids=cogs_account_ids,
-                    discount_account_id=request.POST.get("discount_account", ""),
                     receipt_account_id=request.POST.get("receipt_account", ""),
-                    inventory_account_id=request.POST.get("inventory_account", ""),
                     actor=request.user,
                 )
             except ValidationError as exc:
@@ -904,26 +821,11 @@ def feature(request, slug):
             allocation_totals=allocation_totals,
             can_create_sales_journal=can_create_sales_journal,
             open_sales_journal_modal=open_sales_journal_modal,
-            sales_account_options=sales_account_options,
-            cogs_account_options=cogs_account_options,
-            discount_account_options=discount_account_options,
             receipt_account_options=receipt_account_options,
-            inventory_account_options=inventory_account_options,
-            journal_category_groups=category_groups,
-            journal_source_groups=source_groups_for_journal,
-            default_discount_id=next(
-                (account.id for account in discount_account_options if account.code == "440101"),
-                None,
-            ),
             default_receipt_id=next(
                 (account.id for account in receipt_account_options if account.code == "110301"),
                 None,
             ),
-            default_inventory_id=next(
-                (account.id for account in inventory_account_options if account.code == "110401"),
-                None,
-            ),
-            default_cogs_id=default_cogs_id,
             data_note="Transaksi canonical Sales tidak otomatis menjadi jurnal. Buat jurnal Draft dari tombol Create Jurnal Entry Sales, lalu review dan Approve & Post secara terpisah.",
         )
     elif slug in {"sales-return", "sales-return-per-item"}:

@@ -12,7 +12,7 @@ from django.utils import timezone
 from openpyxl import Workbook
 
 from audit.models import AuditEvent
-from master_data.models import Category, Product, ProductStatus, Subcategory
+from master_data.models import Category, Product, ProductStatus, ProductVariant, SKU, Subcategory
 
 from .importers import stage_finance_cutover
 from .catalog import FEATURES
@@ -37,6 +37,18 @@ class FinanceJournalTests(TestCase):
         )
         JournalLine.objects.create(entry=self.entry, line_number=1, account=self.cash, debit=100, credit=0)
         JournalLine.objects.create(entry=self.entry, line_number=2, account=self.capital, debit=0, credit=100)
+
+    def _sales_sku(self, code, sales_account_code="410002"):
+        status, _ = ProductStatus.objects.get_or_create(code="FIN-JOURNAL", defaults={"name": "Finance Journal"})
+        category, _ = Category.objects.get_or_create(code="FIN-JOURNAL", defaults={"name": "Finance Journal"})
+        product = Product.objects.create(code=code, name=code, status=status, category=category)
+        variant = ProductVariant.objects.create(product=product, name=code)
+        sku = SKU.objects.create(sku=code, product_variant=variant)
+        ProductSalesAccount.objects.create(
+            product=product,
+            sales_account=Account.objects.get(code=sales_account_code),
+        )
+        return sku
 
     def test_balanced_journal_posts_and_updates_trial_balance(self):
         post_journal(self.entry.id, self.user)
@@ -266,6 +278,7 @@ class FinanceJournalTests(TestCase):
     def test_sales_journal_is_balanced_draft_and_does_not_duplicate_sales_lines(self):
         from sales.models import SalesOrder, SalesOrderLine
 
+        sku = self._sales_sku("FIN-JOURNAL-SKU")
         order = SalesOrder.objects.create(
             source=SalesOrder.Source.SHOPEE,
             source_label="Shopee",
@@ -280,6 +293,7 @@ class FinanceJournalTests(TestCase):
         )
         sales_line = SalesOrderLine.objects.create(
             order=order,
+            sku=sku,
             sku_code_snapshot="FIN-JOURNAL-SKU",
             category_snapshot="Finance T-Shirt",
             product_name_snapshot="Finance Journal Product",
@@ -293,13 +307,7 @@ class FinanceJournalTests(TestCase):
         params = {
             "start_date": date(2026, 9, 1),
             "end_date": date(2026, 9, 30),
-            "sales_mode": "total",
-            "cogs_mode": "total",
-            "sales_account_ids": {"Total": Account.objects.get(code="410002").id},
-            "cogs_account_ids": {"Total": Account.objects.get(code="5101").id},
-            "discount_account_id": Account.objects.get(code="440101").id,
             "receipt_account_id": Account.objects.get(code="110301").id,
-            "inventory_account_id": Account.objects.get(code="110401").id,
             "actor": self.user,
         }
 
@@ -316,6 +324,45 @@ class FinanceJournalTests(TestCase):
         page = self.client.get(reverse("finance:feature", args=["sales-invoice"]))
         self.assertContains(page, "Create Jurnal Entry Sales")
         self.assertContains(page, "1 baris sudah dialokasikan")
+        self.assertContains(page, 'name="receipt_account"')
+        self.assertNotContains(page, 'name="discount_account"')
+        self.assertNotContains(page, 'name="inventory_account"')
+        self.assertNotContains(page, 'name="sales_mode"')
+        self.assertNotContains(page, 'name="cogs_mode"')
+
+        october_order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="FINANCE-JOURNAL-002",
+            order_datetime=timezone.make_aware(datetime(2026, 10, 1, 10, 0)),
+            order_date=date(2026, 10, 1),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=october_order,
+            sku=sku,
+            quantity=1,
+            net_unit_price=Decimal("90000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("100000"),
+            total_net_sales=Decimal("90000"),
+            total_cogs=Decimal("60000"),
+        )
+        response = self.client.post(
+            reverse("finance:feature", args=["sales-invoice"]),
+            {
+                "action": "create_sales_journal",
+                "journal_start": "2026-10-01",
+                "journal_end": "2026-10-01",
+                "receipt_account": Account.objects.get(code="110301").id,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(JournalEntry.objects.filter(reference="Sales 2026-10-01/2026-10-01").exists())
 
     def test_sales_return_only_shows_returns_received_by_warehouse(self):
         from inventory.models import PhysicalReturnReceipt
@@ -414,6 +461,7 @@ class FinanceJournalTests(TestCase):
     def test_profit_loss_only_includes_posted_sales_journal(self):
         from sales.models import SalesOrder, SalesOrderLine
 
+        sku = self._sales_sku("FIN-PL-SKU")
         order = SalesOrder.objects.create(
             source=SalesOrder.Source.SHOPEE,
             source_label="Shopee",
@@ -428,6 +476,7 @@ class FinanceJournalTests(TestCase):
         )
         SalesOrderLine.objects.create(
             order=order,
+            sku=sku,
             sku_code_snapshot="FIN-PL-SKU",
             category_snapshot="Finance T-Shirt",
             product_name_snapshot="Finance P&L Product",
@@ -452,13 +501,7 @@ class FinanceJournalTests(TestCase):
         entry = create_sales_journal_draft(
             start_date=date(2026, 9, 1),
             end_date=date(2026, 9, 30),
-            sales_mode="total",
-            cogs_mode="total",
-            sales_account_ids={"Total": Account.objects.get(code="410002").id},
-            cogs_account_ids={"Total": Account.objects.get(code="5101").id},
-            discount_account_id=Account.objects.get(code="440101").id,
             receipt_account_id=Account.objects.get(code="110301").id,
-            inventory_account_id=Account.objects.get(code="110401").id,
             actor=self.user,
         )
         draft = self.client.get(

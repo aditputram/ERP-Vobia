@@ -15,6 +15,7 @@ from .models import (
     JournalEntry,
     JournalLine,
     JournalNumberSequence,
+    ProductSalesAccount,
     SalesJournalAllocation,
 )
 
@@ -221,56 +222,41 @@ def _validated_account(account_id, *, allowed_types, parent_code=None, label):
     return account
 
 
-def _journal_group(line, mode):
-    if mode == "category":
-        return line.category_snapshot or "Tanpa Kategori"
-    if mode == "source":
-        return line.order.display_source
-    return "Total"
-
-
 @transaction.atomic
 def create_sales_journal_draft(
     *,
     start_date,
     end_date,
-    sales_mode,
-    cogs_mode,
-    sales_account_ids,
-    cogs_account_ids,
-    discount_account_id,
     receipt_account_id,
-    inventory_account_id,
     actor,
 ):
     if start_date > end_date:
         raise ValidationError("Tanggal mulai tidak boleh melewati tanggal selesai.")
     if start_date < FINANCE_OPENING_DATE:
         raise ValidationError("Jurnal Sales Finance dimulai 1 September 2026.")
-    if sales_mode not in {"category", "source", "total"} or cogs_mode not in {
-        "category",
-        "source",
-        "total",
-    }:
-        raise ValidationError("Metode pengelompokan Sales atau COGS tidak valid.")
-
     receipt_account = _validated_account(
         receipt_account_id,
         allowed_types={"AREC", "BANK"},
         label="Akun receipt/piutang",
     )
     discount_account = _validated_account(
-        discount_account_id,
+        Account.objects.filter(code="440101").values_list("id", flat=True).first(),
         allowed_types={"REVE"},
         parent_code="4401",
         label="Akun diskon",
     )
+    cogs_account = _validated_account(
+        Account.objects.filter(code="5101").values_list("id", flat=True).first(),
+        allowed_types={"COGS"},
+        label="Akun COGS",
+    )
     inventory_account = _validated_account(
-        inventory_account_id,
+        Account.objects.filter(code="110401").values_list("id", flat=True).first(),
         allowed_types={"INTR"},
         label="Akun persediaan",
     )
 
+    from master_data.models import SKU
     from sales.models import SalesOrderLine
 
     sales_lines = list(
@@ -280,39 +266,40 @@ def create_sales_journal_draft(
             order__order_date__range=(start_date, end_date),
             finance_journal_allocation__isnull=True,
         )
-        .select_related("order")
+        .select_related("order", "sku__product_variant__product")
         .order_by("order__order_date", "order__order_number", "sku_code_snapshot")
     )
     if not sales_lines:
         raise ValidationError("Tidak ada transaksi Sales yang belum dijurnal pada periode ini.")
 
+    snapshot_product_ids = dict(
+        SKU.objects.filter(sku__in={line.sku_code_snapshot for line in sales_lines if not line.sku_id})
+        .values_list("sku", "product_variant__product_id")
+    )
+    product_ids = {
+        line.sku.product_variant.product_id if line.sku_id else snapshot_product_ids.get(line.sku_code_snapshot)
+        for line in sales_lines
+    }
+    product_ids.discard(None)
+    account_id_by_product = dict(
+        ProductSalesAccount.objects.filter(product_id__in=product_ids)
+        .values_list("product_id", "sales_account_id")
+    )
     sales_accounts = {
-        group: _validated_account(
+        account_id: _validated_account(
             account_id,
             allowed_types={"REVE"},
             parent_code="4100",
-            label=f"Akun Sales {group}",
+            label="Akun Sales dari Sales Setting",
         )
-        for group, account_id in sales_account_ids.items()
-        if account_id
-    }
-    cogs_accounts = {
-        group: _validated_account(
-            account_id,
-            allowed_types={"COGS"},
-            label=f"Akun COGS {group}",
-        )
-        for group, account_id in cogs_account_ids.items()
-        if account_id
+        for account_id in set(account_id_by_product.values())
     }
 
     sales_values = defaultdict(lambda: Decimal("0"))
-    cogs_values = defaultdict(lambda: Decimal("0"))
     gross_total = Decimal("0")
     net_total = Decimal("0")
     cogs_total = Decimal("0")
-    missing_sales_groups = set()
-    missing_cogs_groups = set()
+    missing_sales_settings = set()
     missing_cogs_lines = []
     allocation_values = []
     for line in sales_lines:
@@ -322,14 +309,16 @@ def create_sales_journal_draft(
             missing_cogs_lines.append(line.sku_code_snapshot or line.product_name_snapshot)
             continue
         cogs = line.total_cogs.quantize(MONEY_QUANTUM)
-        sales_group = _journal_group(line, sales_mode)
-        cogs_group = _journal_group(line, cogs_mode)
-        if sales_group not in sales_accounts:
-            missing_sales_groups.add(sales_group)
-        if cogs_group not in cogs_accounts:
-            missing_cogs_groups.add(cogs_group)
-        sales_values[sales_group] += gross
-        cogs_values[cogs_group] += cogs
+        product_id = (
+            line.sku.product_variant.product_id
+            if line.sku_id
+            else snapshot_product_ids.get(line.sku_code_snapshot)
+        )
+        sales_account_id = account_id_by_product.get(product_id)
+        if not sales_account_id:
+            missing_sales_settings.add(line.sku_code_snapshot or line.product_name_snapshot)
+        else:
+            sales_values[sales_account_id] += gross
         gross_total += gross
         net_total += net
         cogs_total += cogs
@@ -338,13 +327,11 @@ def create_sales_journal_draft(
     if missing_cogs_lines:
         sample = ", ".join(sorted(set(missing_cogs_lines))[:5])
         raise ValidationError(f"COGS belum tersedia untuk transaksi: {sample}.")
-    if missing_sales_groups:
+    if missing_sales_settings:
         raise ValidationError(
-            "Pilih akun Sales untuk: " + ", ".join(sorted(missing_sales_groups)) + "."
-        )
-    if missing_cogs_groups:
-        raise ValidationError(
-            "Pilih akun COGS untuk: " + ", ".join(sorted(missing_cogs_groups)) + "."
+            "Atur Sales Account di Sales Setting untuk: "
+            + ", ".join(sorted(missing_sales_settings)[:5])
+            + "."
         )
     discount_total = (gross_total - net_total).quantize(MONEY_QUANTUM)
     if discount_total < 0:
@@ -362,8 +349,8 @@ def create_sales_journal_draft(
             "workflow": SALES_JOURNAL_WORKFLOW,
             "start_date": str(start_date),
             "end_date": str(end_date),
-            "sales_mode": sales_mode,
-            "cogs_mode": cogs_mode,
+            "sales_mode": "product_setting",
+            "cogs_mode": "total",
             "sales_line_count": len(sales_lines),
         },
         created_by=actor,
@@ -376,12 +363,13 @@ def create_sales_journal_draft(
         journal_lines.append((receipt_account, net_total, Decimal("0"), "Sales Receivable / Receipt"))
     if discount_total > 0:
         journal_lines.append((discount_account, discount_total, Decimal("0"), "Diskon Penjualan"))
-    for group in sorted(sales_values):
+    for account_id in sorted(sales_values, key=lambda value: sales_accounts[value].code):
+        account = sales_accounts[account_id]
         journal_lines.append(
-            (sales_accounts[group], Decimal("0"), sales_values[group], f"Gross Sales · {group}")
+            (account, Decimal("0"), sales_values[account_id], f"Gross Sales · {account.name}")
         )
-    for group in sorted(cogs_values):
-        journal_lines.append((cogs_accounts[group], cogs_values[group], Decimal("0"), f"COGS · {group}"))
+    if cogs_total > 0:
+        journal_lines.append((cogs_account, cogs_total, Decimal("0"), "COGS · Total"))
     if cogs_total > 0:
         journal_lines.append((inventory_account, Decimal("0"), cogs_total, "Persediaan keluar karena Sales"))
 

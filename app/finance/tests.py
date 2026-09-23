@@ -417,6 +417,7 @@ class FinanceJournalTests(TestCase):
         self.assertEqual(revenue["440101"], Decimal("-20000"))
         self.assertEqual(revenue["440103"], Decimal("-90000"))
         self.assertEqual(expense["5101"], Decimal("60000"))
+        self.assertEqual(response.context["gross_sales_total"], Decimal("200000"))
         self.assertEqual(response.context["revenue_total"], Decimal("90000"))
         self.assertEqual(response.context["expense_total"], Decimal("60000"))
         self.assertEqual(response.context["profit"], Decimal("30000"))
@@ -424,6 +425,10 @@ class FinanceJournalTests(TestCase):
         self.assertEqual(response.context["return_receipt_count"], 1)
         self.assertContains(response, "Sales Return")
         self.assertContains(response, "Beban Pokok Penjualan")
+        self.assertContains(response, "Subtotal Gross Sales")
+        self.assertContains(response, "Subtotal Diskon Penjualan")
+        self.assertContains(response, "Subtotal Beban Pokok Penjualan")
+        self.assertContains(response, "Total Pendapatan Bersih")
 
     def test_finance_workspace_respects_exact_tab_permission(self):
         user = get_user_model().objects.create_user(

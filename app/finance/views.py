@@ -416,8 +416,33 @@ def profit_loss(request):
 
     revenue = sorted(revenue_by_account.values(), key=lambda row: row["account"].code)
     expense = sorted(expense_by_account.values(), key=lambda row: row["account"].code)
+
+    def grouped_accounts(account_rows):
+        groups = {}
+        for account_row in account_rows:
+            account = account_row["account"]
+            parent = account.parent or account
+            group = groups.setdefault(
+                parent.id,
+                {
+                    "account": parent,
+                    "label": "Gross Sales" if parent.code == "4100" else parent.name,
+                    "rows": [],
+                    "subtotal": Decimal("0"),
+                },
+            )
+            group["rows"].append(account_row)
+            group["subtotal"] += account_row["amount"]
+        return sorted(groups.values(), key=lambda group: group["account"].code)
+
+    revenue_groups = grouped_accounts(revenue)
+    expense_groups = grouped_accounts(expense)
     revenue_total = sum((row["amount"] for row in revenue), Decimal("0"))
     expense_total = sum((row["amount"] for row in expense), Decimal("0"))
+    gross_sales_total = next(
+        (group["subtotal"] for group in revenue_groups if group["account"].code == "4100"),
+        Decimal("0"),
+    )
     return render(
         request,
         "finance/profit_loss.html",
@@ -426,6 +451,9 @@ def profit_loss(request):
             "end": end,
             "revenue": revenue,
             "expense": expense,
+            "revenue_groups": revenue_groups,
+            "expense_groups": expense_groups,
+            "gross_sales_total": gross_sales_total,
             "revenue_total": revenue_total,
             "expense_total": expense_total,
             "profit": revenue_total - expense_total,

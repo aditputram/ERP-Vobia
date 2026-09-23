@@ -324,6 +324,7 @@ def _profit_loss_data(start, end, accounts):
     rows = account_balances(
         start_date=start,
         end_date=end,
+        include_draft=True,
         exclude_opening=True,
     )
     revenue_by_account = {}
@@ -927,7 +928,7 @@ def feature(request, slug):
                 "label": f"Buat {spec['title']}",
                 "href": f"{reverse('finance:journal_create')}?workflow={spec['workflow']}",
             },
-            data_note="Transaksi disimpan sebagai jurnal Draft dan baru masuk laporan setelah di-Approve & Post.",
+            data_note="Jurnal Draft langsung masuk General Ledger Summary dan Profit & Loss; Approve & Post tetap menjadi status persetujuan final.",
         )
     elif slug in {"suppliers", "warehouses", "items-services"}:
         from master_data.models import SKU, Supplier, Warehouse
@@ -1005,9 +1006,9 @@ def feature(request, slug):
             selected_account = account_options.filter(pk=selected_account_id).first() if selected_account_id else None
             opening_rows = {
                 row["account"].id: row
-                for row in account_balances(end_date=start - timedelta(days=1))
+                for row in account_balances(end_date=start - timedelta(days=1), include_draft=True)
             }
-            period_rows = account_balances(start_date=start, end_date=end)
+            period_rows = account_balances(start_date=start, end_date=end, include_draft=True)
             ledger_rows = []
             for row in period_rows:
                 account = row["account"]
@@ -1049,7 +1050,6 @@ def feature(request, slug):
                 detail_rows = []
                 for line in JournalLine.objects.filter(
                     account=selected_account,
-                    entry__status=JournalEntry.Status.POSTED,
                     entry__entry_date__range=(start, end),
                 ).select_related("entry").order_by("entry__entry_date", "entry__number", "line_number"):
                     signed_balance += line.debit - line.credit
@@ -1088,7 +1088,7 @@ def feature(request, slug):
                 page=detail_page,
                 pagination_prefix=f"{pagination_query.urlencode()}&" if pagination_query else "",
                 metrics=metrics,
-                data_note="Semua nilai berasal dari jurnal berstatus Posted. Pilih akun untuk melihat mutasi dan saldo berjalan.",
+                data_note="Semua nilai berasal dari jurnal Draft dan Posted. Pilih akun untuk melihat mutasi, status jurnal, dan saldo berjalan.",
             )
         elif slug == "financial-ratio":
             balances = account_balances(end_date=as_of)

@@ -104,7 +104,6 @@ class FinanceJournalTests(TestCase):
         self.assertContains(self.client.get(reverse("finance:dashboard")), "Finance UAT")
 
     def test_general_ledger_can_show_all_accounts_and_selected_account_detail(self):
-        post_journal(self.entry.id, self.user)
         self.client.force_login(self.user)
         url = reverse("finance:feature", args=("general-ledger-summary",))
 
@@ -117,6 +116,7 @@ class FinanceJournalTests(TestCase):
             {"start": "2026-09-01", "end": "2026-09-30", "account": self.cash.id},
         )
         self.assertContains(detail, self.entry.number)
+        self.assertContains(detail, "Draft")
         self.assertContains(detail, "Saldo awal")
         self.assertContains(detail, "Rp 100,00 D")
 
@@ -494,7 +494,7 @@ class FinanceJournalTests(TestCase):
         self.assertNotContains(search_response, "Received Return Product")
         self.assertEqual(search_response.context["query"], "FINANCE-RETURN-DAMAGED")
 
-    def test_profit_loss_only_includes_posted_sales_journal(self):
+    def test_profit_loss_includes_draft_and_posted_sales_journal(self):
         from sales.models import SalesOrder, SalesOrderLine
 
         sku = self._sales_sku("FIN-PL-SKU")
@@ -532,7 +532,7 @@ class FinanceJournalTests(TestCase):
         )
         self.assertEqual(before.context["gross_sales_total"], Decimal("0"))
         self.assertEqual(before.context["profit"], Decimal("0"))
-        self.assertContains(before, "Belum ada jurnal Posted")
+        self.assertContains(before, "Belum ada jurnal Draft atau Posted")
 
         entry = create_sales_journal_draft(
             start_date=date(2026, 9, 1),
@@ -544,7 +544,9 @@ class FinanceJournalTests(TestCase):
             reverse("finance:profit_loss"),
             {"start": "2026-09-01", "end": "2026-09-30"},
         )
-        self.assertEqual(draft.context["gross_sales_total"], Decimal("0"))
+        self.assertEqual(draft.context["gross_sales_total"], Decimal("200000"))
+        self.assertEqual(draft.context["revenue_total"], Decimal("180000"))
+        self.assertEqual(draft.context["expense_total"], Decimal("120000"))
         post_journal(entry.id, self.user)
         response = self.client.get(
             reverse("finance:profit_loss"),

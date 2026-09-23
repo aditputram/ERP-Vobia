@@ -168,17 +168,14 @@ def inbox(request, thread_id=None):
                 user=request.user,
                 defaults={"last_read_at": message.created_at},
             )
-            if selected.kind == ChatThread.Kind.DIRECT:
-                recipient_ids = [user.pk for user in thread_members if user.pk != request.user.pk]
-            else:
-                recipient_ids = list(message.mentions.exclude(pk=request.user.pk).values_list("pk", flat=True))
+            recipient_ids = [user.pk for user in thread_members if user.pk != request.user.pk]
             if recipient_ids:
                 transaction.on_commit(
                     lambda recipients=recipient_ids, message_id=message.id: send_web_push(
                         recipients,
                         title="Pesan baru di Vobia Space",
                         body="Buka Space untuk melihat pesan.",
-                        url=reverse("chat:inbox"),
+                        url=reverse("chat:thread", args=[selected.id]),
                         tag=f"chat:{message_id}",
                     )
                 )

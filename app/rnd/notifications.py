@@ -112,15 +112,16 @@ def create_notifications_for_audit(event):
         for user in recipients
     ]
     created = RndNotification.objects.bulk_create(notifications, ignore_conflicts=True)
-    if event.action in APPROVAL_ACTIONS and created:
+    if created:
         recipient_ids = [notification.recipient_id for notification in created]
+        category = "Approval" if event.action in APPROVAL_ACTIONS else "Notifikasi"
         transaction.on_commit(
-            lambda recipients=recipient_ids, source=event.id: send_web_push(
+            lambda recipients=recipient_ids, source=event.id, push_category=category: send_web_push(
                 recipients,
-                title="Approval R&D baru",
-                body="Buka Space untuk melihat aktivitas approval.",
+                title=f"{push_category} R&D baru",
+                body="Buka Space untuk melihat aktivitas R&D.",
                 url=reverse("rnd:dashboard"),
-                tag=f"rnd-approval:{source}",
+                tag=f"rnd:{source}",
             )
         )
     return len(created)

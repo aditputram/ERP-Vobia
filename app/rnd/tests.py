@@ -376,7 +376,7 @@ class RndWorkflowTests(TestCase):
 
     @override_settings(WEB_PUSH_VAPID_PRIVATE_KEY="private-test-key")
     @patch("rnd.notifications.send_web_push")
-    def test_approval_activity_sends_generic_laptop_notification(self, send_push_mock):
+    def test_rnd_activity_sends_generic_laptop_notification(self, send_push_mock):
         product = self._product(self._collection(code="COL-PUSH"), code="P-PUSH")
         event = AuditEvent.objects.create(
             actor=self.rnd_approver,
@@ -398,6 +398,24 @@ class RndWorkflowTests(TestCase):
         self.assertIn(self.rnd_editor.id, send_push_mock.call_args.args[0])
         self.assertEqual(send_push_mock.call_args.kwargs["title"], "Approval R&D baru")
         self.assertNotIn(product.name, send_push_mock.call_args.kwargs["body"])
+
+        send_push_mock.reset_mock()
+        design = DesignAsset.objects.create(
+            image=self._image("push-design.png"),
+            original_name="push-design.png",
+            uploaded_by=self.rnd_approver,
+        )
+        event = AuditEvent.objects.create(
+            actor=self.rnd_approver,
+            action="rnd_design_uploaded",
+            entity_type="rnd.design_asset",
+            entity_id=str(design.id),
+            after_values={"original_name": design.original_name},
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(create_notifications_for_audit(event), 2)
+        send_push_mock.assert_called_once()
+        self.assertEqual(send_push_mock.call_args.kwargs["title"], "Notifikasi R&D baru")
 
     def test_design_gallery_navigation_expiry_and_delete(self):
         self.client.force_login(self.rnd_editor)

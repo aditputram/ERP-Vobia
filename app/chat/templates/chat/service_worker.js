@@ -5,6 +5,8 @@ self.addEventListener('push', event => {
         icon: '/static/img/vobia-tiktok-app-icon.png?v=20260831',
         badge: '/static/img/vobia-tiktok-app-icon.png?v=20260831',
         tag: data.tag || 'vobia-space',
+        renotify: true,
+        silent: false,
         data: {url: data.url || '/'},
     }));
 });

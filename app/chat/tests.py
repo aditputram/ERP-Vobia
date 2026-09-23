@@ -80,6 +80,7 @@ class ChatTests(TestCase):
             self.assertContains(response, '>Aktifkan notifikasi</button>')
             self.assertContains(response, "Nonaktifkan notifikasi")
             self.assertContains(response, "registration?.pushManager.getSubscription()")
+            self.assertContains(response, "playNotificationSound")
 
     def test_recently_active_conversation_moves_to_top(self):
         first = ChatThread.objects.create(
@@ -225,6 +226,7 @@ class ChatTests(TestCase):
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Service-Worker-Allowed"], "/")
         self.assertContains(worker, "showNotification")
+        self.assertContains(worker, "silent: false")
 
         self.client.force_login(self.rnd)
         config = self.client.get(reverse("chat:push_config")).json()
@@ -282,7 +284,7 @@ class ChatTests(TestCase):
 
     @override_settings(WEB_PUSH_VAPID_PRIVATE_KEY="private-test-key")
     @patch("chat.push.webpush")
-    def test_pushes_personal_chat_and_group_mentions_only(self, webpush_mock):
+    def test_pushes_personal_and_group_chat(self, webpush_mock):
         PushSubscription.objects.create(
             user=self.marketing,
             endpoint="https://fcm.googleapis.com/marketing",
@@ -310,8 +312,15 @@ class ChatTests(TestCase):
         room = ChatThread.objects.get(key="module:rnd")
         with self.captureOnCommitCallbacks(execute=True):
             self.client.post(reverse("chat:thread", args=[room.id]), {"body": "Tanpa mention"})
-        self.assertEqual(webpush_mock.call_count, 1)
+        self.assertEqual(webpush_mock.call_count, 2)
+        self.assertEqual(
+            webpush_mock.call_args.kwargs["subscription_info"]["endpoint"],
+            "https://fcm.googleapis.com/rnd-peer",
+        )
         with self.captureOnCommitCallbacks(execute=True):
             self.client.post(reverse("chat:thread", args=[room.id]), {"body": "Halo @rnd.peer"})
-        self.assertEqual(webpush_mock.call_count, 2)
-        self.assertEqual(webpush_mock.call_args.kwargs["subscription_info"]["endpoint"], "https://fcm.googleapis.com/rnd-peer")
+        self.assertEqual(webpush_mock.call_count, 3)
+        self.assertEqual(
+            webpush_mock.call_args.kwargs["subscription_info"]["endpoint"],
+            "https://fcm.googleapis.com/rnd-peer",
+        )

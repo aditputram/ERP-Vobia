@@ -19,6 +19,27 @@
     const open = document.querySelector('[data-chat-popup-open]');
     if (!popup || !open) return;
     const frame = popup.querySelector('[data-chat-popup-frame]');
+    const notificationOpen = document.querySelector('[data-rnd-notification-open]');
+    let soundContext = null;
+    const unlockSound = () => {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        soundContext ||= new AudioContext();
+        soundContext.resume().catch(() => {});
+    };
+    const playNotificationSound = () => {
+        if (!soundContext || soundContext.state !== 'running') return;
+        const oscillator = soundContext.createOscillator();
+        const gain = soundContext.createGain();
+        oscillator.connect(gain).connect(soundContext.destination);
+        oscillator.frequency.setValueAtTime(880, soundContext.currentTime);
+        gain.gain.setValueAtTime(0.06, soundContext.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, soundContext.currentTime + 0.22);
+        oscillator.start();
+        oscillator.stop(soundContext.currentTime + 0.22);
+    };
+    document.addEventListener('pointerdown', unlockSound, {once: true});
+    document.addEventListener('keydown', unlockSound, {once: true});
     open.addEventListener('click', () => {
         if (!frame.dataset.loaded) { frame.src = frame.dataset.src; frame.dataset.loaded = '1'; }
         popup.showModal();
@@ -38,7 +59,6 @@
         badge.textContent = count > 99 ? '99+' : count;
     };
     const updateNotifications = data => {
-        const notificationOpen = document.querySelector('[data-rnd-notification-open]');
         const notificationPopup = document.querySelector('[data-rnd-notification-popup]');
         if (!notificationOpen || !notificationPopup) return;
         let badge = notificationOpen.querySelector('[data-rnd-notification-badge]');
@@ -95,10 +115,11 @@
             const response = await fetch(open.dataset.liveStatusUrl, {headers: {'X-Requested-With': 'XMLHttpRequest'}});
             if (!response.ok) return;
             const data = await response.json();
-            const previous = Number(open.dataset.chatUnread || 0);
+            const previousChat = Number(open.dataset.chatUnread || 0);
+            const previousRnd = Number(notificationOpen?.dataset.rndUnread || 0);
             updateBadge(data.chat_unread_count);
             updateNotifications(data);
-            if (data.chat_unread_count > previous) {
+            if (data.chat_unread_count > previousChat) {
                 if (!popup.open) delete frame.dataset.loaded;
                 else if (frame.dataset.loaded) {
                     const body = frame.contentDocument?.querySelector('#id_body');
@@ -106,7 +127,9 @@
                     if (!body?.value && !attachment?.files?.length) frame.contentWindow.location.reload();
                 }
             }
+            if (data.chat_unread_count > previousChat || data.rnd_unread_count > previousRnd) playNotificationSound();
             open.dataset.chatUnread = data.chat_unread_count;
+            if (notificationOpen) notificationOpen.dataset.rndUnread = data.rnd_unread_count;
         } catch (_error) {
             // A temporary network failure is retried on the next poll.
         } finally {

@@ -411,23 +411,9 @@ class FinanceJournalTests(TestCase):
         self.assertNotContains(search_response, "Received Return Product")
         self.assertEqual(search_response.context["query"], "FINANCE-RETURN-DAMAGED")
 
-    def test_profit_loss_includes_sales_invoice_discount_return_and_cogs(self):
-        from inventory.models import InventoryMovement, PhysicalReturnReceipt
-        from master_data.models import ProductVariant, SKU, Warehouse
+    def test_profit_loss_only_includes_posted_sales_journal(self):
         from sales.models import SalesOrder, SalesOrderLine
 
-        status = ProductStatus.objects.create(code="FIN-PL-REG", name="Finance P&L Regular")
-        category = Category.objects.create(code="FIN-PL-TS", name="Finance P&L T-Shirt")
-        product = Product.objects.create(
-            code="FIN-PL-PRODUCT",
-            parent_sku="FIN-PL-PARENT",
-            name="Finance P&L Product",
-            status=status,
-            category=category,
-        )
-        variant = ProductVariant.objects.create(product=product, name="Black")
-        sku = SKU.objects.create(sku="FIN-PL-SKU", product_variant=variant)
-        ProductSalesAccount.objects.create(product=product, sales_account=Account.objects.get(code="410002"))
         order = SalesOrder.objects.create(
             source=SalesOrder.Source.SHOPEE,
             source_label="Shopee",
@@ -440,12 +426,12 @@ class FinanceJournalTests(TestCase):
             first_seen_batch_id=uuid.uuid4(),
             latest_batch_id=uuid.uuid4(),
         )
-        line = SalesOrderLine.objects.create(
+        SalesOrderLine.objects.create(
             order=order,
-            sku=sku,
-            sku_code_snapshot=sku.sku,
-            product_name_snapshot=product.name,
-            current_status="Retur",
+            sku_code_snapshot="FIN-PL-SKU",
+            category_snapshot="Finance T-Shirt",
+            product_name_snapshot="Finance P&L Product",
+            current_status="Selesai",
             quantity=2,
             net_unit_price=Decimal("90000"),
             retail_price_snapshot=Decimal("100000"),
@@ -453,30 +439,34 @@ class FinanceJournalTests(TestCase):
             total_net_sales=Decimal("180000"),
             total_cogs=Decimal("120000"),
         )
-        warehouse = Warehouse.objects.create(code="FIN-PL-WH", name="Finance P&L Warehouse")
-        receipt = PhysicalReturnReceipt.objects.create(
-            sales_line=line,
-            received_date=date(2026, 9, 15),
-            quantity=1,
-            warehouse=warehouse,
-            condition=PhysicalReturnReceipt.Condition.SELLABLE,
-            recorded_by=self.user,
-        )
-        InventoryMovement.objects.create(
-            movement_key="FIN-PL-RETURN",
-            movement_date=receipt.received_date,
-            movement_type=InventoryMovement.MovementType.RETURN_IN,
-            direction=InventoryMovement.Direction.IN,
-            sku=sku,
-            warehouse=warehouse,
-            quantity=1,
-            allocated_cost=Decimal("60000"),
-            source_reference=order.order_number,
-            return_receipt=receipt,
-            posted_by=self.user,
-        )
         self.client.force_login(self.user)
 
+        before = self.client.get(
+            reverse("finance:profit_loss"),
+            {"start": "2026-09-01", "end": "2026-09-30"},
+        )
+        self.assertEqual(before.context["gross_sales_total"], Decimal("0"))
+        self.assertEqual(before.context["profit"], Decimal("0"))
+        self.assertContains(before, "Belum ada jurnal Posted")
+
+        entry = create_sales_journal_draft(
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 30),
+            sales_mode="total",
+            cogs_mode="total",
+            sales_account_ids={"Total": Account.objects.get(code="410002").id},
+            cogs_account_ids={"Total": Account.objects.get(code="5101").id},
+            discount_account_id=Account.objects.get(code="440101").id,
+            receipt_account_id=Account.objects.get(code="110301").id,
+            inventory_account_id=Account.objects.get(code="110401").id,
+            actor=self.user,
+        )
+        draft = self.client.get(
+            reverse("finance:profit_loss"),
+            {"start": "2026-09-01", "end": "2026-09-30"},
+        )
+        self.assertEqual(draft.context["gross_sales_total"], Decimal("0"))
+        post_journal(entry.id, self.user)
         response = self.client.get(
             reverse("finance:profit_loss"),
             {"start": "2026-09-01", "end": "2026-09-30"},
@@ -486,15 +476,11 @@ class FinanceJournalTests(TestCase):
         expense = {row["account"].code: row["amount"] for row in response.context["expense"]}
         self.assertEqual(revenue["410002"], Decimal("200000"))
         self.assertEqual(revenue["440101"], Decimal("-20000"))
-        self.assertEqual(revenue["440103"], Decimal("-90000"))
-        self.assertEqual(expense["5101"], Decimal("60000"))
+        self.assertEqual(expense["5101"], Decimal("120000"))
         self.assertEqual(response.context["gross_sales_total"], Decimal("200000"))
-        self.assertEqual(response.context["revenue_total"], Decimal("90000"))
-        self.assertEqual(response.context["expense_total"], Decimal("60000"))
-        self.assertEqual(response.context["profit"], Decimal("30000"))
-        self.assertEqual(response.context["sales_invoice_count"], 1)
-        self.assertEqual(response.context["return_receipt_count"], 1)
-        self.assertContains(response, "Sales Return")
+        self.assertEqual(response.context["revenue_total"], Decimal("180000"))
+        self.assertEqual(response.context["expense_total"], Decimal("120000"))
+        self.assertEqual(response.context["profit"], Decimal("60000"))
         self.assertContains(response, "Beban Pokok Penjualan")
         self.assertContains(response, "Subtotal Gross Sales")
         self.assertContains(response, "Subtotal Diskon Penjualan")
@@ -509,7 +495,7 @@ class FinanceJournalTests(TestCase):
             [period["label"] for period in multi_period.context["comparison"]["periods"]],
             ["Aug 2026", "Sep 2026"],
         )
-        self.assertEqual(multi_period.context["comparison"]["profits"], [Decimal("0"), Decimal("30000")])
+        self.assertEqual(multi_period.context["comparison"]["profits"], [Decimal("0"), Decimal("60000")])
         self.assertContains(multi_period, "Profit &amp; Loss Multi Period")
 
         multi_year = self.client.get(
@@ -520,7 +506,7 @@ class FinanceJournalTests(TestCase):
             [period["label"] for period in multi_year.context["comparison"]["periods"]],
             ["2024", "2025", "2026"],
         )
-        self.assertEqual(multi_year.context["comparison"]["profits"], [Decimal("0"), Decimal("0"), Decimal("30000")])
+        self.assertEqual(multi_year.context["comparison"]["profits"], [Decimal("0"), Decimal("0"), Decimal("60000")])
         self.assertContains(multi_year, "Profit &amp; Loss Multi Year")
 
     def test_finance_workspace_respects_exact_tab_permission(self):

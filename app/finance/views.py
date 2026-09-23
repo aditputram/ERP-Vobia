@@ -325,7 +325,6 @@ def _profit_loss_data(start, end, accounts):
         start_date=start,
         end_date=end,
         exclude_opening=True,
-        exclude_system_workflows=("SALES_JOURNAL_BATCH",),
     )
     revenue_by_account = {}
     expense_by_account = {}
@@ -344,90 +343,6 @@ def _profit_loss_data(start, end, accounts):
             add_amount(revenue_by_account, account, -row["net"])
         elif account.account_type in {"COGS", "EXPS", "OEXP"}:
             add_amount(expense_by_account, account, row["net"])
-
-    from inventory.models import PhysicalReturnReceipt
-    from sales.models import SalesOrderLine
-
-    accounts_by_id = {account.id: account for account in accounts}
-    accounts_by_code = {account.code: account for account in accounts}
-    operation_start = max(start, FINANCE_OPENING_DATE)
-    sales_totals = {"gross": Decimal("0"), "net": Decimal("0"), "cogs": Decimal("0"), "missing_cogs": 0}
-    return_totals = {"value": Decimal("0"), "cogs": Decimal("0"), "count": 0, "missing_cogs": 0}
-    sales_invoice_count = 0
-    unmapped_sales_count = 0
-    unmapped_sales_amount = Decimal("0")
-    if operation_start <= end:
-        sales_lines = SalesOrderLine.objects.filter(
-            is_counted=True,
-            order__order_date__range=(operation_start, end),
-        )
-        sales_totals = sales_lines.aggregate(
-            gross=Sum("total_gross_sales"),
-            net=Sum("total_net_sales"),
-            cogs=Sum("total_cogs"),
-            missing_cogs=Count("id", filter=Q(total_cogs__isnull=True)),
-        )
-        sales_totals = {
-            "gross": sales_totals["gross"] or Decimal("0"),
-            "net": sales_totals["net"] or Decimal("0"),
-            "cogs": sales_totals["cogs"] or Decimal("0"),
-            "missing_cogs": sales_totals["missing_cogs"],
-        }
-        sales_invoice_count = sales_lines.values("order_id").distinct().count()
-        unmapped_sales = sales_lines.filter(
-            sku__product_variant__product__finance_sales_setting__isnull=True
-        )
-        unmapped_sales_count = unmapped_sales.count()
-        unmapped_sales_amount = (
-            unmapped_sales.aggregate(value=Sum("total_gross_sales"))["value"] or Decimal("0")
-        )
-        for group in sales_lines.values(
-            "sku__product_variant__product__finance_sales_setting__sales_account_id"
-        ).annotate(gross=Sum("total_gross_sales")):
-            account = accounts_by_id.get(
-                group["sku__product_variant__product__finance_sales_setting__sales_account_id"]
-            )
-            if account:
-                add_amount(revenue_by_account, account, group["gross"] or Decimal("0"))
-
-        return_value = ExpressionWrapper(
-            F("quantity") * F("sales_line__net_unit_price"),
-            output_field=DecimalField(max_digits=24, decimal_places=4),
-        )
-        receipts = PhysicalReturnReceipt.objects.filter(received_date__range=(operation_start, end))
-        return_totals = receipts.aggregate(
-            value=Sum(return_value),
-            cogs=Sum(
-                "movement__allocated_cost",
-                filter=Q(condition=PhysicalReturnReceipt.Condition.SELLABLE),
-            ),
-            count=Count("id"),
-            missing_cogs=Count(
-                "id",
-                filter=Q(
-                    condition=PhysicalReturnReceipt.Condition.SELLABLE,
-                    movement__isnull=True,
-                ),
-            ),
-        )
-        return_totals = {
-            "value": return_totals["value"] or Decimal("0"),
-            "cogs": return_totals["cogs"] or Decimal("0"),
-            "count": return_totals["count"],
-            "missing_cogs": return_totals["missing_cogs"],
-        }
-
-    add_amount(
-        revenue_by_account,
-        accounts_by_code.get("440101"),
-        -(sales_totals["gross"] - sales_totals["net"]),
-    )
-    add_amount(revenue_by_account, accounts_by_code.get("440103"), -return_totals["value"])
-    add_amount(
-        expense_by_account,
-        accounts_by_code.get("5101"),
-        sales_totals["cogs"] - return_totals["cogs"],
-    )
 
     revenue = sorted(revenue_by_account.values(), key=lambda row: row["account"].code)
     expense = sorted(expense_by_account.values(), key=lambda row: row["account"].code)
@@ -470,11 +385,6 @@ def _profit_loss_data(start, end, accounts):
         "revenue_total": revenue_total,
         "expense_total": expense_total,
         "profit": revenue_total - expense_total,
-        "sales_invoice_count": sales_invoice_count,
-        "return_receipt_count": return_totals["count"],
-        "unmapped_sales_count": unmapped_sales_count,
-        "unmapped_sales_amount": unmapped_sales_amount,
-        "missing_cogs_count": sales_totals["missing_cogs"] + return_totals["missing_cogs"],
     }
 
 
@@ -582,8 +492,6 @@ def profit_loss(request):
         "end_month": end_month,
         "report_year": report_year,
         "comparison": comparison,
-        "unmapped_sales_count": sum((item["unmapped_sales_count"] for item in reports), 0),
-        "missing_cogs_count": sum((item["missing_cogs_count"] for item in reports), 0),
     }
     if report:
         context.update(report)

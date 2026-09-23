@@ -340,6 +340,91 @@ class FinanceJournalTests(TestCase):
         self.assertNotContains(search_response, "Received Return Product")
         self.assertEqual(search_response.context["query"], "FINANCE-RETURN-DAMAGED")
 
+    def test_profit_loss_includes_sales_invoice_discount_return_and_cogs(self):
+        from inventory.models import InventoryMovement, PhysicalReturnReceipt
+        from master_data.models import ProductVariant, SKU, Warehouse
+        from sales.models import SalesOrder, SalesOrderLine
+
+        status = ProductStatus.objects.create(code="FIN-PL-REG", name="Finance P&L Regular")
+        category = Category.objects.create(code="FIN-PL-TS", name="Finance P&L T-Shirt")
+        product = Product.objects.create(
+            code="FIN-PL-PRODUCT",
+            parent_sku="FIN-PL-PARENT",
+            name="Finance P&L Product",
+            status=status,
+            category=category,
+        )
+        variant = ProductVariant.objects.create(product=product, name="Black")
+        sku = SKU.objects.create(sku="FIN-PL-SKU", product_variant=variant)
+        ProductSalesAccount.objects.create(product=product, sales_account=Account.objects.get(code="410002"))
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="FIN-PL-ORDER",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 10, 10, 0)),
+            order_date=date(2026, 9, 10),
+            current_status="Retur",
+            source_status="Retur",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        line = SalesOrderLine.objects.create(
+            order=order,
+            sku=sku,
+            sku_code_snapshot=sku.sku,
+            product_name_snapshot=product.name,
+            current_status="Retur",
+            quantity=2,
+            net_unit_price=Decimal("90000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("200000"),
+            total_net_sales=Decimal("180000"),
+            total_cogs=Decimal("120000"),
+        )
+        warehouse = Warehouse.objects.create(code="FIN-PL-WH", name="Finance P&L Warehouse")
+        receipt = PhysicalReturnReceipt.objects.create(
+            sales_line=line,
+            received_date=date(2026, 9, 15),
+            quantity=1,
+            warehouse=warehouse,
+            condition=PhysicalReturnReceipt.Condition.SELLABLE,
+            recorded_by=self.user,
+        )
+        InventoryMovement.objects.create(
+            movement_key="FIN-PL-RETURN",
+            movement_date=receipt.received_date,
+            movement_type=InventoryMovement.MovementType.RETURN_IN,
+            direction=InventoryMovement.Direction.IN,
+            sku=sku,
+            warehouse=warehouse,
+            quantity=1,
+            allocated_cost=Decimal("60000"),
+            source_reference=order.order_number,
+            return_receipt=receipt,
+            posted_by=self.user,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("finance:profit_loss"),
+            {"start": "2026-09-01", "end": "2026-09-30"},
+        )
+
+        revenue = {row["account"].code: row["amount"] for row in response.context["revenue"]}
+        expense = {row["account"].code: row["amount"] for row in response.context["expense"]}
+        self.assertEqual(revenue["410002"], Decimal("200000"))
+        self.assertEqual(revenue["440101"], Decimal("-20000"))
+        self.assertEqual(revenue["440103"], Decimal("-90000"))
+        self.assertEqual(expense["5101"], Decimal("60000"))
+        self.assertEqual(response.context["revenue_total"], Decimal("90000"))
+        self.assertEqual(response.context["expense_total"], Decimal("60000"))
+        self.assertEqual(response.context["profit"], Decimal("30000"))
+        self.assertEqual(response.context["sales_invoice_count"], 1)
+        self.assertEqual(response.context["return_receipt_count"], 1)
+        self.assertContains(response, "Sales Return")
+        self.assertContains(response, "Beban Pokok Penjualan")
+
     def test_finance_workspace_respects_exact_tab_permission(self):
         user = get_user_model().objects.create_user(
             username="cashier",

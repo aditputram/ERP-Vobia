@@ -109,6 +109,7 @@ class FinanceJournalTests(TestCase):
 
         summary = self.client.get(url, {"start": "2026-09-01", "end": "2026-09-30"})
         self.assertContains(summary, "Semua Akun")
+        self.assertContains(summary, "finance-ledger-filter")
         self.assertContains(summary, 'type="search"')
         self.assertContains(summary, 'list="ledger-account-options"')
         self.assertContains(summary, "data-ledger-account-value")

@@ -16,8 +16,8 @@ from master_data.models import Category, Product, ProductStatus, Subcategory
 
 from .importers import stage_finance_cutover
 from .catalog import FEATURES
-from .models import Account, JournalEntry, JournalLine, ProductSalesAccount
-from .services import account_balances, post_journal
+from .models import Account, JournalEntry, JournalLine, ProductSalesAccount, SalesJournalAllocation
+from .services import account_balances, create_sales_journal_draft, post_journal
 
 
 class FinanceJournalTests(TestCase):
@@ -262,6 +262,60 @@ class FinanceJournalTests(TestCase):
         self.assertContains(response, "120.000")
         self.assertContains(response, "COGS")
         self.assertNotContains(response, "Buat Sales Invoice")
+
+    def test_sales_journal_is_balanced_draft_and_does_not_duplicate_sales_lines(self):
+        from sales.models import SalesOrder, SalesOrderLine
+
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="FINANCE-JOURNAL-001",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 12, 10, 0)),
+            order_date=date(2026, 9, 12),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        sales_line = SalesOrderLine.objects.create(
+            order=order,
+            sku_code_snapshot="FIN-JOURNAL-SKU",
+            category_snapshot="Finance T-Shirt",
+            product_name_snapshot="Finance Journal Product",
+            quantity=2,
+            net_unit_price=Decimal("90000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("200000"),
+            total_net_sales=Decimal("180000"),
+            total_cogs=Decimal("120000"),
+        )
+        params = {
+            "start_date": date(2026, 9, 1),
+            "end_date": date(2026, 9, 30),
+            "sales_mode": "total",
+            "cogs_mode": "total",
+            "sales_account_ids": {"Total": Account.objects.get(code="410002").id},
+            "cogs_account_ids": {"Total": Account.objects.get(code="5101").id},
+            "discount_account_id": Account.objects.get(code="440101").id,
+            "receipt_account_id": Account.objects.get(code="110301").id,
+            "inventory_account_id": Account.objects.get(code="110401").id,
+            "actor": self.user,
+        }
+
+        entry = create_sales_journal_draft(**params)
+
+        self.assertEqual(entry.status, JournalEntry.Status.DRAFT)
+        self.assertEqual(entry.debit_total, Decimal("320000"))
+        self.assertEqual(entry.credit_total, Decimal("320000"))
+        self.assertTrue(SalesJournalAllocation.objects.filter(sales_line=sales_line, entry=entry).exists())
+        with self.assertRaisesMessage(ValidationError, "belum dijurnal"):
+            create_sales_journal_draft(**params)
+
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("finance:feature", args=["sales-invoice"]))
+        self.assertContains(page, "Create Jurnal Entry Sales")
+        self.assertContains(page, "1 baris sudah dialokasikan")
 
     def test_sales_return_only_shows_returns_received_by_warehouse(self):
         from inventory.models import PhysicalReturnReceipt

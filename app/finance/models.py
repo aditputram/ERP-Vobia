@@ -171,3 +171,29 @@ class ProductSalesAccount(models.Model):
 
     def __str__(self):
         return f"{self.product} → {self.sales_account}"
+
+
+class SalesJournalAllocation(models.Model):
+    """Guards one canonical Sales line from being journaled more than once."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    entry = models.ForeignKey(
+        JournalEntry,
+        on_delete=models.PROTECT,
+        related_name="sales_allocations",
+    )
+    sales_line = models.OneToOneField(
+        "sales.SalesOrderLine",
+        on_delete=models.PROTECT,
+        related_name="finance_journal_allocation",
+    )
+    gross_sales = models.DecimalField(max_digits=22, decimal_places=6)
+    net_sales = models.DecimalField(max_digits=22, decimal_places=6)
+    cogs = models.DecimalField(max_digits=22, decimal_places=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("entry__entry_date", "sales_line__order__order_number")
+
+    def __str__(self):
+        return f"{self.entry.number} · {self.sales_line.business_key}"

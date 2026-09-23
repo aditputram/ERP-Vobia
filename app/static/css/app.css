@@ -1022,6 +1022,24 @@ tbody tr:last-child td { border-bottom: 0; }
 .chat-popup > header .chat-push-button.is-active { color: #536b00; background: #f4f8e9; }
 .chat-popup > header .chat-push-button:disabled { cursor: default; }
 .chat-popup iframe { width: 100%; height: 100%; border: 0; background: #f8f8f4; }
+.finance-sales-journal-dialog { width: min(900px, calc(100vw - 32px)); max-height: calc(100dvh - 44px); padding: 0; overflow: hidden; border: 0; border-radius: 16px; background: #f8f8f4; box-shadow: 0 24px 70px rgba(20, 21, 18, .28); }
+.finance-sales-journal-dialog::backdrop { background: rgba(18, 19, 16, .38); backdrop-filter: blur(2px); }
+.finance-sales-journal-dialog > header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--line); background: white; }
+.finance-sales-journal-dialog > header h2 { margin: 2px 0 0; }
+.finance-sales-journal-dialog > header > button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 50%; background: #f1f1eb; font-size: 20px; cursor: pointer; }
+.finance-sales-journal-dialog > form { max-height: calc(100dvh - 120px); padding: 18px 20px 20px; overflow: auto; }
+.finance-journal-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.finance-sales-journal-dialog label { display: grid; gap: 6px; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.finance-sales-journal-dialog input, .finance-sales-journal-dialog select { width: 100%; min-height: 38px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--ink); }
+.finance-journal-mapping { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.finance-journal-mapping > div:first-child { margin-bottom: 10px; }
+.finance-journal-mapping h3 { margin: 0 0 3px; font-size: 14px; }
+.finance-journal-mapping p { margin: 0; color: var(--muted); font-size: 10px; }
+.finance-journal-map-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.finance-sales-journal-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 16px; }
+.finance-sales-journal-dialog footer > div { display: flex; gap: 8px; }
+.finance-sales-journal-dialog footer p { margin: 0; color: var(--muted); font-size: 10px; }
+@media (max-width: 760px) { .finance-journal-form-grid, .finance-journal-map-list { grid-template-columns: 1fr; } .finance-sales-journal-dialog footer { align-items: stretch; flex-direction: column; } }
 .user-access-form { display: grid; gap: 24px; }
 .user-identity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .module-access-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }

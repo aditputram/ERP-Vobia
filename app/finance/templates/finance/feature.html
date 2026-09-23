@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header">
     <div><p class="eyebrow">{{ feature.section }}</p><h1>{{ feature.title }}</h1></div>
-    {% if action %}<a class="primary-button" href="{{ action.href }}">{{ action.label }}</a>{% endif %}
+    {% if sales_invoice and can_create_sales_journal %}<button class="primary-button" type="button" data-sales-journal-open>Create Jurnal Entry Sales</button>{% elif action %}<a class="primary-button" href="{{ action.href }}">{{ action.label }}</a>{% endif %}
 </header>
 {% if sales_invoice %}
 <form method="get" class="panel report-filter dashboard-period-filter" data-auto-submit data-source-cascade data-finance-sales-filter>
@@ -20,7 +20,7 @@
 {% elif slug == 'financial-ratio' or 'outstanding' in slug or 'aging' in slug or slug == 'supplier-payable-per-month' or slug == 'inventory-valuation' %}
 <form method="get" class="panel inventory-filter"><div class="inventory-filter-grid"><label>Per tanggal<input type="date" name="as_of" value="{{ as_of|date:'Y-m-d' }}"></label><button class="primary-button" type="submit">Tampilkan</button></div></form>
 {% endif %}
-{% if sales_invoice %}<section class="metric-grid section-gap"><article class="metric-card"><span>Invoice / Order</span><strong>{{ sales_totals.orders|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Gross Sales</span><strong>Rp {{ sales_totals.gross|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Net Sales</span><strong>Rp {{ sales_totals.net|floatformat:"0g" }}</strong></article><article class="metric-card"><span>COGS</span><strong>Rp {{ sales_totals.cogs|floatformat:"0g" }}</strong></article></section>{% endif %}
+{% if sales_invoice %}<section class="metric-grid section-gap"><article class="metric-card"><span>Invoice / Order</span><strong>{{ sales_totals.orders|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Gross Sales</span><strong>Rp {{ sales_totals.gross|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Net Sales</span><strong>Rp {{ sales_totals.net|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Belum Dijurnal</span><strong>{{ allocation_totals.unjournaled|floatformat:"0g" }}</strong><small>{{ allocation_totals.journaled|floatformat:"0g" }} baris sudah dialokasikan</small></article></section>{% endif %}
 {% if sales_return %}<section class="metric-grid section-gap">{% for label, value in metrics %}<article class="metric-card"><span>{{ label }}</span><strong>{{ value|floatformat:"0g" }}</strong></article>{% endfor %}<form method="get" class="metric-card panel span-two report-filter dashboard-period-filter"><label>Search<input type="search" name="q" value="{{ query }}" placeholder="No. pesanan, SKU, atau produk"></label><label>Status Receipt<select name="receipt_status"><option value="">Semua Status Receipt</option>{% for value, label in receipt_status_options %}<option value="{{ value }}" {% if receipt_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label><button class="primary-button" type="submit">Tampilkan</button></form></section>{% elif metrics %}<section class="metric-grid section-gap">{% for label, value in metrics %}<article class="metric-card"><span>{{ label }}</span><strong>{{ value|floatformat:"2g" }}</strong></article>{% endfor %}</section>{% endif %}
 {% if general_ledger %}
 <section class="panel section-gap">
@@ -35,10 +35,29 @@
 {% else %}
 <section class="panel section-gap">
     <div class="panel-header"><div><h2>{{ feature.title }}</h2><p>{{ data_note }}</p></div></div>
-    {% if sales_invoice %}<div class="table-wrap warehouse-table-wrap"><table><thead><tr><th>Tanggal</th><th>Source</th><th>No. Pesanan</th><th>Status</th><th>Gross</th><th>Net</th><th>COGS</th></tr></thead><tbody>{% for row in sales_orders %}<tr><td>{{ row.order_date|date:"d M Y" }}</td><td>{{ row.display_source }}</td><td>{{ row.order_number }}</td><td>{{ row.current_status }}</td><td>Rp {{ row.gross|default:0|floatformat:"0g" }}</td><td>Rp {{ row.net|default:0|floatformat:"0g" }}</td><td>{% if row.cogs != None %}Rp {{ row.cogs|floatformat:"0g" }}{% else %}—{% endif %}</td></tr>{% empty %}<tr><td colspan="7"><div class="empty-state">Tidak ada transaksi pada filter ini.</div></td></tr>{% endfor %}</tbody></table></div>{% if page.has_other_pages %}<nav class="pagination"><span>Page {{ page.number|floatformat:"0g" }} / {{ page.paginator.num_pages|floatformat:"0g" }}</span><div>{% if page.has_previous %}<a href="?{{ pagination_prefix }}page={{ page.previous_page_number }}">Sebelumnya</a>{% endif %}{% if page.has_next %}<a href="?{{ pagination_prefix }}page={{ page.next_page_number }}">Berikutnya</a>{% endif %}</div></nav>{% endif %}{% elif columns %}<div class="table-wrap warehouse-table-wrap"><table><thead><tr>{% for column in columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in rows %}<tr>{% for cell in row %}<td>{% if cell == None %}—{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>{% empty %}<tr><td colspan="{{ columns|length }}"><div class="empty-state">Belum ada data.</div></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">Struktur menu sudah tersedia. Field, approval, dan posting otomatis akan diaktifkan setelah flow operasional fitur ini ditetapkan bersama tim Finance.</div>{% endif %}
+    {% if sales_invoice %}<div class="table-wrap warehouse-table-wrap"><table><thead><tr><th>Tanggal</th><th>Source</th><th>No. Pesanan</th><th>Status</th><th>Gross</th><th>Net</th><th>COGS</th><th>Jurnal</th></tr></thead><tbody>{% for row in sales_orders %}<tr><td>{{ row.order_date|date:"d M Y" }}</td><td>{{ row.display_source }}</td><td>{{ row.order_number }}</td><td>{{ row.current_status }}</td><td>Rp {{ row.gross|default:0|floatformat:"0g" }}</td><td>Rp {{ row.net|default:0|floatformat:"0g" }}</td><td>{% if row.cogs != None %}Rp {{ row.cogs|floatformat:"0g" }}{% else %}—{% endif %}</td><td>{{ row.journaled_lines|floatformat:"0g" }}/{{ row.counted_lines|floatformat:"0g" }}</td></tr>{% empty %}<tr><td colspan="8"><div class="empty-state">Tidak ada transaksi pada filter ini.</div></td></tr>{% endfor %}</tbody></table></div>{% if page.has_other_pages %}<nav class="pagination"><span>Page {{ page.number|floatformat:"0g" }} / {{ page.paginator.num_pages|floatformat:"0g" }}</span><div>{% if page.has_previous %}<a href="?{{ pagination_prefix }}page={{ page.previous_page_number }}">Sebelumnya</a>{% endif %}{% if page.has_next %}<a href="?{{ pagination_prefix }}page={{ page.next_page_number }}">Berikutnya</a>{% endif %}</div></nav>{% endif %}{% elif columns %}<div class="table-wrap warehouse-table-wrap"><table><thead><tr>{% for column in columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in rows %}<tr>{% for cell in row %}<td>{% if cell == None %}—{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>{% empty %}<tr><td colspan="{{ columns|length }}"><div class="empty-state">Belum ada data.</div></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">Struktur menu sudah tersedia. Field, approval, dan posting otomatis akan diaktifkan setelah flow operasional fitur ini ditetapkan bersama tim Finance.</div>{% endif %}
 </section>
 {% endif %}
 {% if sales_invoice %}
+{% if can_create_sales_journal %}
+<dialog class="finance-sales-journal-dialog" data-sales-journal-dialog>
+    <header><div><p class="eyebrow">SALES · JOURNAL DRAFT</p><h2>Create Jurnal Entry Sales</h2></div><button type="button" aria-label="Tutup" data-sales-journal-close>×</button></header>
+    <form method="post" data-sales-journal-form>{% csrf_token %}<input type="hidden" name="action" value="create_sales_journal">
+        <div class="finance-journal-form-grid"><label>Tanggal mulai<input type="date" name="journal_start" value="{{ date_from|date:'Y-m-d' }}" min="2026-09-01" required></label><label>Sampai tanggal<input type="date" name="journal_end" value="{{ date_to|date:'Y-m-d' }}" min="2026-09-01" required></label><label>Akun Receipt / Piutang<select name="receipt_account" required><option value="">Pilih akun</option>{% for account in receipt_account_options %}<option value="{{ account.id }}" {% if account.id == default_receipt_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label><label>Akun Diskon<select name="discount_account" required><option value="">Pilih akun</option>{% for account in discount_account_options %}<option value="{{ account.id }}" {% if account.id == default_discount_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label><label>Akun Persediaan<select name="inventory_account" required><option value="">Pilih akun</option>{% for account in inventory_account_options %}<option value="{{ account.id }}" {% if account.id == default_inventory_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label></div>
+        <section class="finance-journal-mapping"><div><h3>Akun Gross Sales</h3><p>Kredit Gross Sales dikelompokkan sesuai pilihan ini.</p></div><label>Kelompok berdasarkan<select name="sales_mode" data-journal-mode="sales"><option value="category">Kategori</option><option value="source">Source</option><option value="total">Total</option></select></label>
+            <div class="finance-journal-map-list" data-journal-map="sales:category">{% for group in journal_category_groups %}<label><span>{{ group.label }}</span><input type="hidden" name="sales_category_label" value="{{ group.label }}"><select name="sales_category_account" required><option value="">Pilih Sales A/C</option>{% for account in sales_account_options %}<option value="{{ account.id }}" {% if account.id == group.sales_default_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label>{% endfor %}</div>
+            <div class="finance-journal-map-list" data-journal-map="sales:source" hidden>{% for group in journal_source_groups %}<label><span>{{ group.label }}</span><input type="hidden" name="sales_source_label" value="{{ group.label }}" disabled><select name="sales_source_account" required disabled><option value="">Pilih Sales A/C</option>{% for account in sales_account_options %}<option value="{{ account.id }}">{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label>{% endfor %}</div>
+            <div class="finance-journal-map-list" data-journal-map="sales:total" hidden><label><span>Total Sales</span><select name="sales_total_account" required disabled><option value="">Pilih Sales A/C</option>{% for account in sales_account_options %}<option value="{{ account.id }}">{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label></div>
+        </section>
+        <section class="finance-journal-mapping"><div><h3>Akun COGS</h3><p>Debit COGS dapat dipisah per kategori, source, atau total.</p></div><label>Kelompok berdasarkan<select name="cogs_mode" data-journal-mode="cogs"><option value="category">Kategori</option><option value="source">Source</option><option value="total" selected>Total</option></select></label>
+            <div class="finance-journal-map-list" data-journal-map="cogs:category" hidden>{% for group in journal_category_groups %}<label><span>{{ group.label }}</span><input type="hidden" name="cogs_category_label" value="{{ group.label }}" disabled><select name="cogs_category_account" required disabled><option value="">Pilih akun COGS</option>{% for account in cogs_account_options %}<option value="{{ account.id }}" {% if account.id == group.cogs_default_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label>{% endfor %}</div>
+            <div class="finance-journal-map-list" data-journal-map="cogs:source" hidden>{% for group in journal_source_groups %}<label><span>{{ group.label }}</span><input type="hidden" name="cogs_source_label" value="{{ group.label }}" disabled><select name="cogs_source_account" required disabled><option value="">Pilih akun COGS</option>{% for account in cogs_account_options %}<option value="{{ account.id }}" {% if account.id == group.cogs_default_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label>{% endfor %}</div>
+            <div class="finance-journal-map-list" data-journal-map="cogs:total"><label><span>Total COGS</span><select name="cogs_total_account" required><option value="">Pilih akun COGS</option>{% for account in cogs_account_options %}<option value="{{ account.id }}" {% if account.id == default_cogs_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label></div>
+        </section>
+        <footer><p>Jurnal dibuat sebagai <strong>Draft</strong>. Buku besar baru berubah setelah Approve &amp; Post.</p><div><button class="secondary-button" type="button" data-sales-journal-close>Batal</button><button class="primary-button" type="submit">Create Draft Journal</button></div></footer>
+    </form>
+</dialog>
+{% endif %}
 {% include "includes/multi_select_script.html" %}
 <script>
 (() => {
@@ -63,6 +82,27 @@
     };
     typeSelect.addEventListener('change', sync);
     sync();
+})();
+(() => {
+    const dialog = document.querySelector('[data-sales-journal-dialog]');
+    const open = document.querySelector('[data-sales-journal-open]');
+    if (!dialog || !open) return;
+    const syncMaps = () => {
+        dialog.querySelectorAll('[data-journal-mode]').forEach(select => {
+            const prefix = select.dataset.journalMode;
+            dialog.querySelectorAll(`[data-journal-map^="${prefix}:"]`).forEach(section => {
+                const active = section.dataset.journalMap === `${prefix}:${select.value}`;
+                section.hidden = !active;
+                section.querySelectorAll('input,select').forEach(control => control.disabled = !active);
+            });
+        });
+    };
+    open.addEventListener('click', () => { syncMaps(); dialog.showModal(); });
+    dialog.querySelectorAll('[data-sales-journal-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
+    dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+    dialog.querySelectorAll('[data-journal-mode]').forEach(select => select.addEventListener('change', syncMaps));
+    syncMaps();
+    {% if open_sales_journal_modal %}dialog.showModal();{% endif %}
 })();
 </script>
 {% endif %}

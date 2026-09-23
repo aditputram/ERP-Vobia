@@ -26,10 +26,12 @@ from .models import (
     JournalEntry,
     JournalLine,
     ProductSalesAccount,
+    SalesJournalAllocation,
 )
 from .services import (
     account_balances,
     account_opening_balance,
+    create_sales_journal_draft,
     next_journal_number,
     post_journal,
     set_account_opening_balance,
@@ -319,7 +321,12 @@ def _shift_month(value, offset):
 
 
 def _profit_loss_data(start, end, accounts):
-    rows = account_balances(start_date=start, end_date=end, exclude_opening=True)
+    rows = account_balances(
+        start_date=start,
+        end_date=end,
+        exclude_opening=True,
+        exclude_system_workflows=("SALES_JOURNAL_BATCH",),
+    )
     revenue_by_account = {}
     expense_by_account = {}
 
@@ -796,6 +803,122 @@ def feature(request, slug):
         )
 
         all_lines = SalesOrderLine.objects.filter(is_counted=True)
+        can_create_sales_journal = request.user.is_superuser or module_level(
+            request.user, "finance"
+        ) in {"edit", "approve"}
+        sales_account_options = list(
+            Account.objects.filter(
+                account_type="REVE",
+                is_active=True,
+                is_postable=True,
+                parent__code="4100",
+            ).order_by("code")
+        )
+        cogs_account_options = list(
+            Account.objects.filter(account_type="COGS", is_active=True, is_postable=True).order_by("code")
+        )
+        discount_account_options = list(
+            Account.objects.filter(
+                account_type="REVE",
+                is_active=True,
+                is_postable=True,
+                parent__code="4401",
+            ).exclude(code="440103").order_by("code")
+        )
+        receipt_account_options = list(
+            Account.objects.filter(
+                account_type__in={"AREC", "BANK"}, is_active=True, is_postable=True
+            ).order_by("code")
+        )
+        inventory_account_options = list(
+            Account.objects.filter(account_type="INTR", is_active=True, is_postable=True).order_by("code")
+        )
+        category_labels = list(
+            all_lines.exclude(category_snapshot="")
+            .order_by("category_snapshot")
+            .values_list("category_snapshot", flat=True)
+            .distinct()
+        )
+        if all_lines.filter(category_snapshot="").exists():
+            category_labels.append("Tanpa Kategori")
+        source_labels = sorted(
+            {
+                order.display_source
+                for order in SalesOrder.objects.filter(lines__is_counted=True).distinct()
+            }
+        )
+        default_cogs_id = cogs_account_options[0].id if len(cogs_account_options) == 1 else None
+        category_groups = []
+        for label in category_labels:
+            mapped_ids = set(
+                ProductSalesAccount.objects.filter(
+                    product__category__name=label
+                ).values_list("sales_account_id", flat=True)
+            )
+            category_groups.append(
+                {
+                    "label": label,
+                    "sales_default_id": next(iter(mapped_ids)) if len(mapped_ids) == 1 else None,
+                    "cogs_default_id": default_cogs_id,
+                }
+            )
+        source_groups_for_journal = [
+            {"label": label, "sales_default_id": None, "cogs_default_id": default_cogs_id}
+            for label in source_labels
+        ]
+
+        open_sales_journal_modal = False
+        if request.method == "POST" and request.POST.get("action") == "create_sales_journal":
+            if not can_create_sales_journal:
+                return HttpResponseForbidden("Akun ini tidak memiliki akses membuat jurnal Sales.")
+
+            def posted_mapping(prefix):
+                return {
+                    label: account_id
+                    for label, account_id in zip(
+                        request.POST.getlist(f"{prefix}_label"),
+                        request.POST.getlist(f"{prefix}_account"),
+                    )
+                }
+
+            sales_mode = request.POST.get("sales_mode", "category")
+            cogs_mode = request.POST.get("cogs_mode", "total")
+            sales_account_ids = (
+                {"Total": request.POST.get("sales_total_account", "")}
+                if sales_mode == "total"
+                else posted_mapping(f"sales_{sales_mode}")
+            )
+            cogs_account_ids = (
+                {"Total": request.POST.get("cogs_total_account", "")}
+                if cogs_mode == "total"
+                else posted_mapping(f"cogs_{cogs_mode}")
+            )
+            journal_start = parse_date(request.POST.get("journal_start", ""))
+            journal_end = parse_date(request.POST.get("journal_end", ""))
+            try:
+                if not journal_start or not journal_end:
+                    raise ValidationError("Tanggal mulai dan selesai jurnal wajib diisi.")
+                entry = create_sales_journal_draft(
+                    start_date=journal_start,
+                    end_date=journal_end,
+                    sales_mode=sales_mode,
+                    cogs_mode=cogs_mode,
+                    sales_account_ids=sales_account_ids,
+                    cogs_account_ids=cogs_account_ids,
+                    discount_account_id=request.POST.get("discount_account", ""),
+                    receipt_account_id=request.POST.get("receipt_account", ""),
+                    inventory_account_id=request.POST.get("inventory_account", ""),
+                    actor=request.user,
+                )
+            except ValidationError as exc:
+                messages.error(request, " ".join(exc.messages))
+                open_sales_journal_modal = True
+            else:
+                messages.success(
+                    request,
+                    f"Jurnal Sales {entry.number} dibuat sebagai Draft dan belum memengaruhi buku besar.",
+                )
+                return redirect("finance:journal_detail", entry_id=entry.id)
         latest = all_lines.order_by("-order__order_date").values_list("order__order_date", flat=True).first() or today
         earliest = all_lines.order_by("order__order_date").values_list("order__order_date", flat=True).first() or latest
         period_options = _pareto_period_options(earliest, latest)
@@ -834,10 +957,23 @@ def feature(request, slug):
             net=Sum("total_net_sales"),
             cogs=Sum("total_cogs"),
         )
+        allocation_totals = lines.aggregate(
+            journaled=Count("id", filter=Q(finance_journal_allocation__isnull=False)),
+            unjournaled=Count("id", filter=Q(finance_journal_allocation__isnull=True)),
+        )
         orders = SalesOrder.objects.filter(id__in=lines.values("order_id")).annotate(
             gross=Sum("lines__total_gross_sales", filter=Q(lines__is_counted=True)),
             net=Sum("lines__total_net_sales", filter=Q(lines__is_counted=True)),
             cogs=Sum("lines__total_cogs", filter=Q(lines__is_counted=True)),
+            counted_lines=Count("lines", filter=Q(lines__is_counted=True), distinct=True),
+            journaled_lines=Count(
+                "lines",
+                filter=Q(
+                    lines__is_counted=True,
+                    lines__finance_journal_allocation__isnull=False,
+                ),
+                distinct=True,
+            ),
         ).order_by("-order_datetime", "source", "order_number")
         page = Paginator(orders, 100).get_page(request.GET.get("page"))
         pagination_query = request.GET.copy()
@@ -857,7 +993,30 @@ def feature(request, slug):
             selected_sources=sources,
             selected_source_groups=source_groups,
             sales_totals={key: value or 0 for key, value in totals.items()},
-            data_note="Menggunakan transaksi dan COGS snapshot canonical dari modul Sales. Posting jurnal Finance akan diaktifkan terpisah sesuai cutover 31 Agustus 2026.",
+            allocation_totals=allocation_totals,
+            can_create_sales_journal=can_create_sales_journal,
+            open_sales_journal_modal=open_sales_journal_modal,
+            sales_account_options=sales_account_options,
+            cogs_account_options=cogs_account_options,
+            discount_account_options=discount_account_options,
+            receipt_account_options=receipt_account_options,
+            inventory_account_options=inventory_account_options,
+            journal_category_groups=category_groups,
+            journal_source_groups=source_groups_for_journal,
+            default_discount_id=next(
+                (account.id for account in discount_account_options if account.code == "440101"),
+                None,
+            ),
+            default_receipt_id=next(
+                (account.id for account in receipt_account_options if account.code == "110301"),
+                None,
+            ),
+            default_inventory_id=next(
+                (account.id for account in inventory_account_options if account.code == "110401"),
+                None,
+            ),
+            default_cogs_id=default_cogs_id,
+            data_note="Transaksi canonical Sales tidak otomatis menjadi jurnal. Buat jurnal Draft dari tombol Create Jurnal Entry Sales, lalu review dan Approve & Post secara terpisah.",
         )
     elif slug in {"sales-return", "sales-return-per-item"}:
         from inventory.models import PhysicalReturnReceipt

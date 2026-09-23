@@ -603,6 +603,7 @@ def feature(request, slug):
     elif slug in {"sales-return", "sales-return-per-item"}:
         from inventory.models import PhysicalReturnReceipt
 
+        query = request.GET.get("q", "").strip()
         receipt_status = request.GET.get("receipt_status", "")
         receipt_statuses = dict(PhysicalReturnReceipt.Condition.choices)
         if receipt_status not in receipt_statuses:
@@ -614,9 +615,16 @@ def feature(request, slug):
         ).order_by("-received_date", "-created_at")
         if receipt_status:
             received_returns = received_returns.filter(condition=receipt_status)
+        if query:
+            received_returns = received_returns.filter(
+                Q(sales_line__order__order_number__icontains=query)
+                | Q(sales_line__sku_code_snapshot__icontains=query)
+                | Q(sales_line__product_name_snapshot__icontains=query)
+            )
         totals = received_returns.aggregate(receipts=Count("id"), quantity=Sum("quantity"))
         context.update(
             sales_return=True,
+            query=query,
             receipt_status=receipt_status,
             receipt_status_options=PhysicalReturnReceipt.Condition.choices,
             columns=(

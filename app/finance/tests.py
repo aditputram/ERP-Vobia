@@ -332,6 +332,14 @@ class FinanceJournalTests(TestCase):
         self.assertNotContains(sellable_response, "Damaged Return Product")
         self.assertEqual(sellable_response.context["metrics"], (("Return received", 1), ("Qty received", Decimal("2"))))
 
+        search_response = self.client.get(
+            reverse("finance:feature", args=["sales-return"]),
+            {"q": "FINANCE-RETURN-DAMAGED"},
+        )
+        self.assertContains(search_response, "Damaged Return Product")
+        self.assertNotContains(search_response, "Received Return Product")
+        self.assertEqual(search_response.context["query"], "FINANCE-RETURN-DAMAGED")
+
     def test_finance_workspace_respects_exact_tab_permission(self):
         user = get_user_model().objects.create_user(
             username="cashier",

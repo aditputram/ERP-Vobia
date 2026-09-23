@@ -430,6 +430,28 @@ class FinanceJournalTests(TestCase):
         self.assertContains(response, "Subtotal Beban Pokok Penjualan")
         self.assertContains(response, "Total Pendapatan Bersih")
 
+        multi_period = self.client.get(
+            reverse("finance:profit_loss"),
+            {"mode": "multi_period", "start_month": "2026-08", "end_month": "2026-09"},
+        )
+        self.assertEqual(
+            [period["label"] for period in multi_period.context["comparison"]["periods"]],
+            ["Aug 2026", "Sep 2026"],
+        )
+        self.assertEqual(multi_period.context["comparison"]["profits"], [Decimal("0"), Decimal("30000")])
+        self.assertContains(multi_period, "Profit &amp; Loss Multi Period")
+
+        multi_year = self.client.get(
+            reverse("finance:profit_loss"),
+            {"mode": "multi_year", "year": "2026"},
+        )
+        self.assertEqual(
+            [period["label"] for period in multi_year.context["comparison"]["periods"]],
+            ["2024", "2025", "2026"],
+        )
+        self.assertEqual(multi_year.context["comparison"]["profits"], [Decimal("0"), Decimal("0"), Decimal("30000")])
+        self.assertContains(multi_year, "Profit &amp; Loss Multi Year")
+
     def test_finance_workspace_respects_exact_tab_permission(self):
         user = get_user_model().objects.create_user(
             username="cashier",

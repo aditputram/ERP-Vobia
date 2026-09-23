@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 
@@ -304,12 +305,19 @@ def balance_sheet(request):
     )
 
 
-@login_required
-def profit_loss(request):
-    start = _selected_date(request, "start", date(date.today().year, date.today().month, 1))
-    end = _selected_date(request, "end", date.today())
-    if start > end:
-        start, end = end, start
+def _month_value(value, fallback):
+    try:
+        return date.fromisoformat(f"{value}-01")
+    except (TypeError, ValueError):
+        return fallback.replace(day=1)
+
+
+def _shift_month(value, offset):
+    month_index = value.year * 12 + value.month - 1 + offset
+    return date(month_index // 12, month_index % 12 + 1, 1)
+
+
+def _profit_loss_data(start, end, accounts):
     rows = account_balances(start_date=start, end_date=end, exclude_opening=True)
     revenue_by_account = {}
     expense_by_account = {}
@@ -332,7 +340,6 @@ def profit_loss(request):
     from inventory.models import PhysicalReturnReceipt
     from sales.models import SalesOrderLine
 
-    accounts = list(Account.objects.all())
     accounts_by_id = {account.id: account for account in accounts}
     accounts_by_code = {account.code: account for account in accounts}
     operation_start = max(start, FINANCE_OPENING_DATE)
@@ -443,26 +450,139 @@ def profit_loss(request):
         (group["subtotal"] for group in revenue_groups if group["account"].code == "4100"),
         Decimal("0"),
     )
+    return {
+        "revenue": revenue,
+        "expense": expense,
+        "revenue_groups": revenue_groups,
+        "expense_groups": expense_groups,
+        "amount_by_account": {
+            row["account"].id: row["amount"] for row in revenue + expense
+        },
+        "gross_sales_total": gross_sales_total,
+        "revenue_total": revenue_total,
+        "expense_total": expense_total,
+        "profit": revenue_total - expense_total,
+        "sales_invoice_count": sales_invoice_count,
+        "return_receipt_count": return_totals["count"],
+        "unmapped_sales_count": unmapped_sales_count,
+        "unmapped_sales_amount": unmapped_sales_amount,
+        "missing_cogs_count": sales_totals["missing_cogs"] + return_totals["missing_cogs"],
+    }
+
+
+def _comparison_groups(reports, key):
+    group_definitions = {}
+    for report in reports:
+        for group in report[key]:
+            definition = group_definitions.setdefault(
+                group["account"].id,
+                {"account": group["account"], "label": group["label"], "accounts": {}},
+            )
+            for row in group["rows"]:
+                definition["accounts"][row["account"].id] = row["account"]
+
+    groups = []
+    for definition in sorted(group_definitions.values(), key=lambda item: item["account"].code):
+        rows = []
+        for account in sorted(definition["accounts"].values(), key=lambda item: item.code):
+            amounts = [report["amount_by_account"].get(account.id, Decimal("0")) for report in reports]
+            rows.append({"account": account, "amounts": amounts, "total": sum(amounts, Decimal("0"))})
+        subtotals = [sum((row["amounts"][index] for row in rows), Decimal("0")) for index in range(len(reports))]
+        groups.append(
+            {
+                "account": definition["account"],
+                "label": definition["label"],
+                "rows": rows,
+                "subtotals": subtotals,
+                "total": sum(subtotals, Decimal("0")),
+            }
+        )
+    return groups
+
+
+@login_required
+def profit_loss(request):
+    today = date.today()
+    mode = request.GET.get("mode", "standard")
+    if mode not in {"standard", "multi_period", "multi_year"}:
+        mode = "standard"
+
+    start = _selected_date(request, "start", date(today.year, today.month, 1))
+    end = _selected_date(request, "end", today)
+    if start > end:
+        start, end = end, start
+
+    current_month = date(today.year, today.month, 1)
+    start_month = _month_value(request.GET.get("start_month"), _shift_month(current_month, -2))
+    end_month = _month_value(request.GET.get("end_month"), current_month)
+    if start_month > end_month:
+        start_month, end_month = end_month, start_month
+
+    try:
+        report_year = int(request.GET.get("year", today.year))
+    except ValueError:
+        report_year = today.year
+    if report_year < 2000 or report_year > 2100:
+        report_year = today.year
+
+    accounts = list(Account.objects.select_related("parent").all())
+    if mode == "multi_period":
+        periods = []
+        month = start_month
+        while month <= end_month:
+            periods.append(
+                {
+                    "label": month.strftime("%b %Y"),
+                    "start": month,
+                    "end": date(month.year, month.month, monthrange(month.year, month.month)[1]),
+                }
+            )
+            month = _shift_month(month, 1)
+    elif mode == "multi_year":
+        periods = [
+            {
+                "label": str(year),
+                "start": date(year, 1, 1),
+                "end": date(year, 12, 31),
+            }
+            for year in range(report_year - 2, report_year + 1)
+        ]
+    else:
+        periods = [{"label": f"{start:%d %b %Y} – {end:%d %b %Y}", "start": start, "end": end}]
+
+    reports = [_profit_loss_data(period["start"], period["end"], accounts) for period in periods]
+    report = reports[0] if mode == "standard" else None
+    comparison = None
+    if mode != "standard":
+        comparison = {
+            "periods": periods,
+            "revenue_groups": _comparison_groups(reports, "revenue_groups"),
+            "expense_groups": _comparison_groups(reports, "expense_groups"),
+            "revenue_totals": [item["revenue_total"] for item in reports],
+            "expense_totals": [item["expense_total"] for item in reports],
+            "profits": [item["profit"] for item in reports],
+            "revenue_total": sum((item["revenue_total"] for item in reports), Decimal("0")),
+            "expense_total": sum((item["expense_total"] for item in reports), Decimal("0")),
+            "profit": sum((item["profit"] for item in reports), Decimal("0")),
+        }
+
+    context = {
+        "mode": mode,
+        "start": start,
+        "end": end,
+        "start_month": start_month,
+        "end_month": end_month,
+        "report_year": report_year,
+        "comparison": comparison,
+        "unmapped_sales_count": sum((item["unmapped_sales_count"] for item in reports), 0),
+        "missing_cogs_count": sum((item["missing_cogs_count"] for item in reports), 0),
+    }
+    if report:
+        context.update(report)
     return render(
         request,
         "finance/profit_loss.html",
-        {
-            "start": start,
-            "end": end,
-            "revenue": revenue,
-            "expense": expense,
-            "revenue_groups": revenue_groups,
-            "expense_groups": expense_groups,
-            "gross_sales_total": gross_sales_total,
-            "revenue_total": revenue_total,
-            "expense_total": expense_total,
-            "profit": revenue_total - expense_total,
-            "sales_invoice_count": sales_invoice_count,
-            "return_receipt_count": return_totals["count"],
-            "unmapped_sales_count": unmapped_sales_count,
-            "unmapped_sales_amount": unmapped_sales_amount,
-            "missing_cogs_count": sales_totals["missing_cogs"] + return_totals["missing_cogs"],
-        },
+        context,
     )
 
 

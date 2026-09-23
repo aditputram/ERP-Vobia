@@ -785,6 +785,39 @@ def development_stage_attachment_file(request, attachment_id):
 
 @login_required
 @require_POST
+@transaction.atomic
+def development_stage_attachment_delete(request, attachment_id):
+    if not can_edit_module(request.user, "rnd"):
+        return HttpResponseForbidden("Lampiran Development memerlukan akses Edit atau Approve R&D.")
+    attachment = get_object_or_404(
+        DevelopmentProductStageAttachment.objects.select_related("stage__product__collection"),
+        id=attachment_id,
+        stage__product__collection__development_started_at__isnull=False,
+    )
+    product = attachment.stage.product
+    image_name = attachment.image.name
+    storage = attachment.image.storage
+    record_audit(
+        actor=request.user,
+        action="rnd_product_development_attachment_deleted",
+        entity_type="rnd.development_product_stage_attachment",
+        entity_id=attachment.id,
+        before_values={
+            "product_id": str(product.id),
+            "stage_key": attachment.stage.stage_key,
+            "original_name": attachment.original_name,
+        },
+    )
+    attachment.delete()
+    transaction.on_commit(lambda: storage.delete(image_name))
+    messages.success(request, "Foto Development berhasil dihapus. Silakan attach ulang jika diperlukan.")
+    return redirect(
+        f'{reverse("rnd:development_product_detail", args=[product.id])}#development-timeline'
+    )
+
+
+@login_required
+@require_POST
 def collection_start_development(request, collection_id):
     collection = get_object_or_404(Collection, id=collection_id)
     try:

@@ -34,6 +34,11 @@ urlpatterns = [
         views.development_stage_attachment_file,
         name="development_stage_attachment_file",
     ),
+    path(
+        "development/attachments/<uuid:attachment_id>/delete/",
+        views.development_stage_attachment_delete,
+        name="development_stage_attachment_delete",
+    ),
     path("designing/<uuid:design_id>/", views.design_detail, name="design_detail"),
     path("designing/<uuid:design_id>/file/", views.design_file, name="design_file"),
     path("designing/<uuid:design_id>/recommend/", views.design_recommend, name="design_recommend"),

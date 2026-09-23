@@ -1512,6 +1512,67 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(product.status, DevelopmentProduct.Status.FINAL_APPROVED)
         self.assertEqual(collection.status, Collection.Status.FINAL_DEVELOPMENT)
 
+    def test_development_attachment_can_be_deleted_and_reuploaded(self):
+        collection = self._collection()
+        collection.development_started_at = timezone.now()
+        collection.save(update_fields=("development_started_at", "updated_at"))
+        product = self._product(collection)
+        stage = DevelopmentProductStageDate.objects.create(
+            product=product,
+            stage_key="material_purchase",
+            updated_by=self.rnd_editor,
+        )
+        attachment = DevelopmentProductStageAttachment.objects.create(
+            stage=stage,
+            image=self._image("material-slip.png"),
+            original_name="material-slip.png",
+            uploaded_by=self.rnd_editor,
+        )
+        image_name = attachment.image.name
+        storage = attachment.image.storage
+        delete_url = reverse(
+            "rnd:development_stage_attachment_delete",
+            args=[attachment.id],
+        )
+
+        self.client.force_login(self.rnd_editor)
+        page = self.client.get(reverse("rnd:development_product_detail", args=[product.id]))
+        self.assertContains(page, delete_url)
+        self.assertContains(page, "Hapus foto Pembelian Material")
+
+        self.client.force_login(self.marketing)
+        self.assertEqual(self.client.post(delete_url).status_code, 403)
+        self.assertTrue(DevelopmentProductStageAttachment.objects.filter(pk=attachment.id).exists())
+
+        self.client.force_login(self.rnd_editor)
+        with self.captureOnCommitCallbacks(execute=True):
+            deleted = self.client.post(delete_url)
+        self.assertRedirects(
+            deleted,
+            f'{reverse("rnd:development_product_detail", args=[product.id])}#development-timeline',
+        )
+        self.assertFalse(DevelopmentProductStageAttachment.objects.filter(pk=attachment.id).exists())
+        self.assertFalse(storage.exists(image_name))
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="rnd_product_development_attachment_deleted",
+                entity_id=str(attachment.id),
+            ).exists()
+        )
+
+        reuploaded = self.client.post(
+            reverse("rnd:development_product_detail", args=[product.id]),
+            {
+                "stage_key": "material_purchase",
+                "target_date": "",
+                "actual_date": "",
+                "notes": "",
+                "image": self._image("material-slip-replacement.png"),
+            },
+        )
+        self.assertEqual(reuploaded.status_code, 302)
+        self.assertEqual(stage.attachments.count(), 1)
+
     def test_development_collection_summary_counts_material_entries_and_current_stages(self):
         collection = self._collection()
         collection.development_started_at = timezone.now()

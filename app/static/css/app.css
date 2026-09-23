@@ -351,6 +351,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .rnd-development-notes { margin-top: 15px; padding-top: 14px; border-top: 1px solid var(--line); }
 .rnd-development-notes p { margin: 6px 0 0; color: #55564f; font-size: 11px; line-height: 1.55; }
 .rnd-development-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 9px; margin-top: 14px; }
+.rnd-development-gallery-item { position: relative; min-width: 0; }
+.rnd-development-gallery-item > a { display: block; }
+.rnd-development-gallery-item > form { position: absolute; top: 6px; right: 6px; margin: 0; }
+.rnd-development-gallery-item > form button { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border: 1px solid rgba(255,255,255,.8); border-radius: 50%; color: white; background: rgba(28,29,25,.78); box-shadow: 0 3px 10px rgba(0,0,0,.18); font-size: 16px; line-height: 1; cursor: pointer; }
+.rnd-development-gallery-item > form button:hover { background: #b92f28; }
 .rnd-development-gallery img { width: 100%; aspect-ratio: 4 / 3; display: block; object-fit: cover; border: 1px solid var(--line); border-radius: 9px; background: white; }
 .rnd-development-materials { margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: white; }
 .rnd-development-subheader { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

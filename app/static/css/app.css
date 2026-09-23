@@ -961,6 +961,13 @@ tbody tr:last-child td { border-bottom: 0; }
 .chat-shortcut-icon { position: relative; width: 20px; height: 15px; border: 2px solid currentColor; border-radius: 5px; }
 .chat-shortcut-icon::after { position: absolute; bottom: -5px; left: 3px; width: 6px; height: 6px; border-bottom: 2px solid currentColor; border-left: 2px solid currentColor; background: var(--lime); content: ""; transform: skewY(-35deg); }
 .chat-shortcut-badge { position: absolute; top: -4px; right: -4px; min-width: 19px; padding: 3px 5px; border: 2px solid white; border-radius: 999px; color: white; background: #d93c33; font-size: 8px; font-weight: 900; line-height: 1.1; text-align: center; }
+.space-toast-stack { position: fixed; z-index: 32; right: 22px; bottom: 82px; display: flex; width: min(340px, calc(100vw - 32px)); flex-direction: column; gap: 8px; pointer-events: none; }
+.space-toast { display: grid; gap: 4px; width: 100%; padding: 13px 15px; border: 1px solid #dce7b7; border-radius: 12px; color: var(--ink); background: white; box-shadow: 0 12px 34px rgba(27, 32, 12, .18); font: inherit; text-align: left; text-decoration: none; cursor: pointer; opacity: 1; pointer-events: auto; transform: translateY(0); transition: opacity .18s ease, transform .18s ease; }
+.space-toast:hover { border-color: #c5db75; background: #fbfdf5; }
+.space-toast small { color: var(--lime-dark); font-size: 8px; font-weight: 900; letter-spacing: .13em; }
+.space-toast strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.space-toast span { display: -webkit-box; overflow: hidden; color: #5b5c55; font-size: 9px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.space-toast.is-leaving { opacity: 0; transform: translateY(8px); }
 .rnd-notification-shortcut { position: fixed; z-index: 30; right: 78px; bottom: 22px; display: grid; width: 46px; height: 46px; place-items: center; border: 1px solid #d8d8d0; border-radius: 50%; color: var(--ink); background: white; box-shadow: 0 8px 22px rgba(30, 31, 27, .14); cursor: pointer; transition: transform .16s ease, box-shadow .16s ease; }
 .rnd-notification-shortcut:hover { transform: translateY(-2px); box-shadow: 0 11px 26px rgba(30, 31, 27, .2); }
 .rnd-notification-shortcut svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }

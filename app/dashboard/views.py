@@ -9,6 +9,7 @@ from django.views.decorators.cache import never_cache
 from audit.services import record_audit
 from accounts.access import first_allowed_route, module_level
 from chat.context_processors import unread_chat
+from chat.models import ChatMessage, ChatThread, accessible_threads
 from rnd.context_processors import rnd_notifications
 
 
@@ -86,9 +87,34 @@ MODULES = (
 @never_cache
 def live_status(request):
     chat_count = unread_chat(request)["chat_unread_count"]
+    chat_notifications = []
+    recent_messages = (
+        ChatMessage.objects.filter(thread__in=accessible_threads(request.user))
+        .exclude(sender=request.user)
+        .select_related("thread", "sender")
+        .order_by("-created_at")[:12]
+    )
+    for message in recent_messages:
+        sender_name = message.sender.get_full_name() or message.sender.username
+        if message.thread.kind == ChatThread.Kind.MODULE:
+            title = f"{message.thread.get_module_display()} · {sender_name}"
+        else:
+            title = sender_name
+        preview = message.body.strip()[:180]
+        if not preview:
+            preview = f"Lampiran: {message.original_name}" if message.original_name else "Mengirim lampiran."
+        chat_notifications.append(
+            {
+                "id": str(message.id),
+                "open_url": reverse("chat:thread", args=[message.thread_id]),
+                "title": title,
+                "message": preview,
+            }
+        )
     notification_context = rnd_notifications(request)
     notifications = [
         {
+            "id": str(notification.id),
             "open_url": reverse("rnd:notification_open", args=[notification.id]),
             "title": notification.title,
             "message": notification.message,
@@ -110,6 +136,7 @@ def live_status(request):
     return JsonResponse(
         {
             "chat_unread_count": chat_count,
+            "chat_notifications": chat_notifications,
             "rnd_unread_count": notification_context["rnd_notification_unread_count"],
             "rnd_notifications": notifications,
             "rnd_approval_count": notification_context["rnd_approval_count"],

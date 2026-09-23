@@ -2,6 +2,7 @@
     <span class="chat-shortcut-icon" aria-hidden="true"></span>
     {% if chat_unread_count %}<span class="chat-shortcut-badge" data-chat-shortcut-badge>{% if chat_unread_count > 99 %}99+{% else %}{{ chat_unread_count }}{% endif %}</span>{% endif %}
 </button>
+<div class="space-toast-stack" aria-live="polite" aria-atomic="false" data-space-toast-stack></div>
 <dialog class="chat-popup" aria-label="Messages" data-chat-popup>
     <header>
         <strong>Messages</strong>
@@ -20,6 +21,9 @@
     if (!popup || !open) return;
     const frame = popup.querySelector('[data-chat-popup-frame]');
     const notificationOpen = document.querySelector('[data-rnd-notification-open]');
+    const toastStack = document.querySelector('[data-space-toast-stack]');
+    const seenToastKeys = new Set();
+    let toastStatusInitialized = false;
     let soundContext = null;
     const unlockSound = () => {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -107,6 +111,50 @@
         notificationPopup.querySelector('[data-rnd-approval-count]').textContent = data.rnd_approval_count;
         notificationPopup.dispatchEvent(new CustomEvent('rnd-notifications-updated'));
     };
+    const openChatThread = url => {
+        frame.src = `${url}?embed=1`;
+        frame.dataset.loaded = '1';
+        if (!popup.open) popup.showModal();
+    };
+    const showToast = notification => {
+        if (!toastStack) return;
+        const toast = document.createElement(notification.kind === 'chat' ? 'button' : 'a');
+        toast.className = 'space-toast';
+        if (notification.kind === 'chat') {
+            toast.type = 'button';
+            toast.addEventListener('click', () => openChatThread(notification.open_url));
+        } else {
+            toast.href = notification.open_url;
+        }
+        const source = document.createElement('small');
+        source.textContent = notification.kind === 'chat' ? 'PESAN BARU' : 'NOTIFIKASI R&D';
+        const title = document.createElement('strong');
+        title.textContent = notification.title;
+        const message = document.createElement('span');
+        message.textContent = notification.message;
+        toast.append(source, title, message);
+        toastStack.prepend(toast);
+        window.setTimeout(() => {
+            toast.classList.add('is-leaving');
+            window.setTimeout(() => toast.remove(), 180);
+        }, 3000);
+    };
+    const updateToasts = data => {
+        const items = [
+            ...data.chat_notifications.map(item => ({...item, kind: 'chat', key: `chat:${item.id}`})),
+            ...data.rnd_notifications.filter(item => item.unread).map(item => ({...item, kind: 'rnd', key: `rnd:${item.id}`})),
+        ];
+        if (!toastStatusInitialized) {
+            items.forEach(item => seenToastKeys.add(item.key));
+            toastStatusInitialized = true;
+            return;
+        }
+        items.reverse().forEach(item => {
+            if (seenToastKeys.has(item.key)) return;
+            seenToastKeys.add(item.key);
+            showToast(item);
+        });
+    };
     let fetching = false;
     const refreshStatus = async () => {
         if (fetching || document.hidden) return;
@@ -119,6 +167,7 @@
             const previousRnd = Number(notificationOpen?.dataset.rndUnread || 0);
             updateBadge(data.chat_unread_count);
             updateNotifications(data);
+            updateToasts(data);
             if (data.chat_unread_count > previousChat) {
                 if (!popup.open) delete frame.dataset.loaded;
                 else if (frame.dataset.loaded) {
@@ -136,6 +185,7 @@
             fetching = false;
         }
     };
+    refreshStatus();
     setInterval(refreshStatus, 5000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshStatus(); });
 })();

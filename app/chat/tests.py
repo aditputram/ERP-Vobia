@@ -193,10 +193,31 @@ class ChatTests(TestCase):
         self.client.force_login(self.marketing)
         live_status = self.client.get(reverse("dashboard:live_status")).json()
         self.assertEqual(live_status["chat_unread_count"], 1)
+        self.assertEqual(len(live_status["chat_notifications"]), 1)
+        self.assertEqual(
+            live_status["chat_notifications"][0]["id"],
+            str(ChatMessage.objects.get().id),
+        )
+        self.assertEqual(live_status["chat_notifications"][0]["title"], "rnd.user")
+        self.assertEqual(live_status["chat_notifications"][0]["message"], "Pesan baru")
+        self.assertEqual(
+            live_status["chat_notifications"][0]["open_url"],
+            reverse("chat:thread", args=[thread.id]),
+        )
         self.assertEqual(live_status["rnd_notifications"], [])
         self.client.get(reverse("chat:thread", args=[thread.id]))
         self.assertTrue(ChatReadState.objects.filter(thread=thread, user=self.marketing).exists())
         self.assertEqual(unread_chat(request)["chat_unread_count"], 0)
+
+    def test_space_page_has_three_second_in_app_toasts(self):
+        self.client.force_login(self.rnd)
+
+        response = self.client.get(reverse("dashboard:index"))
+
+        self.assertContains(response, "data-space-toast-stack")
+        self.assertContains(response, "data.chat_notifications")
+        self.assertContains(response, "}, 3000);")
+        self.assertContains(response, "refreshStatus();")
 
     def test_embedded_chat_stays_embedded_after_sending(self):
         self.client.force_login(self.rnd)

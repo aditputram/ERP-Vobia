@@ -283,18 +283,18 @@ def create_sales_journal_draft(
         sales_lines = sales_lines.filter(category_snapshot__in=categories)
     sales_lines = list(
         sales_lines
-        .select_related("order", "sku__product_variant__product")
+        .select_related("order")
         .order_by("order__order_date", "order__order_number", "sku_code_snapshot")
     )
     if not sales_lines:
         raise ValidationError("Tidak ada transaksi Sales yang belum dijurnal untuk periode dan filter ini.")
 
     snapshot_product_ids = dict(
-        SKU.objects.filter(sku__in={line.sku_code_snapshot for line in sales_lines if not line.sku_id})
+        SKU.objects.filter(sku__in={line.sku_code_snapshot for line in sales_lines})
         .values_list("sku", "product_variant__product_id")
     )
     product_ids = {
-        line.sku.product_variant.product_id if line.sku_id else snapshot_product_ids.get(line.sku_code_snapshot)
+        snapshot_product_ids.get(line.sku_code_snapshot)
         for line in sales_lines
     }
     product_ids.discard(None)
@@ -326,11 +326,7 @@ def create_sales_journal_draft(
             missing_cogs_lines.append(line.sku_code_snapshot or line.product_name_snapshot)
             continue
         cogs = line.total_cogs.quantize(MONEY_QUANTUM)
-        product_id = (
-            line.sku.product_variant.product_id
-            if line.sku_id
-            else snapshot_product_ids.get(line.sku_code_snapshot)
-        )
+        product_id = snapshot_product_ids.get(line.sku_code_snapshot)
         sales_account_id = account_id_by_product.get(product_id)
         if not sales_account_id:
             missing_sales_settings.add(line.sku_code_snapshot or line.product_name_snapshot)

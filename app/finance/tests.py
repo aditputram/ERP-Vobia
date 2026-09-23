@@ -581,11 +581,15 @@ class FinanceJournalTests(TestCase):
         self.assertEqual(category_row["cogs"], Decimal("120000"))
         self.assertContains(category_view, "Profit &amp; Loss per Kategori")
         self.assertContains(category_view, "Total Gross Sales")
-        self.assertContains(category_view, "Total Diskon Penjualan")
-        self.assertContains(category_view, "Total Net Sales")
+        self.assertContains(category_view, "Diskon Penjualan")
+        self.assertContains(category_view, "Net Sales")
         self.assertContains(category_view, "Total COGS")
-        self.assertContains(category_view, "Total Laba Kotor")
-        self.assertContains(category_view, "Total GPM")
+        self.assertContains(category_view, "Laba Kotor")
+        self.assertContains(category_view, "GPM")
+        self.assertNotContains(category_view, "Total Diskon Penjualan")
+        self.assertNotContains(category_view, "Total Net Sales")
+        self.assertNotContains(category_view, "Total Laba Kotor")
+        self.assertNotContains(category_view, "Total GPM")
 
         source_view = self.client.get(
             reverse("finance:profit_loss"),

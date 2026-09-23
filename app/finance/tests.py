@@ -579,7 +579,13 @@ class FinanceJournalTests(TestCase):
         self.assertEqual(category_row["discount"], Decimal("20000"))
         self.assertEqual(category_row["net"], Decimal("180000"))
         self.assertEqual(category_row["cogs"], Decimal("120000"))
-        self.assertContains(category_view, "Rincian Sales per Kategori")
+        self.assertContains(category_view, "Profit &amp; Loss per Kategori")
+        self.assertContains(category_view, "Total Gross Sales")
+        self.assertContains(category_view, "Total Diskon Penjualan")
+        self.assertContains(category_view, "Total Net Sales")
+        self.assertContains(category_view, "Total COGS")
+        self.assertContains(category_view, "Total Laba Kotor")
+        self.assertContains(category_view, "Total GPM")
 
         source_view = self.client.get(
             reverse("finance:profit_loss"),
@@ -588,7 +594,7 @@ class FinanceJournalTests(TestCase):
         source_row = source_view.context["sales_dimension_rows"][0]
         self.assertEqual(source_row["label"], "Shopee")
         self.assertEqual(source_view.context["sales_dimension_total"]["gross_profit"], Decimal("60000"))
-        self.assertContains(source_view, "Rincian Sales per Source")
+        self.assertContains(source_view, "Profit &amp; Loss per Source")
 
         multi_period = self.client.get(
             reverse("finance:profit_loss"),

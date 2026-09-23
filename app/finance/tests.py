@@ -109,6 +109,9 @@ class FinanceJournalTests(TestCase):
 
         summary = self.client.get(url, {"start": "2026-09-01", "end": "2026-09-30"})
         self.assertContains(summary, "Semua Akun")
+        self.assertContains(summary, 'type="search"')
+        self.assertContains(summary, 'list="ledger-account-options"')
+        self.assertContains(summary, "data-ledger-account-value")
         self.assertContains(summary, "110101")
 
         detail = self.client.get(
@@ -119,6 +122,7 @@ class FinanceJournalTests(TestCase):
         self.assertContains(detail, "Draft")
         self.assertContains(detail, "Saldo awal")
         self.assertContains(detail, "Rp 100,00 D")
+        self.assertContains(detail, f"{self.cash.code} · {self.cash.name}")
 
     def test_superadmin_can_add_coa_from_account_page(self):
         self.client.force_login(self.user)

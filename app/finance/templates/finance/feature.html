@@ -42,8 +42,13 @@
 {% if can_create_sales_journal %}
 <dialog class="finance-sales-journal-dialog" data-sales-journal-dialog>
     <header><div><p class="eyebrow">SALES · JOURNAL DRAFT</p><h2>Create Jurnal Entry Sales</h2></div><button type="button" aria-label="Tutup" data-sales-journal-close>×</button></header>
-    <form method="post" data-sales-journal-form>{% csrf_token %}<input type="hidden" name="action" value="create_sales_journal">
-        <div class="finance-journal-form-grid"><label>Tanggal mulai<input type="date" name="journal_start" value="{{ date_from|date:'Y-m-d' }}" min="2026-09-01" required></label><label>Sampai tanggal<input type="date" name="journal_end" value="{{ date_to|date:'Y-m-d' }}" min="2026-09-01" required></label><label>Akun Receipt / Piutang<select name="receipt_account" required><option value="">Pilih akun</option>{% for account in receipt_account_options %}<option value="{{ account.id }}" {% if account.id == default_receipt_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label></div>
+    <form method="post" data-sales-journal-form data-source-cascade>{% csrf_token %}<input type="hidden" name="action" value="create_sales_journal">
+        <div class="finance-journal-form-grid">
+            <label>Tanggal mulai<input type="date" name="journal_start" value="{{ date_from|date:'Y-m-d' }}" min="2026-09-01" required></label><label>Sampai tanggal<input type="date" name="journal_end" value="{{ date_to|date:'Y-m-d' }}" min="2026-09-01" required></label><label>Akun Receipt / Piutang<select name="receipt_account" required><option value="">Pilih akun</option>{% for account in receipt_account_options %}<option value="{{ account.id }}" {% if account.id == default_receipt_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label>
+            {% include "sales/includes/multi_select_filter.html" with label="Source Group" name="source_group" options=journal_source_group_options selected=journal_selected_source_groups all_label="All Source Groups" search_placeholder="Ketik source group..." %}
+            {% include "sales/includes/cascading_source_filter.html" with label="Source" options=journal_source_options selected=journal_selected_sources all_label="All Sources" search_placeholder="Ketik source..." %}
+            {% include "sales/includes/multi_select_filter.html" with label="Category" name="category" options=journal_category_options selected=journal_selected_categories all_label="All Categories" search_placeholder="Ketik kategori..." %}
+        </div>
         <p class="muted">Akun Gross Sales mengikuti Sales Setting per Product. Akun Diskon, COGS, dan Persediaan ditentukan otomatis oleh sistem.</p>
         <footer><p>Jurnal dibuat sebagai <strong>Draft</strong>. Buku besar baru berubah setelah Approve &amp; Post.</p><div><button class="secondary-button" type="button" data-sales-journal-close>Batal</button><button class="primary-button" type="submit">Create Draft Journal</button></div></footer>
     </form>

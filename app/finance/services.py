@@ -229,6 +229,9 @@ def create_sales_journal_draft(
     end_date,
     receipt_account_id,
     actor,
+    source_groups=(),
+    sources=(),
+    categories=(),
 ):
     if start_date > end_date:
         raise ValidationError("Tanggal mulai tidak boleh melewati tanggal selesai.")
@@ -259,18 +262,32 @@ def create_sales_journal_draft(
     from master_data.models import SKU
     from sales.models import SalesOrderLine
 
+    sales_lines = SalesOrderLine.objects.select_for_update().filter(
+        is_counted=True,
+        order__order_date__range=(start_date, end_date),
+        finance_journal_allocation__isnull=True,
+    )
+    source_groups = tuple(dict.fromkeys(group for group in source_groups if group in {"Marketplace", "Other"}))
+    sources = tuple(dict.fromkeys(source for source in sources if source))
+    categories = tuple(dict.fromkeys(category for category in categories if category))
+    if sources:
+        sales_lines = sales_lines.filter(order__source_label__in=sources)
+    if source_groups:
+        group_filter = Q()
+        if "Marketplace" in source_groups:
+            group_filter |= Q(order__source__in=["Shopee", "Tiktok"])
+        if "Other" in source_groups:
+            group_filter |= Q(order__source="Other")
+        sales_lines = sales_lines.filter(group_filter)
+    if categories:
+        sales_lines = sales_lines.filter(category_snapshot__in=categories)
     sales_lines = list(
-        SalesOrderLine.objects.select_for_update()
-        .filter(
-            is_counted=True,
-            order__order_date__range=(start_date, end_date),
-            finance_journal_allocation__isnull=True,
-        )
+        sales_lines
         .select_related("order", "sku__product_variant__product")
         .order_by("order__order_date", "order__order_number", "sku_code_snapshot")
     )
     if not sales_lines:
-        raise ValidationError("Tidak ada transaksi Sales yang belum dijurnal pada periode ini.")
+        raise ValidationError("Tidak ada transaksi Sales yang belum dijurnal untuk periode dan filter ini.")
 
     snapshot_product_ids = dict(
         SKU.objects.filter(sku__in={line.sku_code_snapshot for line in sales_lines if not line.sku_id})
@@ -351,6 +368,9 @@ def create_sales_journal_draft(
             "end_date": str(end_date),
             "sales_mode": "product_setting",
             "cogs_mode": "total",
+            "source_groups": list(source_groups),
+            "sources": list(sources),
+            "categories": list(categories),
             "sales_line_count": len(sales_lines),
         },
         created_by=actor,

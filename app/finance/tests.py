@@ -329,7 +329,12 @@ class FinanceJournalTests(TestCase):
         self.assertNotContains(page, 'name="inventory_account"')
         self.assertNotContains(page, 'name="sales_mode"')
         self.assertNotContains(page, 'name="cogs_mode"')
+        dialog = page.content.decode().split('data-sales-journal-dialog', 1)[1]
+        self.assertIn('name="source_group"', dialog)
+        self.assertIn('name="source"', dialog)
+        self.assertIn('name="category"', dialog)
 
+        pants_sku = self._sales_sku("FIN-JOURNAL-PANTS", "410006")
         october_order = SalesOrder.objects.create(
             source=SalesOrder.Source.SHOPEE,
             source_label="Shopee",
@@ -342,15 +347,39 @@ class FinanceJournalTests(TestCase):
             first_seen_batch_id=uuid.uuid4(),
             latest_batch_id=uuid.uuid4(),
         )
-        SalesOrderLine.objects.create(
+        october_shirt = SalesOrderLine.objects.create(
             order=october_order,
             sku=sku,
+            category_snapshot="Finance T-Shirt",
             quantity=1,
             net_unit_price=Decimal("90000"),
             retail_price_snapshot=Decimal("100000"),
             total_gross_sales=Decimal("100000"),
             total_net_sales=Decimal("90000"),
             total_cogs=Decimal("60000"),
+        )
+        october_pants_order = SalesOrder.objects.create(
+            source=SalesOrder.Source.TIKTOK,
+            source_label="TikTok",
+            order_number="FINANCE-JOURNAL-003",
+            order_datetime=timezone.make_aware(datetime(2026, 10, 1, 11, 0)),
+            order_date=date(2026, 10, 1),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        october_pants = SalesOrderLine.objects.create(
+            order=october_pants_order,
+            sku=pants_sku,
+            category_snapshot="Finance Pants",
+            quantity=1,
+            net_unit_price=Decimal("180000"),
+            retail_price_snapshot=Decimal("200000"),
+            total_gross_sales=Decimal("200000"),
+            total_net_sales=Decimal("180000"),
+            total_cogs=Decimal("120000"),
         )
         response = self.client.post(
             reverse("finance:feature", args=["sales-invoice"]),
@@ -359,10 +388,17 @@ class FinanceJournalTests(TestCase):
                 "journal_start": "2026-10-01",
                 "journal_end": "2026-10-01",
                 "receipt_account": Account.objects.get(code="110301").id,
+                "source_group": ["Marketplace"],
+                "source": ["Shopee"],
+                "category": ["Finance T-Shirt"],
             },
         )
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(JournalEntry.objects.filter(reference="Sales 2026-10-01/2026-10-01").exists())
+        filtered_entry = JournalEntry.objects.get(reference="Sales 2026-10-01/2026-10-01")
+        self.assertTrue(SalesJournalAllocation.objects.filter(entry=filtered_entry, sales_line=october_shirt).exists())
+        self.assertFalse(SalesJournalAllocation.objects.filter(sales_line=october_pants).exists())
+        self.assertEqual(filtered_entry.source_metadata["sources"], ["Shopee"])
+        self.assertEqual(filtered_entry.source_metadata["categories"], ["Finance T-Shirt"])
 
     def test_sales_return_only_shows_returns_received_by_warehouse(self):
         from inventory.models import PhysicalReturnReceipt

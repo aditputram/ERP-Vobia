@@ -719,6 +719,26 @@ def feature(request, slug):
                 account_type__in={"AREC", "BANK"}, is_active=True, is_postable=True
             ).order_by("code")
         )
+        journal_selected_source_groups = [
+            value for value in request.POST.getlist("source_group")
+            if value in {"Marketplace", "Other"}
+        ]
+        journal_source_options = _source_options(all_lines, journal_selected_source_groups)
+        journal_allowed_sources = {item["value"] for item in journal_source_options}
+        journal_selected_sources = [
+            value for value in request.POST.getlist("source")
+            if value in journal_allowed_sources
+        ]
+        journal_category_options = list(
+            all_lines.exclude(category_snapshot="")
+            .order_by("category_snapshot")
+            .values_list("category_snapshot", flat=True)
+            .distinct()
+        )
+        journal_selected_categories = [
+            value for value in request.POST.getlist("category")
+            if value in set(journal_category_options)
+        ]
 
         open_sales_journal_modal = False
         if request.method == "POST" and request.POST.get("action") == "create_sales_journal":
@@ -734,6 +754,9 @@ def feature(request, slug):
                     end_date=journal_end,
                     receipt_account_id=request.POST.get("receipt_account", ""),
                     actor=request.user,
+                    source_groups=journal_selected_source_groups,
+                    sources=journal_selected_sources,
+                    categories=journal_selected_categories,
                 )
             except ValidationError as exc:
                 messages.error(request, " ".join(exc.messages))
@@ -822,6 +845,12 @@ def feature(request, slug):
             can_create_sales_journal=can_create_sales_journal,
             open_sales_journal_modal=open_sales_journal_modal,
             receipt_account_options=receipt_account_options,
+            journal_source_group_options=("Marketplace", "Other"),
+            journal_source_options=journal_source_options,
+            journal_category_options=journal_category_options,
+            journal_selected_source_groups=journal_selected_source_groups,
+            journal_selected_sources=journal_selected_sources,
+            journal_selected_categories=journal_selected_categories,
             default_receipt_id=next(
                 (account.id for account in receipt_account_options if account.code == "110301"),
                 None,

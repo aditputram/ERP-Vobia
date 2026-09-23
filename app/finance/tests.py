@@ -91,6 +91,23 @@ class FinanceJournalTests(TestCase):
 
         self.assertContains(self.client.get(reverse("finance:dashboard")), "Finance UAT")
 
+    def test_general_ledger_can_show_all_accounts_and_selected_account_detail(self):
+        post_journal(self.entry.id, self.user)
+        self.client.force_login(self.user)
+        url = reverse("finance:feature", args=("general-ledger-summary",))
+
+        summary = self.client.get(url, {"start": "2026-09-01", "end": "2026-09-30"})
+        self.assertContains(summary, "Semua Akun")
+        self.assertContains(summary, "110101")
+
+        detail = self.client.get(
+            url,
+            {"start": "2026-09-01", "end": "2026-09-30", "account": self.cash.id},
+        )
+        self.assertContains(detail, self.entry.number)
+        self.assertContains(detail, "Saldo awal")
+        self.assertContains(detail, "Rp 100,00 D")
+
     def test_superadmin_can_add_coa_from_account_page(self):
         self.client.force_login(self.user)
 

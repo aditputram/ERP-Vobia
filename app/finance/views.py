@@ -1,5 +1,5 @@
 from calendar import monthrange
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib import messages
@@ -24,6 +24,7 @@ from .models import (
     FINANCE_CUTOVER_DATE,
     FINANCE_OPENING_DATE,
     JournalEntry,
+    JournalLine,
     ProductSalesAccount,
 )
 from .services import (
@@ -987,8 +988,6 @@ def feature(request, slug):
         )
     elif slug in {"cash-flow", "general-ledger-summary", "financial-ratio", "outstanding-invoice", "aging-receivable", "outstanding-purchase-invoice", "account-payable-aging", "account-payable-aging-detail", "supplier-payable-per-month"}:
         if slug == "cash-flow":
-            from .models import JournalLine
-
             lines = JournalLine.objects.filter(
                 entry__status=JournalEntry.Status.POSTED,
                 entry__entry_date__range=(start, end),
@@ -1001,12 +1000,97 @@ def feature(request, slug):
                 data_note="Metode direct dari mutasi akun bertipe Kas & Bank pada jurnal Posted.",
             )
         elif slug == "general-ledger-summary":
-            balances = account_balances(start_date=start, end_date=end)
-            rows = [row for row in balances if row["account"].is_postable and (row["debit"] or row["credit"])]
+            if start > end:
+                start, end = end, start
+            account_options = Account.objects.filter(is_active=True, is_postable=True).order_by("code")
+            selected_account_id = request.GET.get("account", "").strip()
+            selected_account = account_options.filter(pk=selected_account_id).first() if selected_account_id else None
+            opening_rows = {
+                row["account"].id: row
+                for row in account_balances(end_date=start - timedelta(days=1))
+            }
+            period_rows = account_balances(start_date=start, end_date=end)
+            ledger_rows = []
+            for row in period_rows:
+                account = row["account"]
+                opening = opening_rows.get(account.id, {}).get("net", Decimal("0"))
+                closing = opening + row["net"]
+                if account.is_postable and (opening or row["debit"] or row["credit"]):
+                    ledger_rows.append(
+                        {
+                            "account": account,
+                            "opening": abs(opening),
+                            "opening_side": "D" if opening >= 0 else "K",
+                            "debit": row["debit"],
+                            "credit": row["credit"],
+                            "closing": abs(closing),
+                            "closing_side": "D" if closing >= 0 else "K",
+                        }
+                    )
+
+            detail_page = None
+            selected_summary = None
+            if selected_account:
+                selected_summary = next(
+                    (row for row in ledger_rows if row["account"].id == selected_account.id),
+                    {
+                        "account": selected_account,
+                        "opening": Decimal("0"),
+                        "opening_side": "D",
+                        "debit": Decimal("0"),
+                        "credit": Decimal("0"),
+                        "closing": Decimal("0"),
+                        "closing_side": "D",
+                    },
+                )
+                signed_balance = (
+                    selected_summary["opening"]
+                    if selected_summary["opening_side"] == "D"
+                    else -selected_summary["opening"]
+                )
+                detail_rows = []
+                for line in JournalLine.objects.filter(
+                    account=selected_account,
+                    entry__status=JournalEntry.Status.POSTED,
+                    entry__entry_date__range=(start, end),
+                ).select_related("entry").order_by("entry__entry_date", "entry__number", "line_number"):
+                    signed_balance += line.debit - line.credit
+                    detail_rows.append(
+                        {
+                            "line": line,
+                            "balance": abs(signed_balance),
+                            "balance_side": "D" if signed_balance >= 0 else "K",
+                        }
+                    )
+                detail_page = Paginator(detail_rows, 100).get_page(request.GET.get("page"))
+
+            pagination_query = request.GET.copy()
+            pagination_query.pop("page", None)
+            metrics = (
+                (
+                    ("Saldo Awal", selected_summary["opening"]),
+                    ("Debit", selected_summary["debit"]),
+                    ("Kredit", selected_summary["credit"]),
+                    ("Saldo Akhir", selected_summary["closing"]),
+                )
+                if selected_summary
+                else (
+                    ("Akun bermutuasi", len(ledger_rows)),
+                    ("Total Debit", sum((row["debit"] for row in ledger_rows), Decimal("0"))),
+                    ("Total Kredit", sum((row["credit"] for row in ledger_rows), Decimal("0"))),
+                )
+            )
             context.update(
-                columns=("Kode", "Akun", "Debit", "Kredit", "Saldo"),
-                rows=[(row["account"].code, row["account"].name, row["debit"], row["credit"], row["net"]) for row in rows],
-                data_note="Hanya transaksi Posted pada periode terpilih.",
+                general_ledger=True,
+                account_options=account_options,
+                selected_account=selected_account,
+                ledger_rows=ledger_rows,
+                selected_summary=selected_summary,
+                detail_page=detail_page,
+                page=detail_page,
+                pagination_prefix=f"{pagination_query.urlencode()}&" if pagination_query else "",
+                metrics=metrics,
+                data_note="Semua nilai berasal dari jurnal berstatus Posted. Pilih akun untuk melihat mutasi dan saldo berjalan.",
             )
         elif slug == "financial-ratio":
             balances = account_balances(end_date=as_of)

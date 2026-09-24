@@ -498,6 +498,30 @@ class FinanceJournalTests(TestCase):
             response.context["metrics"],
             (("Return received", 2), ("Qty received", Decimal("3")), ("Belum dijurnal", 2)),
         )
+        self.assertEqual(
+            [value for value, _label in response.context["journal_receipt_status_options"]],
+            [PhysicalReturnReceipt.Condition.SELLABLE, PhysicalReturnReceipt.Condition.DAMAGED],
+        )
+        self.assertEqual(
+            {item["condition"] for item in response.context["journal_condition_filter"]["events"]},
+            {PhysicalReturnReceipt.Condition.SELLABLE, PhysicalReturnReceipt.Condition.DAMAGED},
+        )
+
+        narrow_response = self.client.post(
+            reverse("finance:feature", args=["sales-return"]),
+            {
+                "action": "create_sales_return_journal",
+                "journal_start": "2026-09-15",
+                "journal_end": "2026-09-15",
+                "receipt_account": "",
+            },
+        )
+        self.assertEqual(narrow_response.status_code, 200)
+        self.assertEqual(
+            [value for value, _label in narrow_response.context["journal_receipt_status_options"]],
+            [PhysicalReturnReceipt.Condition.SELLABLE],
+        )
+        self.assertTrue(narrow_response.context["open_sales_return_journal_modal"])
 
         sellable_response = self.client.get(
             reverse("finance:feature", args=["sales-return"]),

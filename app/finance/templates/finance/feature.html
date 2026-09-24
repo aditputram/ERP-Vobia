@@ -56,12 +56,12 @@
 {% elif sales_return and can_create_sales_return_journal %}
 <dialog class="finance-sales-journal-dialog" data-sales-journal-dialog>
     <header><div><p class="eyebrow">SALES RETURN · JOURNAL DRAFT</p><h2>Create Jurnal Entry Sales Return</h2></div><button type="button" aria-label="Tutup" data-sales-journal-close>×</button></header>
-    <form method="post" data-sales-journal-form>{% csrf_token %}<input type="hidden" name="action" value="create_sales_return_journal">
+    <form method="post" data-sales-journal-form data-return-journal-form>{% csrf_token %}<input type="hidden" name="action" value="create_sales_return_journal">
         <div class="finance-journal-form-grid">
-            <label>Tanggal mulai<input type="date" name="journal_start" value="{{ return_journal_start|date:'Y-m-d' }}" min="2026-09-01" required></label>
-            <label>Sampai tanggal<input type="date" name="journal_end" value="{{ return_journal_end|date:'Y-m-d' }}" min="2026-09-01" required></label>
+            <label>Tanggal mulai<input type="date" name="journal_start" value="{{ return_journal_start|date:'Y-m-d' }}" min="2026-09-01" required data-return-journal-start></label>
+            <label>Sampai tanggal<input type="date" name="journal_end" value="{{ return_journal_end|date:'Y-m-d' }}" min="2026-09-01" required data-return-journal-end></label>
             <label>Akun Receipt / Piutang<select name="receipt_account" required><option value="">Pilih akun</option>{% for account in receipt_account_options %}<option value="{{ account.id }}" {% if account.id == default_receipt_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label>
-            <label>Status Receipt<select name="journal_condition"><option value="">Semua Status Receipt</option>{% for value, label in receipt_status_options %}<option value="{{ value }}" {% if value in journal_selected_conditions %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+            <label>Status Receipt<select name="journal_condition" data-return-journal-condition><option value="">Semua Status Receipt</option>{% for value, label in journal_receipt_status_options %}<option value="{{ value }}" {% if value in journal_selected_conditions %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
         </div>
         <p class="muted">Sales Return memakai akun 440103. Return Sellable otomatis mengembalikan persediaan dan membalik COGS; status lainnya tidak mengubah persediaan.</p>
         <footer><p>Jurnal dibuat sebagai <strong>Draft</strong> dan langsung masuk General Ledger Summary serta Profit &amp; Loss. Setiap receipt hanya dapat dijurnal satu kali.</p><div><button class="secondary-button" type="button" data-sales-journal-close>Batal</button><button class="primary-button" type="submit">Create Draft Journal</button></div></footer>
@@ -93,6 +93,34 @@
     };
     typeSelect.addEventListener('change', sync);
     sync();
+})();
+</script>
+{% endif %}
+{% if sales_return %}
+{{ journal_condition_filter|json_script:"finance-return-condition-filter" }}
+<script>
+(() => {
+    const form = document.querySelector('[data-return-journal-form]');
+    const payloadNode = document.getElementById('finance-return-condition-filter');
+    if (!form || !payloadNode) return;
+    const start = form.querySelector('[data-return-journal-start]');
+    const end = form.querySelector('[data-return-journal-end]');
+    const select = form.querySelector('[data-return-journal-condition]');
+    const payload = JSON.parse(payloadNode.textContent);
+    const syncConditions = () => {
+        const selected = select.value;
+        const available = new Set(payload.events
+            .filter(item => item.date >= start.value && item.date <= end.value)
+            .map(item => item.condition));
+        select.replaceChildren(new Option('Semua Status Receipt', ''));
+        payload.choices.forEach(choice => {
+            if (available.has(choice.value)) select.add(new Option(choice.label, choice.value));
+        });
+        if (available.has(selected)) select.value = selected;
+    };
+    start.addEventListener('change', syncConditions);
+    end.addEventListener('change', syncConditions);
+    syncConditions();
 })();
 </script>
 {% endif %}

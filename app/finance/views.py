@@ -960,6 +960,38 @@ def feature(request, slug):
         default_return_start = max(default_return_end.replace(day=1), FINANCE_OPENING_DATE)
         return_journal_start = parse_date(request.POST.get("journal_start", "")) or default_return_start
         return_journal_end = parse_date(request.POST.get("journal_end", "")) or default_return_end
+        unjournaled_receipts = PhysicalReturnReceipt.objects.filter(
+            finance_journal_allocation__isnull=True,
+            received_date__gte=FINANCE_OPENING_DATE,
+        )
+        journal_condition_events = list(
+            unjournaled_receipts.order_by("received_date", "condition")
+            .values("received_date", "condition")
+            .distinct()
+        )
+        available_journal_conditions = set(
+            unjournaled_receipts.filter(
+                received_date__range=(return_journal_start, return_journal_end)
+            ).values_list("condition", flat=True)
+        )
+        journal_receipt_status_options = [
+            (value, label)
+            for value, label in PhysicalReturnReceipt.Condition.choices
+            if value in available_journal_conditions
+        ]
+        journal_condition_filter = {
+            "choices": [
+                {"value": value, "label": str(label)}
+                for value, label in PhysicalReturnReceipt.Condition.choices
+            ],
+            "events": [
+                {
+                    "date": item["received_date"].isoformat(),
+                    "condition": item["condition"],
+                }
+                for item in journal_condition_events
+            ],
+        }
         open_sales_return_journal_modal = False
         if request.method == "POST" and request.POST.get("action") == "create_sales_return_journal":
             if not can_create_sales_return_journal:
@@ -1013,6 +1045,8 @@ def feature(request, slug):
             query=query,
             receipt_status=receipt_status,
             receipt_status_options=PhysicalReturnReceipt.Condition.choices,
+            journal_receipt_status_options=journal_receipt_status_options,
+            journal_condition_filter=journal_condition_filter,
             columns=(
                 "Tanggal Receive",
                 "Source",

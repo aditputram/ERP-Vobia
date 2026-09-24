@@ -1041,6 +1041,13 @@ tbody tr:last-child td { border-bottom: 0; }
 .finance-journal-mapping h3 { margin: 0 0 3px; font-size: 14px; }
 .finance-journal-mapping p { margin: 0; color: var(--muted); font-size: 10px; }
 .finance-journal-map-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.finance-journal-preview { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.finance-journal-preview > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.finance-journal-preview h3 { margin: 2px 0 0; font-size: 15px; }
+.finance-journal-preview > div:first-child > span { color: var(--muted); font-size: 10px; font-weight: 800; }
+.finance-journal-preview .table-wrap { margin-top: 10px; }
+.finance-journal-preview th, .finance-journal-preview td { padding: 8px 10px; font-size: 10px; }
+.finance-journal-preview th:nth-child(3), .finance-journal-preview th:nth-child(4), .finance-journal-preview td:nth-child(3), .finance-journal-preview td:nth-child(4) { text-align: right; }
 .finance-sales-journal-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 16px; }
 .finance-sales-journal-dialog footer > div { display: flex; gap: 8px; }
 .finance-sales-journal-dialog footer p { margin: 0; color: var(--muted); font-size: 10px; }

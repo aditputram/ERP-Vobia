@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
-from django.http import HttpResponseForbidden, HttpResponseNotAllowed
+from django.http import HttpResponseForbidden, HttpResponseNotAllowed, JsonResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
@@ -35,6 +35,7 @@ from .services import (
     create_sales_return_journal_draft,
     next_journal_number,
     post_journal,
+    sales_return_journal_preview,
     set_account_opening_balance,
 )
 
@@ -940,11 +941,38 @@ def feature(request, slug):
         can_create_sales_return_journal = request.user.is_superuser or module_level(
             request.user, "finance"
         ) in {"edit", "approve"}
-        receipt_account_options = list(
-            Account.objects.filter(
-                account_type__in={"AREC", "BANK"}, is_active=True, is_postable=True
-            ).order_by("code")
-        )
+        if request.GET.get("journal_preview") == "1":
+            if not can_create_sales_return_journal:
+                return JsonResponse({"ok": False, "error": "Akun ini tidak memiliki akses membuat jurnal Sales Return."}, status=403)
+            preview_start = parse_date(request.GET.get("journal_start", ""))
+            preview_end = parse_date(request.GET.get("journal_end", ""))
+            preview_conditions = request.GET.getlist("journal_condition")
+            try:
+                if not preview_start or not preview_end:
+                    raise ValidationError("Tanggal mulai dan selesai jurnal wajib diisi.")
+                preview = sales_return_journal_preview(
+                    start_date=preview_start,
+                    end_date=preview_end,
+                    conditions=preview_conditions,
+                )
+            except ValidationError as exc:
+                return JsonResponse({"ok": False, "error": " ".join(exc.messages)}, status=400)
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "receipt_count": preview["receipt_count"],
+                    "return_amount": str(preview["return_amount"]),
+                    "reversed_cogs": str(preview["reversed_cogs"]),
+                    "lines": [
+                        {
+                            **line,
+                            "debit": str(line["debit"]),
+                            "credit": str(line["credit"]),
+                        }
+                        for line in preview["lines"]
+                    ],
+                }
+            )
         allowed_conditions = dict(PhysicalReturnReceipt.Condition.choices)
         journal_selected_conditions = [
             value for value in request.POST.getlist("journal_condition")
@@ -1002,7 +1030,6 @@ def feature(request, slug):
                 entry = create_sales_return_journal_draft(
                     start_date=return_journal_start,
                     end_date=return_journal_end,
-                    receipt_account_id=request.POST.get("receipt_account", ""),
                     actor=request.user,
                     conditions=journal_selected_conditions,
                 )
@@ -1081,14 +1108,9 @@ def feature(request, slug):
             ),
             can_create_sales_return_journal=can_create_sales_return_journal,
             open_sales_return_journal_modal=open_sales_return_journal_modal,
-            receipt_account_options=receipt_account_options,
             journal_selected_conditions=journal_selected_conditions,
             return_journal_start=return_journal_start,
             return_journal_end=return_journal_end,
-            default_receipt_id=next(
-                (account.id for account in receipt_account_options if account.code == "110301"),
-                None,
-            ),
             data_note="Hanya Sales Return yang sudah diterima tim Warehouse. Buat jurnal Draft dari tombol Create Jurnal Entry Sales Return agar masuk ke General Ledger Summary dan Profit & Loss.",
         )
     elif spec["workflow"]:

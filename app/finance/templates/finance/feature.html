@@ -60,11 +60,15 @@
         <div class="finance-journal-form-grid">
             <label>Tanggal mulai<input type="date" name="journal_start" value="{{ return_journal_start|date:'Y-m-d' }}" min="2026-09-01" required data-return-journal-start></label>
             <label>Sampai tanggal<input type="date" name="journal_end" value="{{ return_journal_end|date:'Y-m-d' }}" min="2026-09-01" required data-return-journal-end></label>
-            <label>Akun Receipt / Piutang<select name="receipt_account" required><option value="">Pilih akun</option>{% for account in receipt_account_options %}<option value="{{ account.id }}" {% if account.id == default_receipt_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label>
             <label>Status Receipt<select name="journal_condition" data-return-journal-condition><option value="">Semua Status Receipt</option>{% for value, label in journal_receipt_status_options %}<option value="{{ value }}" {% if value in journal_selected_conditions %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
         </div>
-        <p class="muted">Sales Return memakai akun 440103. Return Sellable otomatis mengembalikan persediaan dan membalik COGS; status lainnya tidak mengubah persediaan.</p>
-        <footer><p>Jurnal dibuat sebagai <strong>Draft</strong> dan langsung masuk General Ledger Summary serta Profit &amp; Loss. Setiap receipt hanya dapat dijurnal satu kali.</p><div><button class="secondary-button" type="button" data-sales-journal-close>Batal</button><button class="primary-button" type="submit">Create Draft Journal</button></div></footer>
+        <p class="muted">Akun receipt/piutang otomatis mengikuti jurnal Sales asal. Return Sellable juga mengembalikan persediaan dan membalik COGS; status lainnya tidak mengubah persediaan.</p>
+        <section class="finance-journal-preview" data-return-journal-preview data-preview-url="{% url 'finance:feature' slug %}">
+            <div><div><p class="eyebrow">PREVIEW JURNAL</p><h3>Akun dan nilai yang akan dicatat</h3></div><span data-return-journal-count></span></div>
+            <p class="muted" data-return-journal-message aria-live="polite">Memuat preview jurnal…</p>
+            <div class="table-wrap" data-return-journal-table hidden><table><thead><tr><th>Akun</th><th>Keterangan</th><th>Debit</th><th>Kredit</th></tr></thead><tbody data-return-journal-lines></tbody><tfoot><tr><th colspan="2">Total</th><th data-return-journal-debit></th><th data-return-journal-credit></th></tr></tfoot></table></div>
+        </section>
+        <footer><p>Jurnal dibuat sebagai <strong>Draft</strong> dan langsung masuk General Ledger Summary serta Profit &amp; Loss. Setiap receipt hanya dapat dijurnal satu kali.</p><div><button class="secondary-button" type="button" data-sales-journal-close>Batal</button><button class="primary-button" type="submit" data-return-journal-submit disabled>Create Draft Journal</button></div></footer>
     </form>
 </dialog>
 {% endif %}
@@ -106,7 +110,65 @@
     const start = form.querySelector('[data-return-journal-start]');
     const end = form.querySelector('[data-return-journal-end]');
     const select = form.querySelector('[data-return-journal-condition]');
+    const preview = form.querySelector('[data-return-journal-preview]');
+    const message = form.querySelector('[data-return-journal-message]');
+    const table = form.querySelector('[data-return-journal-table]');
+    const lines = form.querySelector('[data-return-journal-lines]');
+    const count = form.querySelector('[data-return-journal-count]');
+    const debitTotal = form.querySelector('[data-return-journal-debit]');
+    const creditTotal = form.querySelector('[data-return-journal-credit]');
+    const submit = form.querySelector('[data-return-journal-submit]');
     const payload = JSON.parse(payloadNode.textContent);
+    let previewRequest;
+    const money = value => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 2 }).format(Number(value));
+    const syncPreview = async () => {
+        previewRequest?.abort();
+        previewRequest = new AbortController();
+        submit.disabled = true;
+        table.hidden = true;
+        count.textContent = '';
+        message.textContent = 'Memuat preview jurnal…';
+        if (!start.value || !end.value) {
+            message.textContent = 'Pilih tanggal mulai dan sampai tanggal.';
+            return;
+        }
+        const url = new URL(preview.dataset.previewUrl, window.location.origin);
+        url.searchParams.set('journal_preview', '1');
+        url.searchParams.set('journal_start', start.value);
+        url.searchParams.set('journal_end', end.value);
+        if (select.value) url.searchParams.set('journal_condition', select.value);
+        try {
+            const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: previewRequest.signal });
+            const data = await response.json();
+            if (!response.ok || !data.ok) throw new Error(data.error || 'Preview jurnal tidak dapat dimuat.');
+            let debit = 0;
+            let credit = 0;
+            lines.replaceChildren(...data.lines.map(line => {
+                debit += Number(line.debit);
+                credit += Number(line.credit);
+                const row = document.createElement('tr');
+                [
+                    `${line.account_code} · ${line.account_name}`,
+                    line.description,
+                    Number(line.debit) ? money(line.debit) : '—',
+                    Number(line.credit) ? money(line.credit) : '—',
+                ].forEach(value => {
+                    const cell = document.createElement('td');
+                    cell.textContent = value;
+                    row.append(cell);
+                });
+                return row;
+            }));
+            debitTotal.textContent = money(debit);
+            creditTotal.textContent = money(credit);
+            count.textContent = `${data.receipt_count} receipt`;
+            message.textContent = `Sales Return ${money(data.return_amount)} · Pembalikan COGS ${money(data.reversed_cogs)}`;
+            table.hidden = false;
+            submit.disabled = false;
+        } catch (error) {
+            if (error.name !== 'AbortError') message.textContent = error.message;
+        }
+    };
     const syncConditions = () => {
         const selected = select.value;
         const available = new Set(payload.events
@@ -117,9 +179,11 @@
             if (available.has(choice.value)) select.add(new Option(choice.label, choice.value));
         });
         if (available.has(selected)) select.value = selected;
+        syncPreview();
     };
     start.addEventListener('change', syncConditions);
     end.addEventListener('change', syncConditions);
+    select.addEventListener('change', syncPreview);
     syncConditions();
 })();
 </script>

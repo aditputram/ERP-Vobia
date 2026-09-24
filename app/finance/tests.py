@@ -29,6 +29,7 @@ from .services import (
     create_sales_journal_draft,
     create_sales_return_journal_draft,
     post_journal,
+    sales_return_journal_preview,
 )
 
 
@@ -61,6 +62,41 @@ class FinanceJournalTests(TestCase):
             sales_account=Account.objects.get(code=sales_account_code),
         )
         return sku
+
+    def _allocate_sales_line(self, sales_line, receipt_account_code="110301"):
+        amount = sales_line.total_net_sales or (sales_line.quantity * sales_line.net_unit_price)
+        entry = JournalEntry.objects.create(
+            number=f"JV-SALES-{uuid.uuid4().hex[:12].upper()}",
+            entry_date=sales_line.order.order_date,
+            description="Original Sales journal",
+            source=JournalEntry.Source.SYSTEM,
+            source_metadata={"workflow": "SALES_JOURNAL_BATCH"},
+            created_by=self.user,
+        )
+        JournalLine.objects.create(
+            entry=entry,
+            line_number=1,
+            account=Account.objects.get(code=receipt_account_code),
+            debit=amount,
+            credit=0,
+            description="Sales Receivable / Receipt",
+        )
+        JournalLine.objects.create(
+            entry=entry,
+            line_number=2,
+            account=Account.objects.get(code="410002"),
+            debit=0,
+            credit=amount,
+            description="Gross Sales",
+        )
+        SalesJournalAllocation.objects.create(
+            entry=entry,
+            sales_line=sales_line,
+            gross_sales=amount,
+            net_sales=amount,
+            cogs=0,
+        )
+        return entry
 
     def test_balanced_journal_posts_and_updates_trial_balance(self):
         post_journal(self.entry.id, self.user)
@@ -478,6 +514,8 @@ class FinanceJournalTests(TestCase):
             condition=PhysicalReturnReceipt.Condition.DAMAGED,
             recorded_by=self.user,
         )
+        self._allocate_sales_line(received_line)
+        self._allocate_sales_line(damaged_line)
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("finance:feature", args=["sales-return"]))
@@ -492,6 +530,9 @@ class FinanceJournalTests(TestCase):
         self.assertNotContains(response, "FINANCE-RETURN-PENDING")
         self.assertNotContains(response, "Buat Sales Return")
         self.assertContains(response, "Create Jurnal Entry Sales Return")
+        return_dialog = response.content.decode().split("data-return-journal-form", 1)[1]
+        self.assertNotIn('name="receipt_account"', return_dialog)
+        self.assertIn("PREVIEW JURNAL", return_dialog)
         self.assertEqual(response.context["rows"][1][5], 2)
         self.assertNotContains(response, "2,0000")
         self.assertEqual(
@@ -507,13 +548,25 @@ class FinanceJournalTests(TestCase):
             {PhysicalReturnReceipt.Condition.SELLABLE, PhysicalReturnReceipt.Condition.DAMAGED},
         )
 
+        preview_response = self.client.get(
+            reverse("finance:feature", args=["sales-return"]),
+            {
+                "journal_preview": "1",
+                "journal_start": "2026-09-16",
+                "journal_end": "2026-09-16",
+                "journal_condition": PhysicalReturnReceipt.Condition.DAMAGED,
+            },
+        )
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_response.json()["receipt_count"], 1)
+        self.assertEqual(preview_response.json()["lines"][1]["account_code"], "110301")
+
         narrow_response = self.client.post(
             reverse("finance:feature", args=["sales-return"]),
             {
                 "action": "create_sales_return_journal",
                 "journal_start": "2026-09-15",
                 "journal_end": "2026-09-15",
-                "receipt_account": "",
             },
         )
         self.assertEqual(narrow_response.status_code, 200)
@@ -548,7 +601,6 @@ class FinanceJournalTests(TestCase):
                 "action": "create_sales_return_journal",
                 "journal_start": "2026-09-01",
                 "journal_end": "2026-09-30",
-                "receipt_account": Account.objects.get(code="110301").id,
                 "journal_condition": PhysicalReturnReceipt.Condition.DAMAGED,
             },
         )
@@ -624,21 +676,32 @@ class FinanceJournalTests(TestCase):
             return_receipt=sellable_receipt,
             posted_by=self.user,
         )
+        self._allocate_sales_line(sellable_line, "110301")
+        self._allocate_sales_line(damaged_line, "110101")
         params = {
             "start_date": date(2026, 9, 1),
             "end_date": date(2026, 9, 30),
-            "receipt_account_id": Account.objects.get(code="110301").id,
             "actor": self.user,
         }
 
+        preview = sales_return_journal_preview(
+            start_date=params["start_date"],
+            end_date=params["end_date"],
+        )
         entry = create_sales_return_journal_draft(**params)
 
+        self.assertEqual(preview["receipt_count"], 2)
+        self.assertEqual(
+            {line["account_code"] for line in preview["lines"]},
+            {"440103", "110301", "110101", "110401", "5101"},
+        )
         self.assertEqual(entry.status, JournalEntry.Status.DRAFT)
         self.assertEqual(entry.debit_total, Decimal("380000"))
         self.assertEqual(entry.credit_total, Decimal("380000"))
         lines = {line.account.code: line for line in entry.lines.select_related("account")}
         self.assertEqual(lines["440103"].debit, Decimal("260000"))
-        self.assertEqual(lines["110301"].credit, Decimal("260000"))
+        self.assertEqual(lines["110301"].credit, Decimal("180000"))
+        self.assertEqual(lines["110101"].credit, Decimal("80000"))
         self.assertEqual(lines["110401"].debit, Decimal("120000"))
         self.assertEqual(lines["5101"].credit, Decimal("120000"))
         self.assertEqual(SalesReturnJournalAllocation.objects.filter(entry=entry).count(), 2)
@@ -660,7 +723,7 @@ class FinanceJournalTests(TestCase):
         expense = {row["account"].code: row["amount"] for row in profit_loss.context["expense"]}
         self.assertEqual(revenue["440103"], Decimal("-260000"))
         self.assertEqual(expense["5101"], Decimal("-120000"))
-        self.assertEqual(profit_loss.context["profit"], Decimal("-140000"))
+        self.assertEqual(profit_loss.context["profit"], Decimal("120000"))
 
     def test_profit_loss_includes_draft_and_posted_sales_journal(self):
         from sales.models import SalesOrder, SalesOrderLine

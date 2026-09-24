@@ -17,6 +17,7 @@ from .models import (
     JournalNumberSequence,
     ProductSalesAccount,
     SalesJournalAllocation,
+    SalesReturnJournalAllocation,
 )
 
 
@@ -24,6 +25,7 @@ MONEY_QUANTUM = Decimal("0.000001")
 OPENING_ENTRY_NUMBER = "OPENING-20260831"
 OPENING_OFFSET_ACCOUNT_CODE = "300001"
 SALES_JOURNAL_WORKFLOW = "SALES_JOURNAL_BATCH"
+SALES_RETURN_JOURNAL_WORKFLOW = "SALES_RETURN_JOURNAL_BATCH"
 
 
 def account_opening_balance(account):
@@ -433,6 +435,162 @@ def create_sales_journal_draft(
             "net_sales": str(net_total),
             "discount": str(discount_total),
             "cogs": str(cogs_total),
+        },
+        metadata=entry.source_metadata,
+    )
+    return entry
+
+
+@transaction.atomic
+def create_sales_return_journal_draft(
+    *,
+    start_date,
+    end_date,
+    receipt_account_id,
+    actor,
+    conditions=(),
+):
+    if start_date > end_date:
+        raise ValidationError("Tanggal mulai tidak boleh melewati tanggal selesai.")
+    if start_date < FINANCE_OPENING_DATE:
+        raise ValidationError("Jurnal Sales Return Finance dimulai 1 September 2026.")
+    receipt_account = _validated_account(
+        receipt_account_id,
+        allowed_types={"AREC", "BANK"},
+        label="Akun receipt/piutang",
+    )
+    return_account = _validated_account(
+        Account.objects.filter(code="440103").values_list("id", flat=True).first(),
+        allowed_types={"REVE"},
+        parent_code="4401",
+        label="Akun Sales Return",
+    )
+    cogs_account = _validated_account(
+        Account.objects.filter(code="5101").values_list("id", flat=True).first(),
+        allowed_types={"COGS"},
+        label="Akun COGS",
+    )
+    inventory_account = _validated_account(
+        Account.objects.filter(code="110401").values_list("id", flat=True).first(),
+        allowed_types={"INTR"},
+        label="Akun persediaan",
+    )
+
+    from inventory.models import PhysicalReturnReceipt
+
+    allowed_conditions = dict(PhysicalReturnReceipt.Condition.choices)
+    conditions = tuple(dict.fromkeys(value for value in conditions if value in allowed_conditions))
+    allocated_receipts = SalesReturnJournalAllocation.objects.filter(return_receipt_id=OuterRef("pk"))
+    receipts = PhysicalReturnReceipt.objects.annotate(
+        _has_finance_allocation=Exists(allocated_receipts)
+    ).select_for_update().filter(
+        received_date__range=(start_date, end_date),
+        _has_finance_allocation=False,
+    )
+    if conditions:
+        receipts = receipts.filter(condition__in=conditions)
+    receipts = list(
+        receipts.select_related("sales_line__order", "movement")
+        .order_by("received_date", "created_at")
+    )
+    if not receipts:
+        raise ValidationError("Tidak ada Sales Return received yang belum dijurnal untuk periode dan filter ini.")
+
+    return_total = Decimal("0")
+    reversed_cogs_total = Decimal("0")
+    allocation_values = []
+    missing_movements = []
+    for receipt in receipts:
+        return_amount = (receipt.quantity * receipt.sales_line.net_unit_price).quantize(MONEY_QUANTUM)
+        reversed_cogs = Decimal("0")
+        if receipt.condition == PhysicalReturnReceipt.Condition.SELLABLE:
+            movement = getattr(receipt, "movement", None)
+            if movement is None:
+                missing_movements.append(
+                    receipt.sales_line.sku_code_snapshot or receipt.sales_line.product_name_snapshot
+                )
+                continue
+            reversed_cogs = movement.allocated_cost.quantize(MONEY_QUANTUM)
+        return_total += return_amount
+        reversed_cogs_total += reversed_cogs
+        allocation_values.append((receipt, return_amount, reversed_cogs))
+
+    if missing_movements:
+        raise ValidationError(
+            "Return Sellable belum memiliki movement FIFO untuk: "
+            + ", ".join(sorted(set(missing_movements))[:5])
+            + "."
+        )
+    if return_total <= 0:
+        raise ValidationError("Nilai Sales Return periode terpilih bernilai nol.")
+
+    entry = JournalEntry(
+        number=next_journal_number(end_date),
+        entry_date=end_date,
+        description=f"Sales Return {start_date:%d %b %Y} – {end_date:%d %b %Y}",
+        reference=f"Sales Return {start_date:%Y-%m-%d}/{end_date:%Y-%m-%d}",
+        source=JournalEntry.Source.SYSTEM,
+        source_metadata={
+            "workflow": SALES_RETURN_JOURNAL_WORKFLOW,
+            "start_date": str(start_date),
+            "end_date": str(end_date),
+            "conditions": list(conditions),
+            "return_receipt_count": len(receipts),
+        },
+        created_by=actor,
+    )
+    entry.full_clean()
+    entry.save()
+
+    journal_lines = [
+        (return_account, return_total, Decimal("0"), "Sales Return received"),
+        (receipt_account, Decimal("0"), return_total, "Pengurang Sales Receivable / Receipt"),
+    ]
+    if reversed_cogs_total > 0:
+        journal_lines.extend(
+            [
+                (inventory_account, reversed_cogs_total, Decimal("0"), "Persediaan kembali dari return Sellable"),
+                (cogs_account, Decimal("0"), reversed_cogs_total, "Pembalikan COGS return Sellable"),
+            ]
+        )
+    for number, (account, debit, credit, description) in enumerate(journal_lines, 1):
+        line = JournalLine(
+            entry=entry,
+            line_number=number,
+            account=account,
+            description=description,
+            debit=debit,
+            credit=credit,
+        )
+        line.full_clean()
+        line.save()
+
+    debit_total = sum((line[1] for line in journal_lines), Decimal("0")).quantize(MONEY_QUANTUM)
+    credit_total = sum((line[2] for line in journal_lines), Decimal("0")).quantize(MONEY_QUANTUM)
+    if debit_total != credit_total:
+        raise ValidationError("Jurnal Sales Return tidak seimbang dan tidak disimpan.")
+
+    SalesReturnJournalAllocation.objects.bulk_create(
+        [
+            SalesReturnJournalAllocation(
+                entry=entry,
+                return_receipt=receipt,
+                return_amount=return_amount,
+                reversed_cogs=reversed_cogs,
+            )
+            for receipt, return_amount, reversed_cogs in allocation_values
+        ]
+    )
+    record_audit(
+        actor=actor,
+        action="finance_sales_return_journal_draft_created",
+        entity_type="finance.journal_entry",
+        entity_id=entry.id,
+        after_values={
+            "journal_number": entry.number,
+            "return_receipts": len(receipts),
+            "return_amount": str(return_total),
+            "reversed_cogs": str(reversed_cogs_total),
         },
         metadata=entry.source_metadata,
     )

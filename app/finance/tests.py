@@ -16,8 +16,20 @@ from master_data.models import Category, Product, ProductStatus, ProductVariant,
 
 from .importers import stage_finance_cutover
 from .catalog import FEATURES
-from .models import Account, JournalEntry, JournalLine, ProductSalesAccount, SalesJournalAllocation
-from .services import account_balances, create_sales_journal_draft, post_journal
+from .models import (
+    Account,
+    JournalEntry,
+    JournalLine,
+    ProductSalesAccount,
+    SalesJournalAllocation,
+    SalesReturnJournalAllocation,
+)
+from .services import (
+    account_balances,
+    create_sales_journal_draft,
+    create_sales_return_journal_draft,
+    post_journal,
+)
 
 
 class FinanceJournalTests(TestCase):
@@ -458,7 +470,7 @@ class FinanceJournalTests(TestCase):
             condition=PhysicalReturnReceipt.Condition.SELLABLE,
             recorded_by=self.user,
         )
-        PhysicalReturnReceipt.objects.create(
+        damaged_receipt = PhysicalReturnReceipt.objects.create(
             sales_line=damaged_line,
             received_date=date(2026, 9, 16),
             quantity=1,
@@ -479,9 +491,13 @@ class FinanceJournalTests(TestCase):
         self.assertContains(response, "Finance Return Warehouse")
         self.assertNotContains(response, "FINANCE-RETURN-PENDING")
         self.assertNotContains(response, "Buat Sales Return")
+        self.assertContains(response, "Create Jurnal Entry Sales Return")
         self.assertEqual(response.context["rows"][1][5], 2)
         self.assertNotContains(response, "2,0000")
-        self.assertEqual(response.context["metrics"], (("Return received", 2), ("Qty received", Decimal("3"))))
+        self.assertEqual(
+            response.context["metrics"],
+            (("Return received", 2), ("Qty received", Decimal("3")), ("Belum dijurnal", 2)),
+        )
 
         sellable_response = self.client.get(
             reverse("finance:feature", args=["sales-return"]),
@@ -489,7 +505,10 @@ class FinanceJournalTests(TestCase):
         )
         self.assertContains(sellable_response, "Received Return Product")
         self.assertNotContains(sellable_response, "Damaged Return Product")
-        self.assertEqual(sellable_response.context["metrics"], (("Return received", 1), ("Qty received", Decimal("2"))))
+        self.assertEqual(
+            sellable_response.context["metrics"],
+            (("Return received", 1), ("Qty received", Decimal("2")), ("Belum dijurnal", 1)),
+        )
 
         search_response = self.client.get(
             reverse("finance:feature", args=["sales-return"]),
@@ -498,6 +517,126 @@ class FinanceJournalTests(TestCase):
         self.assertContains(search_response, "Damaged Return Product")
         self.assertNotContains(search_response, "Received Return Product")
         self.assertEqual(search_response.context["query"], "FINANCE-RETURN-DAMAGED")
+
+        create_response = self.client.post(
+            reverse("finance:feature", args=["sales-return"]),
+            {
+                "action": "create_sales_return_journal",
+                "journal_start": "2026-09-01",
+                "journal_end": "2026-09-30",
+                "receipt_account": Account.objects.get(code="110301").id,
+                "journal_condition": PhysicalReturnReceipt.Condition.DAMAGED,
+            },
+        )
+        self.assertEqual(create_response.status_code, 302)
+        self.assertTrue(
+            SalesReturnJournalAllocation.objects.filter(return_receipt=damaged_receipt).exists()
+        )
+
+    def test_sales_return_journal_reverses_revenue_and_sellable_cogs_without_duplicates(self):
+        from inventory.models import InventoryMovement, PhysicalReturnReceipt
+        from master_data.models import Warehouse
+        from sales.models import SalesOrder, SalesOrderLine
+
+        sellable_sku = self._sales_sku("FIN-RETURN-JOURNAL-SELLABLE")
+        damaged_sku = self._sales_sku("FIN-RETURN-JOURNAL-DAMAGED")
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="FINANCE-RETURN-JOURNAL-001",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 12, 10, 0)),
+            order_date=date(2026, 9, 12),
+            current_status="Retur",
+            source_status="Retur",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        sellable_line = SalesOrderLine.objects.create(
+            order=order,
+            sku=sellable_sku,
+            product_name_snapshot="Sellable Return",
+            current_status="Retur",
+            quantity=2,
+            net_unit_price=Decimal("90000"),
+            total_net_sales=Decimal("180000"),
+        )
+        damaged_line = SalesOrderLine.objects.create(
+            order=order,
+            sku=damaged_sku,
+            product_name_snapshot="Damaged Return",
+            current_status="Retur",
+            quantity=1,
+            net_unit_price=Decimal("80000"),
+            total_net_sales=Decimal("80000"),
+        )
+        warehouse = Warehouse.objects.create(code="FIN-RET-JOURNAL-WH", name="Return Journal Warehouse")
+        sellable_receipt = PhysicalReturnReceipt.objects.create(
+            sales_line=sellable_line,
+            received_date=date(2026, 9, 20),
+            quantity=2,
+            warehouse=warehouse,
+            condition=PhysicalReturnReceipt.Condition.SELLABLE,
+            recorded_by=self.user,
+        )
+        damaged_receipt = PhysicalReturnReceipt.objects.create(
+            sales_line=damaged_line,
+            received_date=date(2026, 9, 21),
+            quantity=1,
+            warehouse=warehouse,
+            condition=PhysicalReturnReceipt.Condition.DAMAGED,
+            recorded_by=self.user,
+        )
+        InventoryMovement.objects.create(
+            movement_key="FINANCE-RETURN-JOURNAL-MOVEMENT",
+            movement_date=sellable_receipt.received_date,
+            movement_type=InventoryMovement.MovementType.RETURN_IN,
+            direction=InventoryMovement.Direction.IN,
+            sku=sellable_sku,
+            warehouse=warehouse,
+            quantity=2,
+            allocated_cost=Decimal("120000"),
+            source_reference="FINANCE-RETURN-JOURNAL-001",
+            return_receipt=sellable_receipt,
+            posted_by=self.user,
+        )
+        params = {
+            "start_date": date(2026, 9, 1),
+            "end_date": date(2026, 9, 30),
+            "receipt_account_id": Account.objects.get(code="110301").id,
+            "actor": self.user,
+        }
+
+        entry = create_sales_return_journal_draft(**params)
+
+        self.assertEqual(entry.status, JournalEntry.Status.DRAFT)
+        self.assertEqual(entry.debit_total, Decimal("380000"))
+        self.assertEqual(entry.credit_total, Decimal("380000"))
+        lines = {line.account.code: line for line in entry.lines.select_related("account")}
+        self.assertEqual(lines["440103"].debit, Decimal("260000"))
+        self.assertEqual(lines["110301"].credit, Decimal("260000"))
+        self.assertEqual(lines["110401"].debit, Decimal("120000"))
+        self.assertEqual(lines["5101"].credit, Decimal("120000"))
+        self.assertEqual(SalesReturnJournalAllocation.objects.filter(entry=entry).count(), 2)
+        self.assertTrue(
+            SalesReturnJournalAllocation.objects.filter(
+                return_receipt=damaged_receipt,
+                reversed_cogs=0,
+            ).exists()
+        )
+        with self.assertRaisesMessage(ValidationError, "belum dijurnal"):
+            create_sales_return_journal_draft(**params)
+
+        self.client.force_login(self.user)
+        profit_loss = self.client.get(
+            reverse("finance:profit_loss"),
+            {"start": "2026-09-01", "end": "2026-09-30"},
+        )
+        revenue = {row["account"].code: row["amount"] for row in profit_loss.context["revenue"]}
+        expense = {row["account"].code: row["amount"] for row in profit_loss.context["expense"]}
+        self.assertEqual(revenue["440103"], Decimal("-260000"))
+        self.assertEqual(expense["5101"], Decimal("-120000"))
+        self.assertEqual(profit_loss.context["profit"], Decimal("-140000"))
 
     def test_profit_loss_includes_draft_and_posted_sales_journal(self):
         from sales.models import SalesOrder, SalesOrderLine

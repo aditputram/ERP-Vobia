@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header">
     <div><p class="eyebrow">{{ feature.section }}</p><h1>{{ feature.title }}</h1></div>
-    {% if sales_invoice and can_create_sales_journal %}<button class="primary-button" type="button" data-sales-journal-open>Create Jurnal Entry Sales</button>{% elif action %}<a class="primary-button" href="{{ action.href }}">{{ action.label }}</a>{% endif %}
+    {% if sales_invoice and can_create_sales_journal %}<button class="primary-button" type="button" data-sales-journal-open>Create Jurnal Entry Sales</button>{% elif sales_return and can_create_sales_return_journal %}<button class="primary-button" type="button" data-sales-journal-open>Create Jurnal Entry Sales Return</button>{% elif action %}<a class="primary-button" href="{{ action.href }}">{{ action.label }}</a>{% endif %}
 </header>
 {% if sales_invoice %}
 <form method="get" class="panel report-filter dashboard-period-filter" data-auto-submit data-source-cascade data-finance-sales-filter>
@@ -38,8 +38,8 @@
     {% if sales_invoice %}<div class="table-wrap warehouse-table-wrap"><table><thead><tr><th>Tanggal</th><th>Source</th><th>No. Pesanan</th><th>Status</th><th>Gross</th><th>Net</th><th>COGS</th><th>Jurnal</th></tr></thead><tbody>{% for row in sales_orders %}<tr><td>{{ row.order_date|date:"d M Y" }}</td><td>{{ row.display_source }}</td><td>{{ row.order_number }}</td><td>{{ row.current_status }}</td><td>Rp {{ row.gross|default:0|floatformat:"0g" }}</td><td>Rp {{ row.net|default:0|floatformat:"0g" }}</td><td>{% if row.cogs != None %}Rp {{ row.cogs|floatformat:"0g" }}{% else %}—{% endif %}</td><td>{{ row.journaled_lines|floatformat:"0g" }}/{{ row.counted_lines|floatformat:"0g" }}</td></tr>{% empty %}<tr><td colspan="8"><div class="empty-state">Tidak ada transaksi pada filter ini.</div></td></tr>{% endfor %}</tbody></table></div>{% if page.has_other_pages %}<nav class="pagination"><span>Page {{ page.number|floatformat:"0g" }} / {{ page.paginator.num_pages|floatformat:"0g" }}</span><div>{% if page.has_previous %}<a href="?{{ pagination_prefix }}page={{ page.previous_page_number }}">Sebelumnya</a>{% endif %}{% if page.has_next %}<a href="?{{ pagination_prefix }}page={{ page.next_page_number }}">Berikutnya</a>{% endif %}</div></nav>{% endif %}{% elif columns %}<div class="table-wrap warehouse-table-wrap"><table><thead><tr>{% for column in columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in rows %}<tr>{% for cell in row %}<td>{% if cell == None %}—{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>{% empty %}<tr><td colspan="{{ columns|length }}"><div class="empty-state">Belum ada data.</div></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">Struktur menu sudah tersedia. Field, approval, dan posting otomatis akan diaktifkan setelah flow operasional fitur ini ditetapkan bersama tim Finance.</div>{% endif %}
 </section>
 {% endif %}
-{% if sales_invoice %}
-{% if can_create_sales_journal %}
+{% if sales_invoice or sales_return %}
+{% if sales_invoice and can_create_sales_journal %}
 <dialog class="finance-sales-journal-dialog" data-sales-journal-dialog>
     <header><div><p class="eyebrow">SALES · JOURNAL DRAFT</p><h2>Create Jurnal Entry Sales</h2></div><button type="button" aria-label="Tutup" data-sales-journal-close>×</button></header>
     <form method="post" data-sales-journal-form data-source-cascade>{% csrf_token %}<input type="hidden" name="action" value="create_sales_journal">
@@ -53,7 +53,22 @@
         <footer><p>Jurnal dibuat sebagai <strong>Draft</strong> dan langsung masuk General Ledger Summary serta Profit &amp; Loss. Approve &amp; Post tetap menjadi persetujuan final.</p><div><button class="secondary-button" type="button" data-sales-journal-close>Batal</button><button class="primary-button" type="submit">Create Draft Journal</button></div></footer>
     </form>
 </dialog>
+{% elif sales_return and can_create_sales_return_journal %}
+<dialog class="finance-sales-journal-dialog" data-sales-journal-dialog>
+    <header><div><p class="eyebrow">SALES RETURN · JOURNAL DRAFT</p><h2>Create Jurnal Entry Sales Return</h2></div><button type="button" aria-label="Tutup" data-sales-journal-close>×</button></header>
+    <form method="post" data-sales-journal-form>{% csrf_token %}<input type="hidden" name="action" value="create_sales_return_journal">
+        <div class="finance-journal-form-grid">
+            <label>Tanggal mulai<input type="date" name="journal_start" value="{{ return_journal_start|date:'Y-m-d' }}" min="2026-09-01" required></label>
+            <label>Sampai tanggal<input type="date" name="journal_end" value="{{ return_journal_end|date:'Y-m-d' }}" min="2026-09-01" required></label>
+            <label>Akun Receipt / Piutang<select name="receipt_account" required><option value="">Pilih akun</option>{% for account in receipt_account_options %}<option value="{{ account.id }}" {% if account.id == default_receipt_id %}selected{% endif %}>{{ account.code }} · {{ account.name }}</option>{% endfor %}</select></label>
+            <label>Status Receipt<select name="journal_condition"><option value="">Semua Status Receipt</option>{% for value, label in receipt_status_options %}<option value="{{ value }}" {% if value in journal_selected_conditions %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        </div>
+        <p class="muted">Sales Return memakai akun 440103. Return Sellable otomatis mengembalikan persediaan dan membalik COGS; status lainnya tidak mengubah persediaan.</p>
+        <footer><p>Jurnal dibuat sebagai <strong>Draft</strong> dan langsung masuk General Ledger Summary serta Profit &amp; Loss. Setiap receipt hanya dapat dijurnal satu kali.</p><div><button class="secondary-button" type="button" data-sales-journal-close>Batal</button><button class="primary-button" type="submit">Create Draft Journal</button></div></footer>
+    </form>
+</dialog>
 {% endif %}
+{% if sales_invoice %}
 {% include "includes/multi_select_script.html" %}
 <script>
 (() => {
@@ -79,6 +94,9 @@
     typeSelect.addEventListener('change', sync);
     sync();
 })();
+</script>
+{% endif %}
+<script>
 (() => {
     const dialog = document.querySelector('[data-sales-journal-dialog]');
     const open = document.querySelector('[data-sales-journal-open]');
@@ -86,7 +104,7 @@
     open.addEventListener('click', () => dialog.showModal());
     dialog.querySelectorAll('[data-sales-journal-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
     dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
-    {% if open_sales_journal_modal %}dialog.showModal();{% endif %}
+    {% if open_sales_journal_modal or open_sales_return_journal_modal %}dialog.showModal();{% endif %}
 })();
 </script>
 {% endif %}

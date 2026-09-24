@@ -197,3 +197,28 @@ class SalesJournalAllocation(models.Model):
 
     def __str__(self):
         return f"{self.entry.number} · {self.sales_line.business_key}"
+
+
+class SalesReturnJournalAllocation(models.Model):
+    """Guards one warehouse return receipt from being journaled more than once."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    entry = models.ForeignKey(
+        JournalEntry,
+        on_delete=models.PROTECT,
+        related_name="sales_return_allocations",
+    )
+    return_receipt = models.OneToOneField(
+        "inventory.PhysicalReturnReceipt",
+        on_delete=models.PROTECT,
+        related_name="finance_journal_allocation",
+    )
+    return_amount = models.DecimalField(max_digits=22, decimal_places=6)
+    reversed_cogs = models.DecimalField(max_digits=22, decimal_places=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("entry__entry_date", "return_receipt__received_date")
+
+    def __str__(self):
+        return f"{self.entry.number} · {self.return_receipt_id}"

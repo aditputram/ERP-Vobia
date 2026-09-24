@@ -32,6 +32,7 @@ from .services import (
     account_balances,
     account_opening_balance,
     create_sales_journal_draft,
+    create_sales_return_journal_draft,
     next_journal_number,
     post_journal,
     set_account_opening_balance,
@@ -936,6 +937,53 @@ def feature(request, slug):
     elif slug in {"sales-return", "sales-return-per-item"}:
         from inventory.models import PhysicalReturnReceipt
 
+        can_create_sales_return_journal = request.user.is_superuser or module_level(
+            request.user, "finance"
+        ) in {"edit", "approve"}
+        receipt_account_options = list(
+            Account.objects.filter(
+                account_type__in={"AREC", "BANK"}, is_active=True, is_postable=True
+            ).order_by("code")
+        )
+        allowed_conditions = dict(PhysicalReturnReceipt.Condition.choices)
+        journal_selected_conditions = [
+            value for value in request.POST.getlist("journal_condition")
+            if value in allowed_conditions
+        ]
+        latest_receipt_date = (
+            PhysicalReturnReceipt.objects.order_by("-received_date")
+            .values_list("received_date", flat=True)
+            .first()
+            or today
+        )
+        default_return_end = max(latest_receipt_date, FINANCE_OPENING_DATE)
+        default_return_start = max(default_return_end.replace(day=1), FINANCE_OPENING_DATE)
+        return_journal_start = parse_date(request.POST.get("journal_start", "")) or default_return_start
+        return_journal_end = parse_date(request.POST.get("journal_end", "")) or default_return_end
+        open_sales_return_journal_modal = False
+        if request.method == "POST" and request.POST.get("action") == "create_sales_return_journal":
+            if not can_create_sales_return_journal:
+                return HttpResponseForbidden("Akun ini tidak memiliki akses membuat jurnal Sales Return.")
+            try:
+                if not return_journal_start or not return_journal_end:
+                    raise ValidationError("Tanggal mulai dan selesai jurnal wajib diisi.")
+                entry = create_sales_return_journal_draft(
+                    start_date=return_journal_start,
+                    end_date=return_journal_end,
+                    receipt_account_id=request.POST.get("receipt_account", ""),
+                    actor=request.user,
+                    conditions=journal_selected_conditions,
+                )
+            except ValidationError as exc:
+                messages.error(request, " ".join(exc.messages))
+                open_sales_return_journal_modal = True
+            else:
+                messages.success(
+                    request,
+                    f"Jurnal Sales Return {entry.number} dibuat sebagai Draft dan langsung masuk General Ledger Summary serta Profit & Loss.",
+                )
+                return redirect("finance:journal_detail", entry_id=entry.id)
+
         query = request.GET.get("q", "").strip()
         receipt_status = request.GET.get("receipt_status", "")
         receipt_statuses = dict(PhysicalReturnReceipt.Condition.choices)
@@ -945,6 +993,7 @@ def feature(request, slug):
             "sales_line__order",
             "warehouse",
             "recorded_by",
+            "finance_journal_allocation",
         ).order_by("-received_date", "-created_at")
         if receipt_status:
             received_returns = received_returns.filter(condition=receipt_status)
@@ -954,7 +1003,11 @@ def feature(request, slug):
                 | Q(sales_line__sku_code_snapshot__icontains=query)
                 | Q(sales_line__product_name_snapshot__icontains=query)
             )
-        totals = received_returns.aggregate(receipts=Count("id"), quantity=Sum("quantity"))
+        totals = received_returns.aggregate(
+            receipts=Count("id"),
+            quantity=Sum("quantity"),
+            unjournaled=Count("id", filter=Q(finance_journal_allocation__isnull=True)),
+        )
         context.update(
             sales_return=True,
             query=query,
@@ -970,6 +1023,7 @@ def feature(request, slug):
                 "Status Receive",
                 "Warehouse",
                 "Received By",
+                "Jurnal",
             ),
             rows=[
                 (
@@ -982,14 +1036,26 @@ def feature(request, slug):
                     receipt.get_condition_display(),
                     receipt.warehouse.name,
                     receipt.recorded_by.get_full_name() or receipt.recorded_by.username,
+                    "Sudah" if getattr(receipt, "finance_journal_allocation", None) else "Belum",
                 )
                 for receipt in received_returns[:300]
             ],
             metrics=(
                 ("Return received", totals["receipts"] or 0),
                 ("Qty received", totals["quantity"] or 0),
+                ("Belum dijurnal", totals["unjournaled"] or 0),
             ),
-            data_note="Hanya Sales Return yang sudah diterima tim Warehouse. Status Receive mengikuti kondisi yang dicatat di Return Log.",
+            can_create_sales_return_journal=can_create_sales_return_journal,
+            open_sales_return_journal_modal=open_sales_return_journal_modal,
+            receipt_account_options=receipt_account_options,
+            journal_selected_conditions=journal_selected_conditions,
+            return_journal_start=return_journal_start,
+            return_journal_end=return_journal_end,
+            default_receipt_id=next(
+                (account.id for account in receipt_account_options if account.code == "110301"),
+                None,
+            ),
+            data_note="Hanya Sales Return yang sudah diterima tim Warehouse. Buat jurnal Draft dari tombol Create Jurnal Entry Sales Return agar masuk ke General Ledger Summary dan Profit & Loss.",
         )
     elif spec["workflow"]:
         journals = JournalEntry.objects.filter(source_metadata__workflow=spec["workflow"]).prefetch_related("lines")[:200]

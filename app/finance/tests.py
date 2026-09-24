@@ -572,6 +572,8 @@ class FinanceJournalTests(TestCase):
         self.assertContains(response, "Subtotal Diskon Penjualan")
         self.assertContains(response, "Subtotal Beban Pokok Penjualan")
         self.assertContains(response, "Total Pendapatan Bersih")
+        self.assertContains(response, "<th>Nilai</th>", html=True)
+        self.assertNotContains(response, "Kelompok")
 
         category_view = self.client.get(
             reverse("finance:profit_loss"),

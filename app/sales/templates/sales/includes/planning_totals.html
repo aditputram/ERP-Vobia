@@ -1,9 +1,9 @@
 <tfoot>
   <tr data-sales-planning-total data-baseline-qty="{{ totals.baseline_qty|floatformat:'4u' }}">
     {% if status == 'DRAFT' %}<td class="draft-selection-col"></td>{% endif %}
-    <td colspan="{{ identity_columns }}"><strong>Total</strong></td>
-    {% if show_sku_count %}<td>{{ totals.sku_count|floatformat:"0g" }}</td>{% endif %}
-    {% for history in totals.history %}{% if not matrix or show_draft_qty %}<td>{{ history.qty|floatformat:"0g" }}</td>{% endif %}{% if not matrix or show_draft_gross %}<td>Rp {{ history.gross|floatformat:"0g" }}</td>{% endif %}{% endfor %}
+    <td colspan="{{ identity_columns }}"><strong>{% if matrix %}Subtotal{% else %}Total{% endif %}</strong></td>
+    {% if show_sku_count %}<td{% if matrix %} data-draft-subtotal-sku{% endif %}>{{ totals.sku_count|floatformat:"0g" }}</td>{% endif %}
+    {% for history in totals.history %}{% if not matrix or show_draft_qty %}<td{% if matrix %} data-draft-subtotal-history-qty data-history-index="{{ forloop.counter0 }}"{% endif %}>{{ history.qty|floatformat:"0g" }}</td>{% endif %}{% if not matrix or show_draft_gross %}<td{% if matrix %} data-draft-subtotal-history-gross data-history-index="{{ forloop.counter0 }}"{% endif %}>Rp {{ history.gross|floatformat:"0g" }}</td>{% endif %}{% endfor %}
     {% if matrix %}
       {% for cell in totals.targets %}{% if show_draft_qty %}<td data-draft-matrix-total-qty data-month="{{ cell.month|date:'Y-m' }}">{{ cell.qty|floatformat:"0g" }}</td>{% endif %}{% if show_draft_gross %}<td data-draft-matrix-total-gross data-month="{{ cell.month|date:'Y-m' }}">Rp {{ cell.gross|floatformat:"0g" }}</td>{% endif %}{% endfor %}
     {% else %}

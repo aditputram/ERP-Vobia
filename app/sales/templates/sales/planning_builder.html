@@ -193,28 +193,59 @@
     }, true);
   }
   const draft = document.querySelector('#draft-projection');
+  if (!draft) return;
+  const draftRows = [...(draft?.querySelectorAll('[data-sales-draft-parent-row]') || [])];
   const draftInputs = [...(draft?.querySelectorAll('[data-draft-matrix-qty]') || [])];
   const refreshDraftMatrix = () => {
-    const months = new Map();
+    const months = new Map(), subtotalMonths = new Map(), historyQty = new Map(), historyGross = new Map();
+    let subtotalSku = 0;
     draftInputs.forEach(input => {
       const row = input.closest('[data-sales-draft-parent-row]');
       const month = input.dataset.month;
       const qty = Math.max(0, Math.floor(Number(input.value) || 0));
       const gross = Math.round(qty * (Number(input.dataset.grossPerQty) || 0));
       const grossCell = [...row.querySelectorAll('[data-draft-matrix-parent-gross]')].find(cell => cell.dataset.month === month);
-      if (grossCell) grossCell.textContent = `Rp ${formatNumber(gross)}`;
+      if (grossCell) { grossCell.textContent = `Rp ${formatNumber(gross)}`; grossCell.dataset.value = gross; }
       const total = months.get(month) || {qty: 0, gross: 0};
       total.qty += qty; total.gross += gross; months.set(month, total);
+      if (!row.hidden) {
+        const subtotal = subtotalMonths.get(month) || {qty: 0, gross: 0};
+        subtotal.qty += qty; subtotal.gross += gross; subtotalMonths.set(month, subtotal);
+      }
+    });
+    if (!draftInputs.length) draftRows.forEach(row => row.querySelectorAll('[data-draft-matrix-parent-qty]').forEach(cell => {
+      const qty = Number(cell.dataset.value) || 0;
+      const grossCell = [...row.querySelectorAll('[data-draft-matrix-parent-gross]')].find(item => item.dataset.month === cell.dataset.month);
+      const gross = Number(grossCell?.dataset.value) || 0;
+      const total = months.get(cell.dataset.month) || {qty: 0, gross: 0};
+      total.qty += qty; total.gross += gross; months.set(cell.dataset.month, total);
+      if (!row.hidden) {
+        const subtotal = subtotalMonths.get(cell.dataset.month) || {qty: 0, gross: 0};
+        subtotal.qty += qty; subtotal.gross += gross; subtotalMonths.set(cell.dataset.month, subtotal);
+      }
+    }));
+    draftRows.filter(row => !row.hidden).forEach(row => {
+      subtotalSku += Number(row.querySelector('[data-draft-row-sku-count]')?.dataset.draftRowSkuCount) || 0;
+      row.querySelectorAll('[data-draft-row-history-qty], [data-draft-row-history-gross]').forEach(cell => {
+        const totals = cell.hasAttribute('data-draft-row-history-qty') ? historyQty : historyGross;
+        totals.set(cell.dataset.historyIndex, (totals.get(cell.dataset.historyIndex) || 0) + (Number(cell.dataset.value) || 0));
+      });
     });
     draft.querySelectorAll('[data-draft-matrix-total-qty], [data-draft-matrix-total-gross]').forEach(cell => {
-      const total = months.get(cell.dataset.month) || {qty: 0, gross: 0};
+      const total = subtotalMonths.get(cell.dataset.month) || {qty: 0, gross: 0};
       cell.textContent = cell.hasAttribute('data-draft-matrix-total-qty') ? formatNumber(total.qty) : `Rp ${formatNumber(total.gross)}`;
+    });
+    const skuCell = draft.querySelector('[data-draft-subtotal-sku]');
+    if (skuCell) skuCell.textContent = formatNumber(subtotalSku);
+    draft.querySelectorAll('[data-draft-subtotal-history-qty], [data-draft-subtotal-history-gross]').forEach(cell => {
+      const totals = cell.hasAttribute('data-draft-subtotal-history-qty') ? historyQty : historyGross;
+      const value = totals.get(cell.dataset.historyIndex) || 0;
+      cell.textContent = cell.hasAttribute('data-draft-subtotal-history-qty') ? formatNumber(value) : `Rp ${formatNumber(value)}`;
     });
     draft.querySelector('[data-draft-matrix-summary-qty]').textContent = formatNumber([...months.values()].reduce((sum, total) => sum + total.qty, 0));
     draft.querySelector('[data-draft-matrix-summary-gross]').textContent = `Rp ${formatNumber([...months.values()].reduce((sum, total) => sum + total.gross, 0))}`;
   };
   draftInputs.forEach(input => input.addEventListener('input', refreshDraftMatrix));
-  const draftRows = [...(draft?.querySelectorAll('[data-sales-draft-parent-row]') || [])];
   const draftStatus = draft?.querySelector('[data-draft-status-filter]');
   const draftCategory = draft?.querySelector('[data-draft-category-filter]');
   const draftSearch = draft?.querySelector('[data-draft-product-search]');
@@ -240,11 +271,13 @@
       const selection = row.querySelector('[data-draft-row-select]');
       if (row.hidden && selection?.checked) selection.click();
     });
+    refreshDraftMatrix();
   };
   draftStatus?.addEventListener('change', () => { syncDraftCategories(); applyDraftTableFilters(); });
   draftCategory?.addEventListener('change', applyDraftTableFilters);
   draftSearch?.addEventListener('input', applyDraftTableFilters);
   syncDraftCategories();
+  applyDraftTableFilters();
 
 })();
 </script>

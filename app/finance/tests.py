@@ -462,8 +462,8 @@ class FinanceJournalTests(TestCase):
             source=SalesOrder.Source.SHOPEE,
             source_label="Shopee",
             order_number="FINANCE-RETURN-001",
-            order_datetime=timezone.make_aware(datetime(2026, 9, 12, 10, 0)),
-            order_date=date(2026, 9, 12),
+            order_datetime=timezone.make_aware(datetime(2026, 8, 12, 10, 0)),
+            order_date=date(2026, 8, 12),
             current_status="Retur",
             source_status="Retur",
             is_final=True,
@@ -514,8 +514,6 @@ class FinanceJournalTests(TestCase):
             condition=PhysicalReturnReceipt.Condition.DAMAGED,
             recorded_by=self.user,
         )
-        self._allocate_sales_line(received_line)
-        self._allocate_sales_line(damaged_line)
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("finance:feature", args=["sales-return"]))

@@ -499,6 +499,15 @@ def _sales_return_journal_data(*, start_date, end_date, conditions=(), lock=Fals
         debit__gt=0,
     ):
         receipt_accounts_by_entry[line.entry_id].append(line.account)
+    opening_receipt_accounts = list(
+        Account.objects.filter(
+            journal_lines__entry__number=OPENING_ENTRY_NUMBER,
+            journal_lines__debit__gt=0,
+            account_type="AREC",
+            is_active=True,
+            is_postable=True,
+        ).distinct()
+    )
 
     return_total = Decimal("0")
     reversed_cogs_total = Decimal("0")
@@ -510,6 +519,12 @@ def _sales_return_journal_data(*, start_date, end_date, conditions=(), lock=Fals
     for receipt in receipts:
         allocation = sales_allocations.get(receipt.sales_line_id)
         accounts = receipt_accounts_by_entry.get(allocation.entry_id, []) if allocation else []
+        if (
+            not accounts
+            and receipt.sales_line.order.order_date < FINANCE_OPENING_DATE
+            and len(opening_receipt_accounts) == 1
+        ):
+            accounts = opening_receipt_accounts
         if len(accounts) != 1 or not accounts[0].is_active or not accounts[0].is_postable:
             missing_sales_journals.append(
                 f"{receipt.sales_line.order.order_number} / "

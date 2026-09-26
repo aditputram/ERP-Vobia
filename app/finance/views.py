@@ -171,6 +171,7 @@ def journal_list(request):
         {
             "journals": JournalEntry.objects.select_related("created_by", "posted_by").prefetch_related("lines")[:200],
             "can_edit": request.user.is_superuser or module_level(request.user, "finance") in {"edit", "approve"},
+            "can_delete": request.user.is_superuser or module_level(request.user, "finance") == "approve",
         },
     )
 
@@ -241,6 +242,7 @@ def journal_detail(request, entry_id):
         {
             "entry": entry,
             "can_approve": request.user.is_superuser or module_level(request.user, "finance") == "approve",
+            "can_delete": request.user.is_superuser or module_level(request.user, "finance") == "approve",
             "posting_blocked": entry.source == JournalEntry.Source.OPENING
             and entry.source_metadata.get("reconciliation_status") != "RECONCILED",
         },
@@ -258,6 +260,41 @@ def journal_approve(request, entry_id):
     else:
         messages.success(request, "Jurnal berhasil diposting dan masuk ke laporan Finance.")
     return redirect("finance:journal_detail", entry_id=entry_id)
+
+
+@login_required
+@transaction.atomic
+def journal_delete(request, entry_id):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if not (request.user.is_superuser or module_level(request.user, "finance") == "approve"):
+        return HttpResponseForbidden("Tindakan ini memerlukan akses Approve Finance.")
+    entry = get_object_or_404(JournalEntry.objects.select_for_update(), pk=entry_id)
+    if entry.source == JournalEntry.Source.OPENING:
+        messages.error(request, "Opening Balance tidak dapat dihapus dari Journal Voucher.")
+        return redirect("finance:journal_detail", entry_id=entry.id)
+    deleted_id = entry.id
+    deleted_number = entry.number
+    before_values = {
+        "number": entry.number,
+        "status": entry.status,
+        "source": entry.source,
+        "debit": str(entry.debit_total),
+        "credit": str(entry.credit_total),
+    }
+    entry.sales_allocations.all().delete()
+    entry.sales_return_allocations.all().delete()
+    entry.lines.all().delete()
+    entry.delete()
+    record_audit(
+        actor=request.user,
+        action="finance_journal_deleted",
+        entity_type="finance.journal_entry",
+        entity_id=deleted_id,
+        before_values=before_values,
+    )
+    messages.success(request, f"Jurnal {deleted_number} berhasil dihapus.")
+    return redirect("finance:journals")
 
 
 @login_required

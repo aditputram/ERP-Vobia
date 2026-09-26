@@ -11,6 +11,7 @@ urlpatterns = [
     path("journals/new/", views.journal_create, name="journal_create"),
     path("journals/<uuid:entry_id>/", views.journal_detail, name="journal_detail"),
     path("journals/<uuid:entry_id>/approve/", views.journal_approve, name="journal_approve"),
+    path("journals/<uuid:entry_id>/delete/", views.journal_delete, name="journal_delete"),
     path("sales/settings/", views.sales_settings, name="sales_settings"),
     path("reports/trial-balance/", views.trial_balance, name="trial_balance"),
     path("reports/balance-sheet/", views.balance_sheet, name="balance_sheet"),

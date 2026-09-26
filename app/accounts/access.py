@@ -253,6 +253,7 @@ MODULE_TABS = {
                         "finance:journal_create",
                         "finance:journal_detail",
                         "finance:journal_approve",
+                        "finance:journal_delete",
                         "finance:journals",
                     )
                     if tab == "journals"

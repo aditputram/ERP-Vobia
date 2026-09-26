@@ -152,6 +152,46 @@ class FinanceJournalTests(TestCase):
 
         self.assertContains(self.client.get(reverse("finance:dashboard")), "Finance UAT")
 
+    def test_approve_user_can_delete_journal(self):
+        self.client.force_login(self.user)
+        detail_url = reverse("finance:journal_detail", args=(self.entry.id,))
+
+        self.assertContains(self.client.get(reverse("finance:journals")), "Delete Jurnal")
+        self.assertContains(self.client.get(detail_url), "Delete Jurnal")
+        response = self.client.post(reverse("finance:journal_delete", args=(self.entry.id,)))
+
+        self.assertRedirects(response, reverse("finance:journals"))
+        self.assertFalse(JournalEntry.objects.filter(pk=self.entry.id).exists())
+        self.assertTrue(AuditEvent.objects.filter(action="finance_journal_deleted").exists())
+
+    def test_edit_user_cannot_delete_journal(self):
+        editor = get_user_model().objects.create_user(
+            username="finance-editor",
+            password="test",
+            module_access={"finance": "edit"},
+            tab_access={"finance": ["journals"]},
+        )
+        self.client.force_login(editor)
+
+        self.assertNotContains(
+            self.client.get(reverse("finance:journal_detail", args=(self.entry.id,))),
+            "Delete Jurnal",
+        )
+        response = self.client.post(reverse("finance:journal_delete", args=(self.entry.id,)))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(JournalEntry.objects.filter(pk=self.entry.id).exists())
+
+    def test_opening_journal_cannot_be_deleted(self):
+        self.entry.source = JournalEntry.Source.OPENING
+        self.entry.save(update_fields=("source",))
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("finance:journal_delete", args=(self.entry.id,)))
+
+        self.assertRedirects(response, reverse("finance:journal_detail", args=(self.entry.id,)))
+        self.assertTrue(JournalEntry.objects.filter(pk=self.entry.id).exists())
+
     def test_general_ledger_can_show_all_accounts_and_selected_account_detail(self):
         self.client.force_login(self.user)
         url = reverse("finance:feature", args=("general-ledger-summary",))

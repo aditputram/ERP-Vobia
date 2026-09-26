@@ -366,6 +366,8 @@ class FinanceJournalTests(TestCase):
 
         line.current_status = "Perlu Dikirim"
         line.save(update_fields=("current_status",))
+        order.shipped_datetime = timezone.make_aware(datetime(2026, 9, 10, 12, 0))
+        order.save(update_fields=("shipped_datetime",))
         self.assertFalse(finance_sales_lines().filter(pk=line.pk).exists())
         with self.assertRaisesMessage(ValidationError, "belum dijurnal"):
             create_sales_journal_draft(
@@ -379,8 +381,7 @@ class FinanceJournalTests(TestCase):
         line.save(update_fields=("current_status",))
         order.current_status = "Telah Dikirim"
         order.source_status = "Telah Dikirim"
-        order.shipped_datetime = timezone.make_aware(datetime(2026, 9, 10, 12, 0))
-        order.save(update_fields=("current_status", "source_status", "shipped_datetime"))
+        order.save(update_fields=("current_status", "source_status"))
 
         shipped_page = self.client.get(
             reverse("finance:feature", args=["sales-invoice"]),

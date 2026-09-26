@@ -961,6 +961,8 @@ def feature(request, slug):
                 {
                     "ok": True,
                     "receipt_count": preview["receipt_count"],
+                    "receipt_quantity": preview["receipt_quantity"],
+                    "transaction_count": preview["transaction_count"],
                     "return_amount": str(preview["return_amount"]),
                     "reversed_cogs": str(preview["reversed_cogs"]),
                     "lines": [

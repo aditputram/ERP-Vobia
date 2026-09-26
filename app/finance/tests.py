@@ -557,6 +557,8 @@ class FinanceJournalTests(TestCase):
         )
         self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(preview_response.json()["receipt_count"], 1)
+        self.assertEqual(preview_response.json()["receipt_quantity"], 1)
+        self.assertEqual(preview_response.json()["transaction_count"], 1)
         self.assertEqual(preview_response.json()["lines"][1]["account_code"], "110301")
 
         narrow_response = self.client.post(
@@ -689,6 +691,8 @@ class FinanceJournalTests(TestCase):
         entry = create_sales_return_journal_draft(**params)
 
         self.assertEqual(preview["receipt_count"], 2)
+        self.assertEqual(preview["receipt_quantity"], 3)
+        self.assertEqual(preview["transaction_count"], 1)
         self.assertEqual(
             {line["account_code"] for line in preview["lines"]},
             {"440103", "110301", "110101", "110401", "5101"},

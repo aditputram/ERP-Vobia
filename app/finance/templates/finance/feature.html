@@ -161,7 +161,7 @@
             }));
             debitTotal.textContent = money(debit);
             creditTotal.textContent = money(credit);
-            count.textContent = `${data.receipt_count} receipt`;
+            count.textContent = `${data.receipt_quantity} qty receipt (${data.transaction_count} transaction)`;
             message.textContent = `Sales Return ${money(data.return_amount)} · Pembalikan COGS ${money(data.reversed_cogs)}`;
             table.hidden = false;
             submit.disabled = false;

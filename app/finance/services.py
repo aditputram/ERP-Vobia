@@ -598,6 +598,8 @@ def sales_return_journal_preview(*, start_date, end_date, conditions=()):
     )
     return {
         "receipt_count": len(data["receipts"]),
+        "receipt_quantity": int(sum((receipt.quantity for receipt in data["receipts"]), Decimal("0"))),
+        "transaction_count": len({receipt.sales_line.order_id for receipt in data["receipts"]}),
         "return_amount": data["return_total"],
         "reversed_cogs": data["reversed_cogs_total"],
         "lines": [

@@ -708,8 +708,12 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .finance-ledger-filter [data-ledger-account-picker],.finance-ledger-filter [data-ledger-account-search] { width:100%; }
 .finance-ledger-filter>.primary-button { min-height:34px; padding:7px 12px; }
+.finance-return-filter { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.finance-return-filter>label { min-width:0; }
+.finance-return-filter>[hidden] { display:none; }
+.finance-return-filter>.primary-button { min-height:40px; align-self:end; }
 @media(max-width:1150px) { .dashboard-period-filter { grid-template-columns:repeat(3,minmax(0,1fr)); } }
-@media(max-width:650px) { .dashboard-period-filter { grid-template-columns:1fr; } }
+@media(max-width:650px) { .dashboard-period-filter,.finance-return-filter { grid-template-columns:1fr; } }
 .report-filter label { min-width: 145px; display: grid; gap: 6px; color: var(--muted); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .report-filter input, .report-filter select { min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--ink); }
 .report-filter .secondary-button { margin-top: 0; }

@@ -595,6 +595,30 @@ class FinanceJournalTests(TestCase):
         self.assertNotContains(search_response, "Received Return Product")
         self.assertEqual(search_response.context["query"], "FINANCE-RETURN-DAMAGED")
 
+        month_response = self.client.get(
+            reverse("finance:feature", args=["sales-return"]),
+            {"period_type": "month", "period": "2026-09"},
+        )
+        self.assertEqual(month_response.context["period_type"], "month")
+        self.assertEqual(month_response.context["period_value"], "2026-09")
+        self.assertContains(month_response, "Received Return Product")
+        self.assertContains(month_response, "Damaged Return Product")
+
+        custom_response = self.client.get(
+            reverse("finance:feature", args=["sales-return"]),
+            {
+                "period_type": "custom",
+                "date_from": "2026-09-16",
+                "date_to": "2026-09-16",
+            },
+        )
+        self.assertNotContains(custom_response, "Received Return Product")
+        self.assertContains(custom_response, "Damaged Return Product")
+        self.assertEqual(
+            custom_response.context["metrics"],
+            (("Return received", 1), ("Qty received", Decimal("1")), ("Belum dijurnal", 1)),
+        )
+
         create_response = self.client.post(
             reverse("finance:feature", args=["sales-return"]),
             {

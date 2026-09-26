@@ -937,6 +937,7 @@ def feature(request, slug):
         )
     elif slug in {"sales-return", "sales-return-per-item"}:
         from inventory.models import PhysicalReturnReceipt
+        from sales.views import _pareto_period_bounds, _pareto_period_options
 
         can_create_sales_return_journal = request.user.is_superuser or module_level(
             request.user, "finance"
@@ -1050,12 +1051,42 @@ def feature(request, slug):
         receipt_statuses = dict(PhysicalReturnReceipt.Condition.choices)
         if receipt_status not in receipt_statuses:
             receipt_status = ""
+        latest = (
+            PhysicalReturnReceipt.objects.order_by("-received_date")
+            .values_list("received_date", flat=True)
+            .first()
+            or today
+        )
+        earliest = (
+            PhysicalReturnReceipt.objects.order_by("received_date")
+            .values_list("received_date", flat=True)
+            .first()
+            or latest
+        )
+        period_options = {"month": _pareto_period_options(earliest, latest)["month"]}
+        period_type = request.GET.get("period_type", "custom")
+        if period_type not in {"custom", "month"}:
+            period_type = "custom"
+        if period_type == "custom":
+            period_value = ""
+            date_from = _selected_date(request, "date_from", latest.replace(day=1))
+            date_to = _selected_date(request, "date_to", latest)
+            if date_from > date_to:
+                date_from, date_to = date_to, date_from
+        else:
+            valid_periods = {item["value"] for item in period_options["month"]}
+            period_value = request.GET.get("period", "")
+            if period_value not in valid_periods:
+                period_value = period_options["month"][-1]["value"]
+            date_from, date_to = _pareto_period_bounds("month", period_value)
         received_returns = PhysicalReturnReceipt.objects.select_related(
             "sales_line__order",
             "warehouse",
             "recorded_by",
             "finance_journal_allocation",
-        ).order_by("-received_date", "-created_at")
+        ).filter(received_date__range=(date_from, date_to)).order_by(
+            "-received_date", "-created_at"
+        )
         if receipt_status:
             received_returns = received_returns.filter(condition=receipt_status)
         if query:
@@ -1072,6 +1103,11 @@ def feature(request, slug):
         context.update(
             sales_return=True,
             query=query,
+            date_from=date_from,
+            date_to=date_to,
+            period_type=period_type,
+            period_value=period_value,
+            period_options=period_options,
             receipt_status=receipt_status,
             receipt_status_options=PhysicalReturnReceipt.Condition.choices,
             journal_receipt_status_options=journal_receipt_status_options,

@@ -47,6 +47,40 @@ def _selected_date(request, key, fallback):
 
 
 @login_required
+def audit_pending_sales_journals(request):
+    if not can_access_tab(request.user, "finance", "sales"):
+        return HttpResponseForbidden("Akun ini tidak memiliki akses ke tab Sales Finance.")
+    pending = Q()
+    for status in PENDING_SALES_INVOICE_STATUSES:
+        pending |= Q(sales_line__current_status__iexact=status)
+        pending |= Q(sales_line__order__current_status__iexact=status)
+    allocations = SalesJournalAllocation.objects.filter(pending)
+    return JsonResponse({
+        "summary": allocations.aggregate(
+            lines=Count("id"),
+            orders=Count("sales_line__order_id", distinct=True),
+            vouchers=Count("entry_id", distinct=True),
+            gross=Sum("gross_sales"),
+            net=Sum("net_sales"),
+            cogs=Sum("cogs"),
+        ),
+        "vouchers": list(
+            allocations.values("entry__number", "entry__status")
+            .annotate(lines=Count("id"), gross=Sum("gross_sales"), net=Sum("net_sales"))
+            .order_by("entry__number")
+        ),
+        "orders": list(
+            allocations.values(
+                "sales_line__order__order_number",
+                "sales_line__order__current_status",
+                "sales_line__current_status",
+                "entry__number",
+            ).order_by("sales_line__order__order_number")[:100]
+        ),
+    })
+
+
+@login_required
 def dashboard(request):
     opening = JournalEntry.objects.filter(source=JournalEntry.Source.OPENING).first()
     posted_lines = JournalEntry.objects.filter(status=JournalEntry.Status.POSTED).aggregate(
@@ -789,38 +823,6 @@ def feature(request, slug):
             _pareto_period_options,
             _source_options,
         )
-
-        if request.GET.get("audit_pending_allocations") == "1":
-            if not request.user.is_superuser:
-                return HttpResponseForbidden("Audit ini hanya tersedia untuk superadmin.")
-            pending = Q()
-            for status in PENDING_SALES_INVOICE_STATUSES:
-                pending |= Q(sales_line__current_status__iexact=status)
-                pending |= Q(sales_line__order__current_status__iexact=status)
-            allocations = SalesJournalAllocation.objects.filter(pending)
-            return JsonResponse({
-                "summary": allocations.aggregate(
-                    lines=Count("id"),
-                    orders=Count("sales_line__order_id", distinct=True),
-                    vouchers=Count("entry_id", distinct=True),
-                    gross=Sum("gross_sales"),
-                    net=Sum("net_sales"),
-                    cogs=Sum("cogs"),
-                ),
-                "vouchers": list(
-                    allocations.values("entry__number", "entry__status")
-                    .annotate(lines=Count("id"), gross=Sum("gross_sales"), net=Sum("net_sales"))
-                    .order_by("entry__number")
-                ),
-                "orders": list(
-                    allocations.values(
-                        "sales_line__order__order_number",
-                        "sales_line__order__current_status",
-                        "sales_line__current_status",
-                        "entry__number",
-                    ).order_by("sales_line__order__order_number")[:100]
-                ),
-            })
 
         all_lines = finance_sales_lines()
         can_create_sales_journal = request.user.is_superuser or module_level(

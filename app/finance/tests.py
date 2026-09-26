@@ -390,6 +390,46 @@ class FinanceJournalTests(TestCase):
         self.assertContains(shipped_page, order.order_number)
         self.assertTrue(finance_sales_lines().filter(pk=line.pk).exists())
 
+    def test_sales_invoice_filters_transaction_status(self):
+        from sales.models import SalesOrder, SalesOrderLine
+
+        for index, status in enumerate(("Dikirim", "Selesai"), 1):
+            order = SalesOrder.objects.create(
+                source=SalesOrder.Source.SHOPEE,
+                source_label="Shopee",
+                order_number=f"FINANCE-STATUS-{index}",
+                order_datetime=timezone.make_aware(datetime(2026, 9, 10, 10, index)),
+                order_date=date(2026, 9, 10),
+                current_status=status,
+                source_status=status,
+                is_final=True,
+                first_seen_batch_id=uuid.uuid4(),
+                latest_batch_id=uuid.uuid4(),
+            )
+            SalesOrderLine.objects.create(
+                order=order,
+                sku_code_snapshot=f"FINANCE-STATUS-SKU-{index}",
+                product_name_snapshot="Finance Status Product",
+                quantity=1,
+                net_unit_price=Decimal("90000"),
+                retail_price_snapshot=Decimal("100000"),
+                total_gross_sales=Decimal("100000"),
+                total_net_sales=Decimal("90000"),
+                total_cogs=Decimal("60000"),
+            )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("finance:feature", args=["sales-invoice"]),
+            {"period_type": "month", "period": "2026-09", "status": "Dikirim"},
+        )
+
+        self.assertEqual(response.context["selected_status"], "Dikirim")
+        self.assertEqual(response.context["status_options"], ["Dikirim", "Selesai"])
+        self.assertEqual(response.context["sales_totals"]["orders"], 1)
+        self.assertContains(response, "FINANCE-STATUS-1")
+        self.assertNotContains(response, "FINANCE-STATUS-2")
+
     def test_sales_journal_is_balanced_draft_and_does_not_duplicate_sales_lines(self):
         from sales.models import SalesOrder, SalesOrderLine
 

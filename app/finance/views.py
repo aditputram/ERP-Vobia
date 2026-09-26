@@ -878,6 +878,17 @@ def feature(request, slug):
         lines = _apply_source_filters(all_lines, sources, source_groups).filter(
             order__order_date__range=(start, end)
         )
+        status_options = list(
+            lines.exclude(order__current_status="")
+            .order_by("order__current_status")
+            .values_list("order__current_status", flat=True)
+            .distinct()
+        )
+        selected_status = request.GET.get("status", "")
+        if selected_status not in status_options:
+            selected_status = ""
+        if selected_status:
+            lines = lines.filter(order__current_status=selected_status)
         totals = lines.aggregate(
             orders=Count("order_id", distinct=True),
             gross=Sum("total_gross_sales"),
@@ -919,6 +930,8 @@ def feature(request, slug):
             source_options=source_options,
             selected_sources=sources,
             selected_source_groups=source_groups,
+            status_options=status_options,
+            selected_status=selected_status,
             sales_totals={key: value or 0 for key, value in totals.items()},
             allocation_totals=allocation_totals,
             can_create_sales_journal=can_create_sales_journal,

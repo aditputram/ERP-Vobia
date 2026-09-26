@@ -379,7 +379,8 @@ class FinanceJournalTests(TestCase):
         line.save(update_fields=("current_status",))
         order.current_status = "Telah Dikirim"
         order.source_status = "Telah Dikirim"
-        order.save(update_fields=("current_status", "source_status"))
+        order.shipped_datetime = timezone.make_aware(datetime(2026, 9, 10, 12, 0))
+        order.save(update_fields=("current_status", "source_status", "shipped_datetime"))
 
         shipped_page = self.client.get(
             reverse("finance:feature", args=["sales-invoice"]),
@@ -873,6 +874,7 @@ class FinanceJournalTests(TestCase):
             category_snapshot="Finance T-Shirt",
             product_name_snapshot="Finance P&L Product",
             current_status="Selesai",
+            is_final=True,
             quantity=2,
             net_unit_price=Decimal("90000"),
             retail_price_snapshot=Decimal("100000"),

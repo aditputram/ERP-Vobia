@@ -26,16 +26,14 @@ OPENING_ENTRY_NUMBER = "OPENING-20260831"
 OPENING_OFFSET_ACCOUNT_CODE = "300001"
 SALES_JOURNAL_WORKFLOW = "SALES_JOURNAL_BATCH"
 SALES_RETURN_JOURNAL_WORKFLOW = "SALES_RETURN_JOURNAL_BATCH"
-PENDING_SALES_INVOICE_STATUSES = ("Belum Bayar", "Belum Dibayar", "Perlu Dikirim")
 
 
 def finance_sales_lines():
     from sales.models import SalesOrderLine
 
-    pending = Q()
-    for status in PENDING_SALES_INVOICE_STATUSES:
-        pending |= Q(current_status__iexact=status)
-    return SalesOrderLine.objects.filter(is_counted=True).exclude(pending)
+    return SalesOrderLine.objects.filter(is_counted=True).filter(
+        Q(order__shipped_datetime__isnull=False) | Q(is_final=True)
+    )
 
 
 def account_opening_balance(account):

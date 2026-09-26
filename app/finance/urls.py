@@ -12,7 +12,6 @@ urlpatterns = [
     path("journals/<uuid:entry_id>/", views.journal_detail, name="journal_detail"),
     path("journals/<uuid:entry_id>/approve/", views.journal_approve, name="journal_approve"),
     path("sales/settings/", views.sales_settings, name="sales_settings"),
-    path("audits/pending-sales-journals/", views.audit_pending_sales_journals, name="audit_pending_sales_journals"),
     path("reports/trial-balance/", views.trial_balance, name="trial_balance"),
     path("reports/balance-sheet/", views.balance_sheet, name="balance_sheet"),
     path("reports/profit-loss/", views.profit_loss, name="profit_loss"),

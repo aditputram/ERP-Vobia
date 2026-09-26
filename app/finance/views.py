@@ -29,7 +29,6 @@ from .models import (
     SalesJournalAllocation,
 )
 from .services import (
-    PENDING_SALES_INVOICE_STATUSES,
     account_balances,
     account_opening_balance,
     create_sales_journal_draft,
@@ -44,40 +43,6 @@ from .services import (
 
 def _selected_date(request, key, fallback):
     return parse_date(request.GET.get(key, "")) or fallback
-
-
-@login_required
-def audit_pending_sales_journals(request):
-    if not can_access_tab(request.user, "finance", "sales"):
-        return HttpResponseForbidden("Akun ini tidak memiliki akses ke tab Sales Finance.")
-    pending = Q()
-    for status in PENDING_SALES_INVOICE_STATUSES:
-        pending |= Q(sales_line__current_status__iexact=status)
-        pending |= Q(sales_line__order__current_status__iexact=status)
-    allocations = SalesJournalAllocation.objects.filter(pending)
-    return JsonResponse({
-        "summary": allocations.aggregate(
-            lines=Count("id"),
-            orders=Count("sales_line__order_id", distinct=True),
-            vouchers=Count("entry_id", distinct=True),
-            gross=Sum("gross_sales"),
-            net=Sum("net_sales"),
-            cogs=Sum("cogs"),
-        ),
-        "vouchers": list(
-            allocations.values("entry__number", "entry__status")
-            .annotate(lines=Count("id"), gross=Sum("gross_sales"), net=Sum("net_sales"))
-            .order_by("entry__number")
-        ),
-        "orders": list(
-            allocations.values(
-                "sales_line__order__order_number",
-                "sales_line__order__current_status",
-                "sales_line__current_status",
-                "entry__number",
-            ).order_by("sales_line__order__order_number")[:100]
-        ),
-    })
 
 
 @login_required
@@ -828,34 +793,6 @@ def feature(request, slug):
         can_create_sales_journal = request.user.is_superuser or module_level(
             request.user, "finance"
         ) in {"edit", "approve"}
-        pending_audit_query = Q()
-        for pending_status in PENDING_SALES_INVOICE_STATUSES:
-            pending_audit_query |= Q(sales_line__current_status__iexact=pending_status)
-            pending_audit_query |= Q(sales_line__order__current_status__iexact=pending_status)
-        pending_audit_allocations = SalesJournalAllocation.objects.filter(pending_audit_query)
-        context["pending_journal_audit"] = {
-            "summary": pending_audit_allocations.aggregate(
-                lines=Count("id"),
-                orders=Count("sales_line__order_id", distinct=True),
-                vouchers=Count("entry_id", distinct=True),
-                gross=Sum("gross_sales"),
-                net=Sum("net_sales"),
-                cogs=Sum("cogs"),
-            ),
-            "vouchers": list(
-                pending_audit_allocations.values("entry__number", "entry__status")
-                .annotate(lines=Count("id"), gross=Sum("gross_sales"), net=Sum("net_sales"))
-                .order_by("entry__number")
-            ),
-            "orders": list(
-                pending_audit_allocations.values(
-                    "sales_line__order__order_number",
-                    "sales_line__order__current_status",
-                    "sales_line__current_status",
-                    "entry__number",
-                ).order_by("sales_line__order__order_number")[:100]
-            ),
-        }
         receipt_account_options = list(
             Account.objects.filter(
                 account_type__in={"AREC", "BANK"}, is_active=True, is_postable=True

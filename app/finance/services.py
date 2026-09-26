@@ -26,6 +26,16 @@ OPENING_ENTRY_NUMBER = "OPENING-20260831"
 OPENING_OFFSET_ACCOUNT_CODE = "300001"
 SALES_JOURNAL_WORKFLOW = "SALES_JOURNAL_BATCH"
 SALES_RETURN_JOURNAL_WORKFLOW = "SALES_RETURN_JOURNAL_BATCH"
+PENDING_SALES_INVOICE_STATUSES = ("Belum Bayar", "Belum Dibayar", "Perlu Dikirim")
+
+
+def finance_sales_lines():
+    from sales.models import SalesOrderLine
+
+    pending = Q()
+    for status in PENDING_SALES_INVOICE_STATUSES:
+        pending |= Q(current_status__iexact=status)
+    return SalesOrderLine.objects.filter(is_counted=True).exclude(pending)
 
 
 def account_opening_balance(account):
@@ -262,13 +272,11 @@ def create_sales_journal_draft(
     )
 
     from master_data.models import SKU
-    from sales.models import SalesOrderLine
 
     allocated_sales_lines = SalesJournalAllocation.objects.filter(sales_line_id=OuterRef("pk"))
-    sales_lines = SalesOrderLine.objects.annotate(
+    sales_lines = finance_sales_lines().annotate(
         _has_finance_allocation=Exists(allocated_sales_lines)
     ).select_for_update().filter(
-        is_counted=True,
         order__order_date__range=(start_date, end_date),
         _has_finance_allocation=False,
     )

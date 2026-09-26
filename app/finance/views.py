@@ -33,6 +33,7 @@ from .services import (
     account_opening_balance,
     create_sales_journal_draft,
     create_sales_return_journal_draft,
+    finance_sales_lines,
     next_journal_number,
     post_journal,
     sales_return_journal_preview,
@@ -788,7 +789,7 @@ def feature(request, slug):
             _source_options,
         )
 
-        all_lines = SalesOrderLine.objects.filter(is_counted=True)
+        all_lines = finance_sales_lines()
         can_create_sales_journal = request.user.is_superuser or module_level(
             request.user, "finance"
         ) in {"edit", "approve"}

@@ -28,6 +28,7 @@ from .services import (
     account_balances,
     create_sales_journal_draft,
     create_sales_return_journal_draft,
+    finance_sales_lines,
     post_journal,
     sales_return_journal_preview,
 )
@@ -327,6 +328,65 @@ class FinanceJournalTests(TestCase):
         self.assertContains(response, "120.000")
         self.assertContains(response, "COGS")
         self.assertNotContains(response, "Buat Sales Invoice")
+
+    def test_sales_invoice_waits_until_order_is_shipped(self):
+        from sales.models import SalesOrder, SalesOrderLine
+
+        sku = self._sales_sku("FINANCE-PENDING-SKU")
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="FINANCE-PENDING-001",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 10, 10, 0)),
+            order_date=date(2026, 9, 10),
+            current_status="Belum Dibayar",
+            source_status="Belum Dibayar",
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        line = SalesOrderLine.objects.create(
+            order=order,
+            sku=sku,
+            current_status="Belum Dibayar",
+            quantity=1,
+            net_unit_price=Decimal("90000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("100000"),
+            total_net_sales=Decimal("90000"),
+            total_cogs=Decimal("60000"),
+        )
+        self.client.force_login(self.user)
+
+        pending_page = self.client.get(
+            reverse("finance:feature", args=["sales-invoice"]),
+            {"period_type": "month", "period": "2026-09"},
+        )
+        self.assertNotContains(pending_page, order.order_number)
+        self.assertFalse(finance_sales_lines().filter(pk=line.pk).exists())
+
+        line.current_status = "Perlu Dikirim"
+        line.save(update_fields=("current_status",))
+        self.assertFalse(finance_sales_lines().filter(pk=line.pk).exists())
+        with self.assertRaisesMessage(ValidationError, "belum dijurnal"):
+            create_sales_journal_draft(
+                start_date=date(2026, 9, 1),
+                end_date=date(2026, 9, 30),
+                receipt_account_id=Account.objects.get(code="110301").id,
+                actor=self.user,
+            )
+
+        line.current_status = "Telah Dikirim"
+        line.save(update_fields=("current_status",))
+        order.current_status = "Telah Dikirim"
+        order.source_status = "Telah Dikirim"
+        order.save(update_fields=("current_status", "source_status"))
+
+        shipped_page = self.client.get(
+            reverse("finance:feature", args=["sales-invoice"]),
+            {"period_type": "month", "period": "2026-09"},
+        )
+        self.assertContains(shipped_page, order.order_number)
+        self.assertTrue(finance_sales_lines().filter(pk=line.pk).exists())
 
     def test_sales_journal_is_balanced_draft_and_does_not_duplicate_sales_lines(self):
         from sales.models import SalesOrder, SalesOrderLine

@@ -29,6 +29,7 @@ from .models import (
     SalesJournalAllocation,
 )
 from .services import (
+    PENDING_SALES_INVOICE_STATUSES,
     account_balances,
     account_opening_balance,
     create_sales_journal_draft,
@@ -788,6 +789,38 @@ def feature(request, slug):
             _pareto_period_options,
             _source_options,
         )
+
+        if request.GET.get("audit_pending_allocations") == "1":
+            if not request.user.is_superuser:
+                return HttpResponseForbidden("Audit ini hanya tersedia untuk superadmin.")
+            pending = Q()
+            for status in PENDING_SALES_INVOICE_STATUSES:
+                pending |= Q(sales_line__current_status__iexact=status)
+                pending |= Q(sales_line__order__current_status__iexact=status)
+            allocations = SalesJournalAllocation.objects.filter(pending)
+            return JsonResponse({
+                "summary": allocations.aggregate(
+                    lines=Count("id"),
+                    orders=Count("sales_line__order_id", distinct=True),
+                    vouchers=Count("entry_id", distinct=True),
+                    gross=Sum("gross_sales"),
+                    net=Sum("net_sales"),
+                    cogs=Sum("cogs"),
+                ),
+                "vouchers": list(
+                    allocations.values("entry__number", "entry__status")
+                    .annotate(lines=Count("id"), gross=Sum("gross_sales"), net=Sum("net_sales"))
+                    .order_by("entry__number")
+                ),
+                "orders": list(
+                    allocations.values(
+                        "sales_line__order__order_number",
+                        "sales_line__order__current_status",
+                        "sales_line__current_status",
+                        "entry__number",
+                    ).order_by("sales_line__order__order_number")[:100]
+                ),
+            })
 
         all_lines = finance_sales_lines()
         can_create_sales_journal = request.user.is_superuser or module_level(

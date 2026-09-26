@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header">
     <div><p class="eyebrow">{{ feature.section }}</p><h1>{{ feature.title }}</h1></div>
-    {% if sales_invoice and can_create_sales_journal %}<div style="display:flex;gap:8px"><a class="ghost-button" href="{% url 'finance:audit_pending_sales_journals' %}">Audit pending</a><button class="primary-button" type="button" data-sales-journal-open>Create Jurnal Entry Sales</button></div>{% elif sales_return and can_create_sales_return_journal %}<button class="primary-button" type="button" data-sales-journal-open>Create Jurnal Entry Sales Return</button>{% elif action %}<a class="primary-button" href="{{ action.href }}">{{ action.label }}</a>{% endif %}
+    {% if sales_invoice and can_create_sales_journal %}<button class="primary-button" type="button" data-sales-journal-open>Create Jurnal Entry Sales</button>{% elif sales_return and can_create_sales_return_journal %}<button class="primary-button" type="button" data-sales-journal-open>Create Jurnal Entry Sales Return</button>{% elif action %}<a class="primary-button" href="{{ action.href }}">{{ action.label }}</a>{% endif %}
 </header>
 {% if sales_invoice %}
 <form method="get" class="panel report-filter dashboard-period-filter" data-auto-submit data-source-cascade data-finance-sales-filter data-finance-period-filter>
@@ -215,4 +215,5 @@
 })();
 </script>
 {% endif %}
+{% if pending_journal_audit %}{{ pending_journal_audit|json_script:"pending-journal-audit-data" }}{% endif %}
 {% endblock %}

@@ -828,6 +828,34 @@ def feature(request, slug):
         can_create_sales_journal = request.user.is_superuser or module_level(
             request.user, "finance"
         ) in {"edit", "approve"}
+        pending_audit_query = Q()
+        for pending_status in PENDING_SALES_INVOICE_STATUSES:
+            pending_audit_query |= Q(sales_line__current_status__iexact=pending_status)
+            pending_audit_query |= Q(sales_line__order__current_status__iexact=pending_status)
+        pending_audit_allocations = SalesJournalAllocation.objects.filter(pending_audit_query)
+        context["pending_journal_audit"] = {
+            "summary": pending_audit_allocations.aggregate(
+                lines=Count("id"),
+                orders=Count("sales_line__order_id", distinct=True),
+                vouchers=Count("entry_id", distinct=True),
+                gross=Sum("gross_sales"),
+                net=Sum("net_sales"),
+                cogs=Sum("cogs"),
+            ),
+            "vouchers": list(
+                pending_audit_allocations.values("entry__number", "entry__status")
+                .annotate(lines=Count("id"), gross=Sum("gross_sales"), net=Sum("net_sales"))
+                .order_by("entry__number")
+            ),
+            "orders": list(
+                pending_audit_allocations.values(
+                    "sales_line__order__order_number",
+                    "sales_line__order__current_status",
+                    "sales_line__current_status",
+                    "entry__number",
+                ).order_by("sales_line__order__order_number")[:100]
+            ),
+        }
         receipt_account_options = list(
             Account.objects.filter(
                 account_type__in={"AREC", "BANK"}, is_active=True, is_postable=True

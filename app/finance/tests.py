@@ -387,6 +387,45 @@ class FinanceJournalTests(TestCase):
         self.assertIn('name="source"', dialog)
         self.assertIn('name="category"', dialog)
 
+        late_order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="FINANCE-JOURNAL-LATE-001",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 12, 15, 0)),
+            order_date=date(2026, 9, 12),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        late_sales_line = SalesOrderLine.objects.create(
+            order=late_order,
+            sku=sku,
+            sku_code_snapshot="FIN-JOURNAL-SKU",
+            category_snapshot="Finance T-Shirt",
+            product_name_snapshot="Finance Journal Product",
+            quantity=1,
+            net_unit_price=Decimal("90000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("100000"),
+            total_net_sales=Decimal("90000"),
+            total_cogs=Decimal("60000"),
+        )
+
+        late_entry = create_sales_journal_draft(**params)
+
+        self.assertTrue(
+            SalesJournalAllocation.objects.filter(
+                sales_line=late_sales_line,
+                entry=late_entry,
+            ).exists()
+        )
+        self.assertEqual(
+            SalesJournalAllocation.objects.filter(sales_line=sales_line).count(),
+            1,
+        )
+
         pants_sku = self._sales_sku("FIN-JOURNAL-PANTS", "410006")
         october_order = SalesOrder.objects.create(
             source=SalesOrder.Source.SHOPEE,

@@ -11,6 +11,7 @@ urlpatterns = [
     path("planning-builder/", views.planning_builder, name="planning_builder"),
     path("planning-builder/filter-options/", views.planning_filter_options, name="planning_filter_options"),
     path("product-performance/", views.product_performance, name="product_performance"),
+    path("pivot-analysis/", views.product_performance, {"pivot_only": True}, name="pivot_analysis"),
     path("pareto-analysis/", views.pareto, name="pareto"),
     path("transactions/", views.transactions, name="transactions"),
     path("input-transaction/", views.input_transaction, name="input_transaction"),

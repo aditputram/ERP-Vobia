@@ -1845,7 +1845,7 @@ def dashboard(request):
 
 
 @login_required
-def product_performance(request):
+def product_performance(request, pivot_only=False):
     all_counted = SalesOrderLine.objects.filter(is_counted=True)
     latest = all_counted.order_by("-order__order_date").values_list("order__order_date", flat=True).first() or date.today()
     earliest = all_counted.order_by("order__order_date").values_list("order__order_date", flat=True).first() or latest
@@ -1965,6 +1965,7 @@ def product_performance(request):
         for field in ("views", "clicks", "visitors")
     }
     return render(request, "sales/product_performance.html", {
+        "pivot_only": pivot_only,
         "rows": rows,
         "date_from": start,
         "date_to": end,
@@ -1972,7 +1973,7 @@ def product_performance(request):
         "period_value": period_value,
         "month_options": month_options,
         "totals": _totals(lines),
-        "pivot": _product_performance_pivot(lines, request),
+        "pivot": _product_performance_pivot(lines, request) if pivot_only else None,
         "traffic_totals": traffic_totals,
         "source_groups": ("Marketplace", "Other"),
         "selected_sources": sources,

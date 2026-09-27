@@ -22,7 +22,12 @@ MODULE_TABS = {
             "Sales",
             ("sales:planning_builder", "sales:planning_filter_options"),
         ),
-        ("product_performance", "Product Performance", "Sales", ("sales:product_performance",)),
+        (
+            "product_performance",
+            "Product Performance",
+            "Sales",
+            ("sales:product_performance", "sales:pivot_analysis"),
+        ),
         ("pareto", "Pareto Analysis", "Sales", ("sales:pareto",)),
         ("transactions", "Transaction", "Sales", ("sales:transactions",)),
         ("input_transaction", "Input Transaction", "Sales", ("sales:input_transaction",)),

@@ -37,7 +37,7 @@ class SalesReportRouteTests(TestCase):
         return product, sku
 
     def test_sales_report_routes_render(self):
-        for name in ("sales:planning_builder", "sales:product_performance", "sales:pareto", "sales:transactions", "sales:input_transaction"):
+        for name in ("sales:planning_builder", "sales:product_performance", "sales:pivot_analysis", "sales:pareto", "sales:transactions", "sales:input_transaction"):
             with self.subTest(name=name):
                 response = self.client.get(reverse(name))
                 self.assertEqual(response.status_code, 200)
@@ -1604,7 +1604,7 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(response.context["selected_categories"], ["Category Alpha", "Category Beta"])
         self.assertEqual(response.context["totals"]["orders"], 2)
         self.assertEqual(response.context["totals"]["net"], Decimal("300000"))
-        self.assertEqual(response.content.count(b"data-multi-select data-all-label"), 6)
+        self.assertEqual(response.content.count(b"data-multi-select data-all-label"), 5)
 
     def test_product_performance_builds_filtered_pivot_for_selected_month(self):
         fixtures = (
@@ -1640,10 +1640,10 @@ class SalesReportRouteTests(TestCase):
                 gpm=Decimal(gpm),
             )
 
-        default_response = self.client.get(reverse("sales:product_performance"))
+        default_response = self.client.get(reverse("sales:pivot_analysis"))
         self.assertIn(b'value="2026-09" selected', default_response.content)
 
-        response = self.client.get(reverse("sales:product_performance"), {
+        response = self.client.get(reverse("sales:pivot_analysis"), {
             "period_type": "month",
             "period": "2026-08",
             "pivot_row": "category",
@@ -1663,6 +1663,7 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual([item["value"] for item in pivot["grand_total"]], [2, Decimal("200000"), Decimal("40")])
         self.assertContains(response, "PIVOT ANALYSIS")
         self.assertContains(response, "Knitwear")
+        self.assertNotContains(self.client.get(reverse("sales:product_performance")), "PIVOT ANALYSIS")
 
     def test_product_performance_cascades_status_category_and_product_options(self):
         fixtures = (

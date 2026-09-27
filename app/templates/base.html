@@ -143,6 +143,7 @@
                 {% endif %}
                 {% if tab_permissions.sales.product_performance %}
                 <a class="nav-item {% if request.resolver_match.url_name == 'product_performance' %}active{% endif %}" href="{% url 'sales:product_performance' %}"><span>Product Performance</span></a>
+                <a class="nav-item {% if request.resolver_match.url_name == 'pivot_analysis' %}active{% endif %}" href="{% url 'sales:pivot_analysis' %}"><span>Pivot Analysis</span></a>
                 {% endif %}
                 {% if tab_permissions.sales.pareto %}
                 <a class="nav-item {% if request.resolver_match.url_name == 'pareto' %}active{% endif %}" href="{% url 'sales:pareto' %}"><span>Pareto Analysis</span></a>

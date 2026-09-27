@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Product Performance · Vobia ERP{% endblock %}
+{% block title %}{% if pivot_only %}Pivot Analysis{% else %}Product Performance{% endif %} · Vobia ERP{% endblock %}
 {% block content %}
-<header class="page-header"><div><p class="eyebrow">SALES · PRODUCT PERFORMANCE</p><h1>Product Performance</h1><p>Susun analisis seperti pivot berdasarkan periode, dimensi, metric, dan filter produk yang dipilih.</p></div></header>
+<header class="page-header"><div><p class="eyebrow">SALES · {% if pivot_only %}PIVOT ANALYSIS{% else %}PRODUCT PERFORMANCE{% endif %}</p><h1>{% if pivot_only %}Pivot Analysis{% else %}Product Performance{% endif %}</h1><p>{% if pivot_only %}Susun analisis berdasarkan periode, dimensi, metric, dan filter produk yang dipilih.{% else %}Pantau traffic dan performa penjualan produk per bulan.{% endif %}</p></div></header>
 
 <form id="product-performance-filter" method="get" class="panel report-filter product-performance-filter" data-auto-submit data-preserve-scroll data-product-performance-filter>
   <label>Period Type<select name="period_type" data-period-type><option value="custom" {% if period_type == 'custom' %}selected{% endif %}>Custom Date</option><option value="month" {% if period_type == 'month' %}selected{% endif %}>Bulan</option></select></label>
   <label data-period-field {% if period_type == 'custom' %}hidden{% endif %}>Bulan<select name="period" {% if period_type != 'month' %}disabled{% endif %}>{% for item in month_options %}<option value="{{ item.value }}" {% if period_type == 'month' %}{% if item.value == period_value %}selected{% endif %}{% elif forloop.last %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select></label>
   <label data-custom-date-field {% if period_type != 'custom' %}hidden{% endif %}>Dari Tanggal<input type="date" name="date_from" value="{{ date_from|date:'Y-m-d' }}" {% if period_type != 'custom' %}disabled{% endif %}></label>
   <label data-custom-date-field {% if period_type != 'custom' %}hidden{% endif %}>Sampai Tanggal<input type="date" name="date_to" value="{{ date_to|date:'Y-m-d' }}" {% if period_type != 'custom' %}disabled{% endif %}></label>
-  <label>Baris<select name="pivot_row">{% for item in pivot.dimension_options %}<option value="{{ item.key }}" {% if item.key == pivot.row_dimension %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select></label>
+  {% if pivot_only %}<label>Baris<select name="pivot_row">{% for item in pivot.dimension_options %}<option value="{{ item.key }}" {% if item.key == pivot.row_dimension %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select></label>
   <label>Kolom<select name="pivot_column">{% for item in pivot.dimension_options %}<option value="{{ item.key }}" {% if item.key == pivot.column_dimension %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select></label>
   <div class="filter-field multi-select-field" data-multi-select data-all-label="Pilih Metric">
     <span class="filter-label">Metric</span>
@@ -18,31 +18,32 @@
       <div class="multi-select-toolbar"><button type="button" data-filter-select-visible>Select All</button><span data-filter-result-count>{{ pivot.metric_options|length }} pilihan</span><button type="button" data-filter-clear>Clear All</button></div>
       <div class="multi-select-options">{% for item in pivot.metric_options %}<label class="multi-select-option"><input type="checkbox" name="metric" value="{{ item.key }}" {% if item.selected %}checked{% endif %}><span>{{ item.label }}</span></label>{% endfor %}</div>
     </div>
-  </div>
+  </div>{% endif %}
   {% include "sales/includes/multi_select_filter.html" with label="Source" name="source" options=sources selected=selected_sources all_label="All Sources" search_placeholder="Ketik source..." %}
   {% include "sales/includes/multi_select_filter.html" with label="Source Group" name="source_group" options=source_groups selected=selected_source_groups all_label="All Source Groups" search_placeholder="Ketik source group..." %}
   {% include "sales/includes/multi_select_filter.html" with label="Status Produk" name="product_status" options=product_statuses selected=selected_product_statuses all_label="All Product Status" search_placeholder="Ketik status produk..." %}
   {% include "sales/includes/multi_select_filter.html" with label="Category" name="category" options=categories selected=selected_categories all_label="All Categories" search_placeholder="Ketik category..." %}
   {% include "sales/includes/multi_select_filter.html" with label="Product" name="product" options=products selected=selected_products all_label="All Products" search_placeholder="Ketik nama produk..." enable_select_all=1 %}
-  <a class="secondary-button" href="{% url 'sales:product_performance' %}">Reset</a>
+  <a class="secondary-button" href="{% if pivot_only %}{% url 'sales:pivot_analysis' %}{% else %}{% url 'sales:product_performance' %}{% endif %}">Reset</a>
 </form>
 
-<section class="metric-grid section-gap"><article class="metric-card"><span>Qty Sold</span><strong>{{ totals.qty|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Net Sales</span><strong class="metric-money">Rp {{ totals.net|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Gross Sales</span><strong class="metric-money">Rp {{ totals.gross|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Order</span><strong>{{ totals.orders|floatformat:"0g" }}</strong></article></section>
+{% if not pivot_only %}<section class="metric-grid section-gap"><article class="metric-card"><span>Qty Sold</span><strong>{{ totals.qty|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Net Sales</span><strong class="metric-money">Rp {{ totals.net|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Gross Sales</span><strong class="metric-money">Rp {{ totals.gross|floatformat:"0g" }}</strong></article><article class="metric-card"><span>Order</span><strong>{{ totals.orders|floatformat:"0g" }}</strong></article></section>{% endif %}
 
-<section class="panel section-gap product-pivot-panel">
+{% if pivot_only %}<section class="panel section-gap product-pivot-panel">
   <div class="panel-header"><div><p class="eyebrow">PIVOT ANALYSIS</p><h2>{{ pivot.row_label }} × {{ pivot.column_label }}</h2><small>{{ date_from|date:"d M Y" }} – {{ date_to|date:"d M Y" }}</small></div><span class="pill">{{ pivot.metrics|length }} metric</span></div>
   <div class="table-wrap product-pivot-wrap"><table class="product-pivot-table">
     <thead><tr><th rowspan="2" class="pivot-sticky-column">{{ pivot.row_label }}</th>{% for column in pivot.columns %}<th colspan="{{ pivot.metrics|length }}">{{ column.label }}</th>{% endfor %}<th colspan="{{ pivot.metrics|length }}" class="pivot-total-column">Total</th></tr><tr>{% for column in pivot.columns %}{% for metric in pivot.metrics %}<th>{{ metric.label }}</th>{% endfor %}{% endfor %}{% for metric in pivot.metrics %}<th class="pivot-total-column">{{ metric.label }}</th>{% endfor %}</tr></thead>
     <tbody>{% for row in pivot.rows %}<tr><th class="pivot-sticky-column">{{ row.label }}</th>{% for cell in row.cells %}{% for item in cell.values %}<td>{% include "sales/includes/pivot_value.html" with item=item %}</td>{% endfor %}{% endfor %}{% for item in row.total %}<td class="pivot-total-column">{% include "sales/includes/pivot_value.html" with item=item %}</td>{% endfor %}</tr>{% empty %}<tr><td colspan="99"><div class="empty-state">Tidak ada data untuk filter ini.</div></td></tr>{% endfor %}</tbody>
     {% if pivot.rows %}<tfoot><tr><th class="pivot-sticky-column">Total</th>{% for total in pivot.column_totals %}{% for item in total.values %}<td>{% include "sales/includes/pivot_value.html" with item=item %}</td>{% endfor %}{% endfor %}{% for item in pivot.grand_total %}<td class="pivot-total-column">{% include "sales/includes/pivot_value.html" with item=item %}</td>{% endfor %}</tr></tfoot>{% endif %}
   </table></div>
-</section>
+</section>{% else %}
 
 <section class="dashboard-grid section-gap">
   <article class="panel"><div class="panel-header"><div><p class="eyebrow">TRAFFIC</p><h2>Trend Traffic Produk</h2></div></div><div class="bar-chart">{% for row in rows %}<div class="bar-row"><span>{{ row.month|date:"M" }}</span><div><i style="width:{{ row.traffic_bar|floatformat:"2u" }}%"></i></div><strong>{{ row.views|floatformat:"0g" }}</strong></div>{% empty %}<div class="empty-state">Traffic belum diimpor.</div>{% endfor %}</div></article>
   <article class="panel span-two"><div class="panel-header"><div><p class="eyebrow">SALES</p><h2>Trend Penjualan Produk</h2></div></div><div class="bar-chart">{% for row in rows %}<div class="bar-row"><span>{{ row.month|date:"M" }}</span><div><i style="width:{{ row.sales_bar|floatformat:"2u" }}%"></i></div><strong>Rp {{ row.net|floatformat:"0g" }}</strong></div>{% empty %}<div class="empty-state">Tidak ada data.</div>{% endfor %}</div></article>
 </section>
 <section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">MONTHLY DATA</p><h2>Performance table</h2></div></div><div class="table-wrap"><table><thead><tr><th>Month</th><th>Views</th><th>Clicks</th><th>Visitors</th><th>Qty</th><th>Net Sales</th><th>Gross Sales</th><th>Order</th><th>Disc Exp</th><th>Disc Rate</th><th>Growth</th><th>CVR Product</th><th>AOV</th></tr></thead><tbody>{% for row in rows %}<tr><td><strong>{{ row.label }}</strong></td><td>{{ row.views|floatformat:"0g" }}</td><td>{{ row.clicks|floatformat:"0g" }}</td><td>{{ row.visitors|floatformat:"0g" }}</td><td>{{ row.qty|floatformat:"0g" }}</td><td>Rp {{ row.net|floatformat:"0g" }}</td><td>Rp {{ row.gross|floatformat:"0g" }}</td><td>{{ row.orders|floatformat:"0g" }}</td><td>Rp {{ row.discount|floatformat:"0g" }}</td><td>{% if row.discount_rate_pct != None %}{{ row.discount_rate_pct|floatformat:"2g" }}%{% else %}—{% endif %}</td><td>{% if row.growth_pct != None %}{{ row.growth_pct|floatformat:"1g" }}%{% else %}—{% endif %}</td><td>{% if row.cvr_pct != None %}{{ row.cvr_pct|floatformat:"2g" }}%{% else %}—{% endif %}</td><td>Rp {{ row.aov|floatformat:"0g" }}</td></tr>{% empty %}<tr><td colspan="13">Tidak ada data untuk filter ini.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endif %}
 
 {% include "includes/multi_select_script.html" %}
 <script>

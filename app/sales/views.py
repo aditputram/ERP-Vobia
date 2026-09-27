@@ -48,6 +48,29 @@ SALES_PROJECTION_METHODS = (
     ("SAME_AS_LAST_MONTH", "Sama dengan Bulan Lalu"),
 )
 
+PRODUCT_PERFORMANCE_DIMENSIONS = (
+    ("product", "Product"),
+    ("month", "Bulan"),
+    ("date", "Tanggal"),
+    ("source_group", "Source Group"),
+    ("source", "Source"),
+    ("product_status", "Status Produk"),
+    ("category", "Category"),
+)
+
+PRODUCT_PERFORMANCE_METRICS = (
+    ("qty", "Qty", "number"),
+    ("orders", "Order", "number"),
+    ("gross", "Gross Sales", "money"),
+    ("net", "Net Sales", "money"),
+    ("discount", "Discount", "money"),
+    ("cogs", "COGS", "money"),
+    ("gpm", "Gross Profit", "money"),
+    ("gpm_rate", "GPM Rate", "percent"),
+    ("aov", "AOV", "money"),
+    ("avg_price", "Avg. Selling Price", "money"),
+)
+
 
 def _date(value, fallback):
     try:
@@ -1314,6 +1337,144 @@ def _totals(qs):
     return values
 
 
+def _product_performance_pivot(lines, request):
+    dimension_labels = dict(PRODUCT_PERFORMANCE_DIMENSIONS)
+    row_dimension = request.GET.get("pivot_row", "product")
+    column_dimension = request.GET.get("pivot_column", "month")
+    if row_dimension not in dimension_labels:
+        row_dimension = "product"
+    if column_dimension not in dimension_labels:
+        column_dimension = "month"
+    if row_dimension == column_dimension:
+        column_dimension = "month" if row_dimension != "month" else "source_group"
+
+    metric_definitions = {
+        key: {"key": key, "label": label, "kind": kind}
+        for key, label, kind in PRODUCT_PERFORMANCE_METRICS
+    }
+    selected_metric_keys = list(dict.fromkeys(
+        key for key in request.GET.getlist("metric")
+        if key in metric_definitions
+    ))
+    if not selected_metric_keys:
+        selected_metric_keys = ["qty", "gross", "net"]
+    selected_metrics = [metric_definitions[key] for key in selected_metric_keys]
+
+    dimensions = {
+        "product": F("product_name_snapshot"),
+        "month": TruncMonth("order__order_date"),
+        "date": F("order__order_date"),
+        "source_group": Case(
+            When(order__source__in=[SalesOrder.Source.SHOPEE, SalesOrder.Source.TIKTOK], then=Value("Marketplace")),
+            default=Value("Other"),
+            output_field=CharField(),
+        ),
+        "source": Case(
+            When(order__source_label="", then=F("order__source")),
+            default=F("order__source_label"),
+            output_field=CharField(),
+        ),
+        "product_status": F("product_status_snapshot"),
+        "category": F("category_snapshot"),
+    }
+
+    def aggregate(*dimension_names):
+        annotations = {
+            f"pivot_{index}": dimensions[name]
+            for index, name in enumerate(dimension_names)
+        }
+        return list(
+            lines.annotate(**annotations)
+            .values(*annotations)
+            .annotate(
+                qty=Sum("quantity"),
+                orders=Count("order_id", distinct=True),
+                gross=Sum("total_gross_sales"),
+                net=Sum("total_net_sales"),
+                cogs=Sum("total_cogs"),
+                gpm=Sum("gpm"),
+            )
+            .order_by(*annotations)
+        )
+
+    def metric_values(row):
+        qty = row.get("qty") or 0
+        orders = row.get("orders") or 0
+        gross = row.get("gross") or Decimal("0")
+        net = row.get("net") or Decimal("0")
+        cogs = row.get("cogs") or Decimal("0")
+        gpm = row.get("gpm") or Decimal("0")
+        values = {
+            "qty": qty,
+            "orders": orders,
+            "gross": gross,
+            "net": net,
+            "discount": gross - net,
+            "cogs": cogs,
+            "gpm": gpm,
+            "gpm_rate": gpm / gross * 100 if gross else None,
+            "aov": net / orders if orders else None,
+            "avg_price": net / qty if qty else None,
+        }
+        return [
+            {**metric, "value": values[metric["key"]]}
+            for metric in selected_metrics
+        ]
+
+    def dimension_label(value, dimension):
+        if not value:
+            return "Tidak diketahui"
+        if dimension == "month":
+            return date_format(value, "M Y")
+        if dimension == "date":
+            return date_format(value, "d M Y")
+        return str(value)
+
+    cell_rows = aggregate(row_dimension, column_dimension)
+    row_total_rows = {row["pivot_0"]: row for row in aggregate(row_dimension)}
+    column_total_rows = {row["pivot_0"]: row for row in aggregate(column_dimension)}
+    row_keys = list(dict.fromkeys(row["pivot_0"] for row in cell_rows))
+    column_keys = list(dict.fromkeys(row["pivot_1"] for row in cell_rows))
+    cells = {(row["pivot_0"], row["pivot_1"]): row for row in cell_rows}
+    grand_totals = _totals(lines)
+
+    return {
+        "dimension_options": [
+            {"key": key, "label": label}
+            for key, label in PRODUCT_PERFORMANCE_DIMENSIONS
+        ],
+        "row_dimension": row_dimension,
+        "row_label": dimension_labels[row_dimension],
+        "column_dimension": column_dimension,
+        "column_label": dimension_labels[column_dimension],
+        "metric_options": [
+            {**metric_definitions[key], "selected": key in selected_metric_keys}
+            for key, _label, _kind in PRODUCT_PERFORMANCE_METRICS
+        ],
+        "metrics": selected_metrics,
+        "columns": [
+            {"key": value, "label": dimension_label(value, column_dimension)}
+            for value in column_keys
+        ],
+        "rows": [
+            {
+                "label": dimension_label(row_key, row_dimension),
+                "cells": [
+                    {"values": metric_values(cells.get((row_key, column_key), {}))}
+                    for column_key in column_keys
+                ],
+                "total": metric_values(row_total_rows.get(row_key, {})),
+            }
+            for row_key in row_keys
+        ],
+        "column_totals": [
+            {"values": metric_values(column_total_rows.get(column_key, {}))}
+            for column_key in column_keys
+        ],
+        "grand_total": metric_values(grand_totals),
+    }
+
+
 def _monthly_gross_chart(lines, monthly_start, monthly_end):
     aggregates = {
         row["month"]: row["gross"] or 0
@@ -1685,11 +1846,24 @@ def dashboard(request):
 
 @login_required
 def product_performance(request):
-    latest = SalesOrderLine.objects.filter(is_counted=True).order_by("-order__order_date").values_list("order__order_date", flat=True).first() or date.today()
-    start = _date(request.GET.get("date_from"), date(latest.year, 1, 1))
-    end = _date(request.GET.get("date_to"), latest)
-    if start > end:
-        start, end = end, start
+    all_counted = SalesOrderLine.objects.filter(is_counted=True)
+    latest = all_counted.order_by("-order__order_date").values_list("order__order_date", flat=True).first() or date.today()
+    earliest = all_counted.order_by("order__order_date").values_list("order__order_date", flat=True).first() or latest
+    month_options = _pareto_period_options(earliest, latest)["month"]
+    period_type = request.GET.get("period_type", "custom")
+    if period_type not in {"custom", "month"}:
+        period_type = "custom"
+    period_value = request.GET.get("period", "")
+    valid_months = {item["value"] for item in month_options}
+    if period_type == "month":
+        if period_value not in valid_months:
+            period_value = month_options[-1]["value"]
+        start, end = _pareto_period_bounds("month", period_value)
+    else:
+        start = _date(request.GET.get("date_from"), date(latest.year, 1, 1))
+        end = _date(request.GET.get("date_to"), latest)
+        if start > end:
+            start, end = end, start
     filter_state = _product_performance_filter_state(request)
     product_statuses = filter_state["selected_product_statuses"]
     categories = filter_state["selected_categories"]
@@ -1794,7 +1968,11 @@ def product_performance(request):
         "rows": rows,
         "date_from": start,
         "date_to": end,
+        "period_type": period_type,
+        "period_value": period_value,
+        "month_options": month_options,
         "totals": _totals(lines),
+        "pivot": _product_performance_pivot(lines, request),
         "traffic_totals": traffic_totals,
         "source_groups": ("Marketplace", "Other"),
         "selected_sources": sources,

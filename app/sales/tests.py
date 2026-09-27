@@ -1604,7 +1604,62 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(response.context["selected_categories"], ["Category Alpha", "Category Beta"])
         self.assertEqual(response.context["totals"]["orders"], 2)
         self.assertEqual(response.context["totals"]["net"], Decimal("300000"))
-        self.assertEqual(response.content.count(b"data-multi-select data-all-label"), 5)
+        self.assertEqual(response.content.count(b"data-multi-select data-all-label"), 6)
+
+    def test_product_performance_builds_filtered_pivot_for_selected_month(self):
+        fixtures = (
+            (date(2026, 8, 10), SalesOrder.Source.SHOPEE, "Shopee", "Knitwear", "Pivot Alpha", 2, "200000", "180000", "80000"),
+            (date(2026, 9, 10), SalesOrder.Source.TIKTOK, "Tiktok", "Shirt", "Pivot Beta", 3, "450000", "400000", "160000"),
+        )
+        for index, (order_day, source, source_label, category, product, qty, gross, net, gpm) in enumerate(fixtures, start=1):
+            order = SalesOrder.objects.create(
+                source=source,
+                source_label=source_label,
+                order_number=f"PIVOT-{index}",
+                order_datetime=timezone.make_aware(datetime.combine(order_day, datetime.min.time())),
+                order_date=order_day,
+                current_status="Selesai",
+                source_status="Selesai",
+                is_final=True,
+                first_seen_batch_id=uuid.uuid4(),
+                latest_batch_id=uuid.uuid4(),
+            )
+            SalesOrderLine.objects.create(
+                order=order,
+                sku_code_snapshot=f"PIVOT-SKU-{index}",
+                product_name_snapshot=product,
+                product_status_snapshot="Regular",
+                category_snapshot=category,
+                quantity=qty,
+                net_unit_price=Decimal(net) / qty,
+                retail_price_snapshot=Decimal(gross) / qty,
+                sales_cogs_snapshot=(Decimal(net) - Decimal(gpm)) / qty,
+                total_gross_sales=Decimal(gross),
+                total_net_sales=Decimal(net),
+                total_cogs=Decimal(net) - Decimal(gpm),
+                gpm=Decimal(gpm),
+            )
+
+        response = self.client.get(reverse("sales:product_performance"), {
+            "period_type": "month",
+            "period": "2026-08",
+            "pivot_row": "category",
+            "pivot_column": "source",
+            "metric": ["qty", "gross", "gpm_rate"],
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["date_from"], date(2026, 8, 1))
+        self.assertEqual(response.context["date_to"], date(2026, 8, 31))
+        pivot = response.context["pivot"]
+        self.assertEqual(pivot["row_label"], "Category")
+        self.assertEqual(pivot["column_label"], "Source")
+        self.assertEqual([item["label"] for item in pivot["columns"]], ["Shopee"])
+        self.assertEqual([item["label"] for item in pivot["metrics"]], ["Qty", "Gross Sales", "GPM Rate"])
+        self.assertEqual(pivot["rows"][0]["label"], "Knitwear")
+        self.assertEqual([item["value"] for item in pivot["grand_total"]], [2, Decimal("200000"), Decimal("40")])
+        self.assertContains(response, "PIVOT ANALYSIS")
+        self.assertContains(response, "Knitwear")
 
     def test_product_performance_cascades_status_category_and_product_options(self):
         fixtures = (

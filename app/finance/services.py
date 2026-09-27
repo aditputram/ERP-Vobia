@@ -482,7 +482,7 @@ def _sales_return_journal_data(*, start_date, end_date, conditions=(), lock=Fals
         _has_finance_allocation=Exists(allocated_receipts)
     )
     if lock:
-        receipts = receipts.select_for_update()
+        receipts = receipts.select_for_update(of=("self",))
     receipts = receipts.filter(
         received_date__range=(start_date, end_date),
         _has_finance_allocation=False,

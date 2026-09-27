@@ -266,6 +266,8 @@ class FinanceJournalTests(TestCase):
 
         self.assertContains(response, "Inventory")
         self.assertEqual(response.context["difference"], Decimal("0"))
+        self.assertEqual(response.context["ledger_start"], date(2026, 9, 1))
+        self.assertContains(response, f"account={inventory.id}", count=2)
 
     def test_balance_sheet_uses_draft_opening_but_excludes_other_drafts(self):
         inventory, _ = Account.objects.update_or_create(
@@ -1008,6 +1010,10 @@ class FinanceJournalTests(TestCase):
         self.assertContains(response, "Total Pendapatan Bersih")
         self.assertContains(response, "<th>Nilai</th>", html=True)
         self.assertNotContains(response, "Kelompok")
+        sales_account = Account.objects.get(code="410002")
+        self.assertEqual(response.context["ledger_start"], date(2026, 9, 1))
+        self.assertEqual(response.context["ledger_end"], date(2026, 9, 30))
+        self.assertContains(response, f"account={sales_account.id}", count=2)
 
         category_view = self.client.get(
             reverse("finance:profit_loss"),

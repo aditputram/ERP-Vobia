@@ -340,6 +340,7 @@ def balance_sheet(request):
         {
             "groups": groups,
             "as_of": as_of,
+            "ledger_start": FINANCE_OPENING_DATE,
             "include_draft": include_draft,
             "current_earnings": current_earnings,
             "totals": totals,
@@ -596,6 +597,8 @@ def profit_loss(request):
         "end_month": end_month,
         "report_year": report_year,
         "comparison": comparison,
+        "ledger_start": periods[0]["start"],
+        "ledger_end": periods[-1]["end"],
     }
     if report:
         context.update(report)

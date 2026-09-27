@@ -1640,6 +1640,9 @@ class SalesReportRouteTests(TestCase):
                 gpm=Decimal(gpm),
             )
 
+        default_response = self.client.get(reverse("sales:product_performance"))
+        self.assertIn(b'value="2026-09" selected', default_response.content)
+
         response = self.client.get(reverse("sales:product_performance"), {
             "period_type": "month",
             "period": "2026-08",

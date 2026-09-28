@@ -703,7 +703,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .product-pivot-table { width:max-content; min-width:100%; }
 .product-pivot-table th,.product-pivot-table td { min-width:72px; padding:4px 5px; white-space:nowrap; text-align:center; font-size:8px; line-height:1.15; }
 .product-pivot-table thead th { position:sticky; top:0; z-index:3; height:26px; background:var(--lime); color:#344300; text-align:center; }
-.product-pivot-table thead tr:nth-child(2) th { top:26px; }
+.product-pivot-table thead tr:first-child th { border-bottom:0; }
+.product-pivot-table thead tr:nth-child(2) th { top:26px; border-top:0; }
+.product-pivot-table .pivot-group-start { border-left:1px solid #b7cc69; }
 .product-pivot-table .pivot-sticky-column { position:sticky; left:0; z-index:2; width:1%; min-width:0; max-width:none; overflow:visible; background:#fff; text-align:left; text-overflow:clip; }
 .product-pivot-table thead .pivot-sticky-column { top:0; z-index:5; background:var(--lime); }
 .product-pivot-table tbody tr:nth-child(odd)>* { background:#fff; }

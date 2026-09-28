@@ -706,7 +706,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .product-pivot-table thead tr:first-child th { border-bottom:0; }
 .product-pivot-table thead tr:nth-child(2) th { top:26px; border-top:0; }
 .product-pivot-table .pivot-group-start { border-left:1px solid #b7cc69; }
-.product-pivot-table .pivot-sticky-column { position:sticky; left:0; z-index:2; width:1%; min-width:0; max-width:none; overflow:visible; background:#fff; text-align:left; text-overflow:clip; }
+.product-pivot-table .pivot-sticky-column { position:sticky; left:0; z-index:2; width:1%; min-width:0; max-width:none; overflow:visible; background:#fff; border-right:1px solid #b7cc69; text-align:left; text-overflow:clip; }
 .product-pivot-table thead .pivot-sticky-column { top:0; z-index:5; background:var(--lime); }
 .product-pivot-table tbody tr:nth-child(odd)>* { background:#fff; }
 .product-pivot-table tbody tr:nth-child(even)>* { background:#f5f5f1; }

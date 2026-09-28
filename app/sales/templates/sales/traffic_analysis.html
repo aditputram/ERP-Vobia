@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Traffic Analysis · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">SALES · TRAFFIC ANALYSIS</p><h1>Traffic Analysis</h1><p>Bandingkan hasil penjualan setiap 1.000 unique visitor produk.</p></div></header>
+
+<form method="get" class="panel report-filter product-performance-filter" data-auto-submit>
+  <label>Bulan<select name="month">{% for item in month_options %}<option value="{{ item.value }}" {% if item.value == selected_month %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select></label>
+  {% include "sales/includes/multi_select_filter.html" with label="Source" name="source" options=sources selected=selected_sources all_label="All Sources" search_placeholder="Ketik source..." %}
+  {% include "sales/includes/multi_select_filter.html" with label="Status Produk" name="product_status" options=product_statuses selected=selected_product_statuses all_label="All Product Status" search_placeholder="Ketik status produk..." %}
+  {% include "sales/includes/multi_select_filter.html" with label="Category" name="category" options=categories selected=selected_categories all_label="All Categories" search_placeholder="Ketik category..." %}
+  {% include "sales/includes/multi_select_filter.html" with label="Product" name="product" options=products selected=selected_products all_label="All Products" search_placeholder="Ketik nama produk..." enable_select_all=1 %}
+  <a class="secondary-button" href="{% url 'sales:traffic_analysis' %}">Reset</a>
+</form>
+
+<section class="metric-grid five section-gap">
+  <article class="metric-card"><span>Unique Visitor</span><strong>{{ totals.visitors|floatformat:"0g" }}</strong><small>{{ selected_month_label }}</small></article>
+  <article class="metric-card"><span>Qty Sold</span><strong>{{ totals.qty|floatformat:"0g" }}</strong><small>{{ selected_month_label }}</small></article>
+  <article class="metric-card"><span>Gross Sales</span><strong class="metric-money">Rp {{ totals.gross|floatformat:"0g" }}</strong><small>{{ selected_month_label }}</small></article>
+  <article class="metric-card"><span>Qty Sold / 1.000 Traffic</span><strong>{% if totals.qty_per_1000 != None %}{{ totals.qty_per_1000|floatformat:"2g" }}{% else %}—{% endif %}</strong><small>Qty Sold ÷ Unique Visitor × 1.000</small></article>
+  <article class="metric-card"><span>Gross Sales / 1.000 Traffic</span><strong class="metric-money">{% if totals.gross_per_1000 != None %}Rp {{ totals.gross_per_1000|floatformat:"0g" }}{% else %}—{% endif %}</strong><small>Gross Sales ÷ Unique Visitor × 1.000</small></article>
+</section>
+
+<section class="panel section-gap">
+  <div class="panel-header"><div><p class="eyebrow">PRODUCT DATA</p><h2>Performance per 1.000 Traffic</h2><small>{{ selected_month_label }} · traffic memakai unique visitor</small></div><span class="pill">{{ rows|length }} product</span></div>
+  <div class="table-wrap"><table class="traffic-analysis-table">
+    <thead><tr><th>Product</th><th>Status Produk</th><th>Category</th><th>Unique Visitor</th><th>Qty Sold</th><th>Gross Sales</th><th>Qty Sold / 1.000 Traffic</th><th>Gross Sales / 1.000 Traffic</th></tr></thead>
+    <tbody>{% for row in rows %}<tr><td><strong>{{ row.product.name }}</strong></td><td>{{ row.product.status.name }}</td><td>{{ row.product.category.name }}</td><td>{{ row.visitors|floatformat:"0g" }}</td><td>{{ row.qty|floatformat:"0g" }}</td><td>Rp {{ row.gross|floatformat:"0g" }}</td><td>{% if row.qty_per_1000 != None %}{{ row.qty_per_1000|floatformat:"2g" }}{% else %}—{% endif %}</td><td>{% if row.gross_per_1000 != None %}Rp {{ row.gross_per_1000|floatformat:"0g" }}{% else %}—{% endif %}</td></tr>{% empty %}<tr><td colspan="8"><div class="empty-state">Tidak ada data traffic dan sales untuk filter ini.</div></td></tr>{% endfor %}</tbody>
+    {% if rows %}<tfoot><tr><th colspan="3">Total</th><td>{{ totals.visitors|floatformat:"0g" }}</td><td>{{ totals.qty|floatformat:"0g" }}</td><td>Rp {{ totals.gross|floatformat:"0g" }}</td><td>{% if totals.qty_per_1000 != None %}{{ totals.qty_per_1000|floatformat:"2g" }}{% else %}—{% endif %}</td><td>{% if totals.gross_per_1000 != None %}Rp {{ totals.gross_per_1000|floatformat:"0g" }}{% else %}—{% endif %}</td></tr></tfoot>{% endif %}
+  </table></div>
+</section>
+
+{% include "includes/multi_select_script.html" %}
+{% endblock %}

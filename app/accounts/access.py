@@ -26,7 +26,7 @@ MODULE_TABS = {
             "product_performance",
             "Product Performance",
             "Sales",
-            ("sales:product_performance", "sales:pivot_analysis"),
+            ("sales:product_performance", "sales:pivot_analysis", "sales:traffic_analysis"),
         ),
         ("pareto", "Pareto Analysis", "Sales", ("sales:pareto",)),
         ("transactions", "Transaction", "Sales", ("sales:transactions",)),

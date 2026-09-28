@@ -37,10 +37,95 @@ class SalesReportRouteTests(TestCase):
         return product, sku
 
     def test_sales_report_routes_render(self):
-        for name in ("sales:planning_builder", "sales:product_performance", "sales:pivot_analysis", "sales:pareto", "sales:transactions", "sales:input_transaction"):
+        for name in ("sales:planning_builder", "sales:product_performance", "sales:pivot_analysis", "sales:traffic_analysis", "sales:pareto", "sales:transactions", "sales:input_transaction"):
             with self.subTest(name=name):
                 response = self.client.get(reverse(name))
                 self.assertEqual(response.status_code, 200)
+
+    def test_traffic_analysis_uses_gross_sales_and_unique_visitors(self):
+        status = ProductStatus.objects.create(code="TRAFFIC-REGULAR", name="Regular")
+        category = Category.objects.create(code="TRAFFIC-KNIT", name="Knitwear")
+        product = Product.objects.create(
+            code="TRAFFIC-PRODUCT",
+            name="Traffic Product",
+            status=status,
+            category=category,
+        )
+        variant = ProductVariant.objects.create(product=product, name="Default")
+        sku = SKU.objects.create(
+            sku="TRAFFIC-SKU",
+            product_variant=variant,
+            current_retail_price=Decimal("50000"),
+        )
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="TRAFFIC-ORDER",
+            order_datetime=timezone.make_aware(datetime(2026, 8, 10, 10, 0)),
+            order_date=date(2026, 8, 10),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku=sku,
+            product_name_snapshot=product.name,
+            product_status_snapshot=status.name,
+            category_snapshot=category.name,
+            quantity=6,
+            net_unit_price=Decimal("40000"),
+            retail_price_snapshot=Decimal("50000"),
+            total_gross_sales=Decimal("300000"),
+            total_net_sales=Decimal("240000"),
+        )
+        raw = RawFile.objects.create(
+            dataset_type=RawFile.DatasetType.TRAFFIC_SHOPEE,
+            original_filename="traffic-analysis.xlsx",
+            storage_path="tests/traffic-analysis.xlsx",
+            checksum_sha256="f" * 64,
+            byte_size=1,
+            detected_format="xlsx",
+            uploaded_by=self.user,
+        )
+        batch = TrafficImportBatch.objects.create(
+            raw_file=raw,
+            source="Shopee",
+            period_start=date(2026, 8, 1),
+            period_end=date(2026, 8, 31),
+            status=TrafficImportBatch.Status.COMMITTED,
+        )
+        for key, visitors in (("ROW-1", 10), ("ROW-2", 12)):
+            TrafficProductMetric.objects.create(
+                source="Shopee",
+                period_start=date(2026, 8, 1),
+                period_end=date(2026, 8, 31),
+                product=product,
+                traffic_product_key=key,
+                marketplace_product_code_snapshot="SAME-LISTING",
+                product_name_snapshot=product.name,
+                visitors=visitors,
+                source_batch=batch,
+            )
+
+        response = self.client.get(reverse("sales:traffic_analysis"), {
+            "month": "2026-08",
+            "source": "Shopee",
+            "product_status": status.name,
+            "category": category.name,
+            "product": product.name,
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["rows"]), 1)
+        row = response.context["rows"][0]
+        self.assertEqual(row["visitors"], 12)
+        self.assertEqual(row["qty_per_1000"], Decimal("500"))
+        self.assertEqual(row["gross_per_1000"], Decimal("25000000"))
+        self.assertContains(response, "Qty Sold / 1.000 Traffic")
+        self.assertContains(response, "Gross Sales / 1.000 Traffic")
 
     def test_only_sales_approver_can_delete_draft_scenario(self):
         product, sku = self._planning_product("DELETE-SCENARIO")

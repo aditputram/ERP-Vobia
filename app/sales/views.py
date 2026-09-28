@@ -1317,6 +1317,42 @@ def _filter_options():
     }
 
 
+def _traffic_analysis_filter_state(request):
+    products = Product.objects.select_related("status", "category").all()
+    product_statuses = tuple(
+        products.order_by("status__name").values_list("status__name", flat=True).distinct()
+    )
+    selected_product_statuses = _valid_multi_values(
+        request, "product_status", product_statuses
+    )
+    if selected_product_statuses:
+        products = products.filter(status__name__in=selected_product_statuses)
+
+    categories = tuple(
+        products.order_by("category__name").values_list("category__name", flat=True).distinct()
+    )
+    selected_categories = _valid_multi_values(request, "category", categories)
+    if selected_categories:
+        products = products.filter(category__name__in=selected_categories)
+
+    product_options = tuple(
+        products.order_by("name").values_list("name", flat=True).distinct()
+    )
+    selected_products = _valid_multi_values(request, "product", product_options)
+    if selected_products:
+        products = products.filter(name__in=selected_products)
+
+    return {
+        "products_queryset": products,
+        "product_statuses": product_statuses,
+        "categories": categories,
+        "products": product_options,
+        "selected_product_statuses": selected_product_statuses,
+        "selected_categories": selected_categories,
+        "selected_products": selected_products,
+    }
+
+
 def _totals(qs):
     values = qs.aggregate(
         qty=Sum("quantity"),
@@ -1841,6 +1877,147 @@ def dashboard(request):
         "selected_source_groups": source_groups,
         "legacy_exceptions": lines.filter(sku__isnull=True).count(),
         "includes_historical": start < date(2026, 8, 1),
+    })
+
+
+@login_required
+def traffic_analysis(request):
+    sales_dates = SalesOrderLine.objects.filter(is_counted=True).aggregate(
+        earliest=Min("order__order_date"),
+        latest=Max("order__order_date"),
+    )
+    traffic_dates = TrafficProductMetric.objects.aggregate(
+        earliest=Min("period_start"),
+        latest=Max("period_end"),
+    )
+    latest = max(
+        value for value in (sales_dates["latest"], traffic_dates["latest"], date.today()) if value
+    )
+    earliest = min(
+        value for value in (sales_dates["earliest"], traffic_dates["earliest"], latest) if value
+    )
+    month_options = _pareto_period_options(earliest, latest)["month"]
+    valid_months = {item["value"] for item in month_options}
+    selected_month = request.GET.get("month", latest.strftime("%Y-%m"))
+    if selected_month not in valid_months:
+        selected_month = month_options[-1]["value"]
+    start, end = _pareto_period_bounds("month", selected_month)
+
+    source_options = ("Shopee", "Tiktok")
+    selected_sources = _valid_multi_values(request, "source", source_options)
+    active_sources = selected_sources or list(source_options)
+    filter_state = _traffic_analysis_filter_state(request)
+    scoped_products = list(filter_state.pop("products_queryset"))
+    product_by_id = {product.id: product for product in scoped_products}
+    allowed_product_ids = set(product_by_id)
+    name_to_ids = {}
+    for product in scoped_products:
+        name_to_ids.setdefault(product.name, []).append(product.id)
+
+    sales_by_product = {}
+    sales_lines = SalesOrderLine.objects.filter(
+        is_counted=True,
+        order__order_date__range=(start, end),
+        order__source__in=active_sources,
+    ).filter(
+        Q(sku__product_variant__product_id__in=allowed_product_ids)
+        | Q(sku__isnull=True, product_name_snapshot__in=name_to_ids)
+    )
+    for sale in sales_lines.values(
+        "sku__product_variant__product_id", "product_name_snapshot"
+    ).annotate(qty=Sum("quantity"), gross=Sum("total_gross_sales")):
+        product_id = sale["sku__product_variant__product_id"]
+        if not product_id:
+            matches = name_to_ids.get(sale["product_name_snapshot"], ())
+            product_id = matches[0] if len(matches) == 1 else None
+        if product_id not in allowed_product_ids:
+            continue
+        current = sales_by_product.setdefault(product_id, {"qty": 0, "gross": Decimal("0")})
+        current["qty"] += sale["qty"] or 0
+        current["gross"] += sale["gross"] or Decimal("0")
+
+    mapping_ids = {}
+    for mapping in MarketplaceProductMapping.objects.filter(
+        product_id__in=allowed_product_ids,
+        source__in=active_sources,
+        is_active=True,
+    ).values("source", "marketplace_product_code", "product_id"):
+        mapping_ids.setdefault(
+            (mapping["source"], mapping["marketplace_product_code"]), set()
+        ).add(mapping["product_id"])
+
+    listing_visitors = {}
+    traffic = TrafficProductMetric.objects.filter(
+        period_start__lte=end,
+        period_end__gte=start,
+        source__in=active_sources,
+    ).values(
+        "product_id",
+        "source",
+        "marketplace_product_code_snapshot",
+        "traffic_product_key",
+        "visitors",
+    )
+    for metric in traffic:
+        product_id = metric["product_id"]
+        if not product_id:
+            matches = mapping_ids.get(
+                (metric["source"], metric["marketplace_product_code_snapshot"]), ()
+            )
+            product_id = matches[0] if len(matches) == 1 else None
+        if product_id not in allowed_product_ids:
+            continue
+        listing = metric["marketplace_product_code_snapshot"] or metric["traffic_product_key"]
+        key = (product_id, metric["source"], listing)
+        listing_visitors[key] = max(listing_visitors.get(key, 0), metric["visitors"] or 0)
+
+    visitors_by_product = {}
+    for (product_id, _source, _listing), visitors in listing_visitors.items():
+        visitors_by_product[product_id] = visitors_by_product.get(product_id, 0) + visitors
+
+    rows = []
+    for product_id in set(sales_by_product) | set(visitors_by_product):
+        product = product_by_id[product_id]
+        sales = sales_by_product.get(product_id, {})
+        visitors = visitors_by_product.get(product_id, 0)
+        qty = sales.get("qty") or 0
+        gross = sales.get("gross") or Decimal("0")
+        rows.append({
+            "product": product,
+            "visitors": visitors,
+            "qty": qty,
+            "gross": gross,
+            "qty_per_1000": Decimal(qty) * Decimal("1000") / visitors if visitors else None,
+            "gross_per_1000": gross * Decimal("1000") / visitors if visitors else None,
+        })
+    rows.sort(key=lambda row: (
+        row["gross_per_1000"] is None,
+        -(row["gross_per_1000"] or Decimal("0")),
+        row["product"].name,
+    ))
+
+    totals = {
+        "visitors": sum(row["visitors"] for row in rows),
+        "qty": sum(row["qty"] for row in rows),
+        "gross": sum((row["gross"] for row in rows), Decimal("0")),
+    }
+    totals["qty_per_1000"] = (
+        Decimal(totals["qty"]) * Decimal("1000") / totals["visitors"]
+        if totals["visitors"] else None
+    )
+    totals["gross_per_1000"] = (
+        totals["gross"] * Decimal("1000") / totals["visitors"]
+        if totals["visitors"] else None
+    )
+    return render(request, "sales/traffic_analysis.html", {
+        "rows": rows,
+        "totals": totals,
+        "month_options": month_options,
+        "selected_month": selected_month,
+        "selected_month_label": date_format(start, "M Y"),
+        "sources": source_options,
+        "selected_sources": selected_sources,
+        **filter_state,
     })
 
 

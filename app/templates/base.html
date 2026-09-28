@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="light">
     <title>Vobia Space - {% block title %}ERP{% endblock %}</title>
     <link rel="icon" type="image/png" href="{% static 'img/vobia-tiktok-app-icon.png' %}?v=20260831">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260928-05">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260928-06">
     <script src="{% static 'js/app.js' %}?v=20260921-01" defer></script>
 </head>
 <body{% if request.GET.embed == "1" %} class="chat-embedded"{% endif %}>
@@ -144,6 +144,7 @@
                 {% if tab_permissions.sales.product_performance %}
                 <a class="nav-item {% if request.resolver_match.url_name == 'product_performance' %}active{% endif %}" href="{% url 'sales:product_performance' %}"><span>Product Performance</span></a>
                 <a class="nav-item {% if request.resolver_match.url_name == 'pivot_analysis' %}active{% endif %}" href="{% url 'sales:pivot_analysis' %}"><span>Pivot Analysis</span></a>
+                <a class="nav-item {% if request.resolver_match.url_name == 'traffic_analysis' %}active{% endif %}" href="{% url 'sales:traffic_analysis' %}"><span>Traffic Analysis</span></a>
                 {% endif %}
                 {% if tab_permissions.sales.pareto %}
                 <a class="nav-item {% if request.resolver_match.url_name == 'pareto' %}active{% endif %}" href="{% url 'sales:pareto' %}"><span>Pareto Analysis</span></a>

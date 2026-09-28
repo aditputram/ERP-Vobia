@@ -701,10 +701,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .product-performance-filter .secondary-button { min-height:40px; align-self:end; }
 .product-pivot-wrap { max-height:680px; overflow:auto; border:1px solid var(--line); border-radius:10px; }
 .product-pivot-table { width:max-content; min-width:100%; }
-.product-pivot-table th,.product-pivot-table td { min-width:105px; white-space:nowrap; text-align:right; }
-.product-pivot-table thead th { text-align:center; }
-.product-pivot-table .pivot-sticky-column { position:sticky; left:0; z-index:2; min-width:190px; max-width:260px; background:#fff; text-align:left; }
-.product-pivot-table thead .pivot-sticky-column { z-index:4; background:#f4f3ee; }
+.product-pivot-table th,.product-pivot-table td { min-width:82px; padding:6px 7px; white-space:nowrap; text-align:center; font-size:9px; line-height:1.2; }
+.product-pivot-table thead th { position:sticky; top:0; z-index:3; height:30px; background:#f4f3ee; text-align:center; }
+.product-pivot-table thead tr:nth-child(2) th { top:30px; }
+.product-pivot-table .pivot-sticky-column { position:sticky; left:0; z-index:2; width:150px; min-width:150px; max-width:150px; overflow:hidden; background:#fff; text-align:left; text-overflow:ellipsis; }
+.product-pivot-table thead .pivot-sticky-column { top:0; z-index:5; background:#f4f3ee; }
 .product-pivot-table tfoot .pivot-sticky-column,.product-pivot-table .pivot-total-column { background:#f3f8df; font-weight:850; }
 .product-pivot-table tfoot td,.product-pivot-table tfoot th { border-top:1px solid #ccd99d; font-weight:850; }
 @media(max-width:1150px) { .product-performance-filter { grid-template-columns:repeat(3,minmax(0,1fr)); } }

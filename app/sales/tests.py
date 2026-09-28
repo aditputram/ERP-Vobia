@@ -51,6 +51,13 @@ class SalesReportRouteTests(TestCase):
             status=status,
             category=category,
         )
+        second_status = ProductStatus.objects.create(code="TRAFFIC-ESSENTIAL", name="Essential+")
+        Product.objects.create(
+            code="TRAFFIC-SECOND-PRODUCT",
+            name="Second Traffic Product",
+            status=second_status,
+            category=category,
+        )
         variant = ProductVariant.objects.create(product=product, name="Default")
         sku = SKU.objects.create(
             sku="TRAFFIC-SKU",
@@ -97,12 +104,17 @@ class SalesReportRouteTests(TestCase):
             period_end=date(2026, 8, 31),
             status=TrafficImportBatch.Status.COMMITTED,
         )
+        MarketplaceProductMapping.objects.create(
+            source="Shopee",
+            marketplace_product_code="SAME-LISTING",
+            product=product,
+            valid_from=date(2026, 8, 1),
+        )
         for key, visitors in (("ROW-1", 10), ("ROW-2", 12)):
             TrafficProductMetric.objects.create(
                 source="Shopee",
                 period_start=date(2026, 8, 1),
                 period_end=date(2026, 8, 31),
-                product=product,
                 traffic_product_key=key,
                 marketplace_product_code_snapshot="SAME-LISTING",
                 product_name_snapshot=product.name,
@@ -113,7 +125,7 @@ class SalesReportRouteTests(TestCase):
         response = self.client.get(reverse("sales:traffic_analysis"), {
             "month": "2026-08",
             "source": "Shopee",
-            "product_status": status.name,
+            "product_status": [status.name, second_status.name],
             "category": category.name,
             "product": product.name,
         })

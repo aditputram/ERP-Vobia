@@ -1964,7 +1964,7 @@ def traffic_analysis(request):
             matches = mapping_ids.get(
                 (metric["source"], metric["marketplace_product_code_snapshot"]), ()
             )
-            product_id = matches[0] if len(matches) == 1 else None
+            product_id = next(iter(matches)) if len(matches) == 1 else None
         if product_id not in allowed_product_ids:
             continue
         listing = metric["marketplace_product_code_snapshot"] or metric["traffic_product_key"]

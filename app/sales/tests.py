@@ -1803,6 +1803,71 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(response, "Knitwear")
         self.assertNotContains(self.client.get(reverse("sales:product_performance")), "PIVOT ANALYSIS")
 
+    def test_pivot_str_uses_sales_qty_divided_by_beginning_qty(self):
+        status = ProductStatus.objects.create(code="STR-REGULAR", name="STR Regular")
+        category = Category.objects.create(code="STR-KNIT", name="STR Knitwear")
+        product = Product.objects.create(
+            code="STR-PRODUCT",
+            name="STR Product",
+            status=status,
+            category=category,
+        )
+        variant = ProductVariant.objects.create(product=product, name="Default")
+        sku = SKU.objects.create(sku="STR-SKU", product_variant=variant, size="M")
+        batch = MerchandisingSnapshotBatch.objects.create(
+            source_workbook_id="str-pivot",
+            source_file_name="str-pivot.xlsx",
+            source_sha256="f" * 64,
+            imported_by=self.user,
+            is_active=True,
+        )
+        MerchandisingMonthlySnapshot.objects.create(
+            batch=batch,
+            sku=sku,
+            source_row=1,
+            month=date(2026, 8, 1),
+            status_snapshot=status.name,
+            product_snapshot=product.name,
+            category_snapshot=category.name,
+            beginning_qty=Decimal("10"),
+        )
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="STR-PIVOT-1",
+            order_datetime=timezone.make_aware(datetime(2026, 8, 10, 10, 0)),
+            order_date=date(2026, 8, 10),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku=sku,
+            product_name_snapshot=product.name,
+            product_status_snapshot=status.name,
+            category_snapshot=category.name,
+            quantity=2,
+            net_unit_price=Decimal("100000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("200000"),
+            total_net_sales=Decimal("200000"),
+        )
+
+        response = self.client.get(reverse("sales:pivot_analysis"), {
+            "period_type": "month",
+            "period": "2026-08",
+            "pivot_row": "product",
+            "pivot_column": "month",
+            "metric": "str",
+        })
+
+        pivot = response.context["pivot"]
+        self.assertEqual([item["label"] for item in pivot["metrics"]], ["STR"])
+        self.assertEqual(pivot["grand_total"][0]["value"], Decimal("20"))
+
     def test_product_performance_cascades_status_category_and_product_options(self):
         fixtures = (
             ("Regular", "Knitwear", "Product Knit"),

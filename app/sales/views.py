@@ -24,6 +24,7 @@ from inventory.models import InventoryMovement
 from inventory.services.fifo import CUTOVER_DATE
 from inventory.services.reporting import inventory_summary_rows
 from master_data.models import Category, MarketplaceProductMapping, Product, ProductStatus, SKU, Subcategory
+from merchandising.models import MerchandisingMonthlySnapshot
 from merchandising.services.planning_activity import (
     filter_products_by_planning_activity,
     planning_activity_snapshot,
@@ -69,6 +70,7 @@ PRODUCT_PERFORMANCE_METRICS = (
     ("gpm_rate", "GPM Rate", "percent"),
     ("aov", "AOV", "money"),
     ("avg_price", "Avg. Selling Price", "money"),
+    ("str", "STR", "percent"),
 )
 
 
@@ -1561,12 +1563,57 @@ def _product_performance_pivot(lines, request):
         "category": F("category_snapshot"),
     }
 
+    stock_keys = list(
+        lines.filter(sku_id__isnull=False)
+        .annotate(stock_month=TruncMonth("order__order_date"))
+        .values_list("sku_id", "stock_month")
+        .distinct()
+    )
+    active_batch_id = (
+        MerchandisingMonthlySnapshot.objects.filter(batch__is_active=True)
+        .order_by("-batch__imported_at")
+        .values_list("batch_id", flat=True)
+        .first()
+    )
+    beginning_by_stock_key = {}
+    if active_batch_id and stock_keys:
+        sku_ids = {sku_id for sku_id, _month in stock_keys}
+        months = {month for _sku_id, month in stock_keys}
+        beginning_by_stock_key = {
+            (row["sku_id"], row["month"]): row["beginning_qty"]
+            for row in MerchandisingMonthlySnapshot.objects.filter(
+                batch_id=active_batch_id,
+                sku_id__in=sku_ids,
+                month__in=months,
+            ).values("sku_id", "month", "beginning_qty")
+        }
+
+    def beginning_totals(*dimension_names):
+        annotations = {
+            f"pivot_{index}": dimensions[name]
+            for index, name in enumerate(dimension_names)
+        }
+        totals = {}
+        rows = (
+            lines.filter(sku_id__isnull=False)
+            .annotate(**annotations, stock_month=TruncMonth("order__order_date"))
+            .values(*annotations, "sku_id", "stock_month")
+            .distinct()
+        )
+        for row in rows:
+            beginning = beginning_by_stock_key.get((row["sku_id"], row["stock_month"]))
+            if beginning is None:
+                continue
+            key = tuple(row[f"pivot_{index}"] for index in range(len(dimension_names)))
+            totals[key] = totals.get(key, Decimal("0")) + beginning
+        return totals
+
     def aggregate(*dimension_names):
         annotations = {
             f"pivot_{index}": dimensions[name]
             for index, name in enumerate(dimension_names)
         }
-        return list(
+        rows = list(
             lines.annotate(**annotations)
             .values(*annotations)
             .annotate(
@@ -1579,6 +1626,11 @@ def _product_performance_pivot(lines, request):
             )
             .order_by(*annotations)
         )
+        beginnings = beginning_totals(*dimension_names)
+        for row in rows:
+            key = tuple(row[f"pivot_{index}"] for index in range(len(dimension_names)))
+            row["beginning"] = beginnings.get(key)
+        return rows
 
     def metric_values(row):
         qty = row.get("qty") or 0
@@ -1587,6 +1639,7 @@ def _product_performance_pivot(lines, request):
         net = row.get("net") or Decimal("0")
         cogs = row.get("cogs") or Decimal("0")
         gpm = row.get("gpm") or Decimal("0")
+        beginning = row.get("beginning")
         values = {
             "qty": qty,
             "orders": orders,
@@ -1598,6 +1651,7 @@ def _product_performance_pivot(lines, request):
             "gpm_rate": gpm / gross * 100 if gross else None,
             "aov": net / orders if orders else None,
             "avg_price": net / qty if qty else None,
+            "str": Decimal(qty) / beginning * 100 if beginning else None,
         }
         return [
             {**metric, "value": values[metric["key"]]}
@@ -1620,6 +1674,7 @@ def _product_performance_pivot(lines, request):
     column_keys = list(dict.fromkeys(row["pivot_1"] for row in cell_rows))
     cells = {(row["pivot_0"], row["pivot_1"]): row for row in cell_rows}
     grand_totals = _totals(lines)
+    grand_totals["beginning"] = beginning_totals().get(())
 
     return {
         "dimension_options": [

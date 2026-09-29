@@ -503,6 +503,146 @@ def _sales_plan_summary(request):
     }
 
 
+def _sales_forecast_matrix(request):
+    targets = SalesPlanSKU.objects.all()
+    bounds = targets.aggregate(start=Min("plan__month"), end=Max("plan__month"))
+    default_month = _shift_month(timezone.localdate().replace(day=1), 1)
+    start = _sales_planning_month(request.GET.get("start_month")) or bounds["start"] or default_month
+    end = _sales_planning_month(request.GET.get("end_month")) or bounds["end"] or start
+    error = ""
+    if any(request.GET.get(key) and not _sales_planning_month(request.GET[key]) for key in ("start_month", "end_month")):
+        error = "Start Month dan End Month harus berupa bulan yang valid."
+    elif start > end:
+        error = "End Month tidak boleh sebelum Start Month."
+    targets = targets.none() if error else targets.filter(plan__month__range=(start, end))
+
+    scenario_options = list(
+        SalesPlanningScenario.objects.filter(projections__sku_targets__in=targets)
+        .distinct().order_by("-created_at")
+    )
+    selected_scenario = request.GET.get("scenario", "")
+    if selected_scenario and not any(str(item.id) == selected_scenario for item in scenario_options):
+        selected_scenario = ""
+    if selected_scenario:
+        targets = targets.filter(plan__scenario_id=selected_scenario)
+
+    valid_statuses = {key for key, _label in SalesPlanningScenario.Status.choices}
+    selected_status = request.GET.get("scenario_status", "")
+    if selected_status not in valid_statuses:
+        selected_status = ""
+    if selected_status:
+        targets = targets.filter(plan__scenario__status=selected_status)
+
+    product_statuses = list(
+        targets.exclude(plan__product__status__name="")
+        .order_by("plan__product__status__name")
+        .values_list("plan__product__status__name", flat=True).distinct()
+    )
+    selected_product_status = request.GET.get("product_status", "")
+    if selected_product_status not in product_statuses:
+        selected_product_status = ""
+    if selected_product_status:
+        targets = targets.filter(plan__product__status__name=selected_product_status)
+
+    categories = list(
+        targets.exclude(plan__product__category__name="")
+        .order_by("plan__product__category__name")
+        .values_list("plan__product__category__name", flat=True).distinct()
+    )
+    selected_category = request.GET.get("category", "")
+    if selected_category not in categories:
+        selected_category = ""
+    if selected_category:
+        targets = targets.filter(plan__product__category__name=selected_category)
+
+    product_options = list(
+        targets.order_by("plan__product__name", "plan__product_id")
+        .values("plan__product_id", "plan__product__name").distinct()
+    )
+    selected_product = request.GET.get("product", "")
+    if selected_product and not any(str(item["plan__product_id"]) == selected_product for item in product_options):
+        selected_product = ""
+    if selected_product:
+        targets = targets.filter(plan__product_id=selected_product)
+
+    metric_definitions = {
+        "qty": {"key": "qty", "label": "Qty", "kind": "number"},
+        "gross": {"key": "gross", "label": "Gross Sales", "kind": "money"},
+    }
+    selected_metric_keys = [
+        key for key in ("qty", "gross") if key in request.GET.getlist("metric")
+    ] or ["qty", "gross"]
+    metrics = [metric_definitions[key] for key in selected_metric_keys]
+    aggregated = list(
+        targets.values("plan__product_id", "plan__product__name", "plan__month")
+        .annotate(qty=Sum("quantity_target"), gross=Sum("gross_sales_target"))
+        .order_by("plan__product__name", "plan__month")
+    )
+
+    months = []
+    month = start
+    while month <= end:
+        months.append(month)
+        month = _shift_month(month, 1)
+
+    def values(qty=0, gross=Decimal("0")):
+        raw = {"qty": qty or 0, "gross": gross or Decimal("0")}
+        return [{**metric, "value": raw[metric["key"]]} for metric in metrics]
+
+    products = {}
+    month_totals = {month: {"qty": 0, "gross": Decimal("0")} for month in months}
+    for item in aggregated:
+        product = products.setdefault(item["plan__product_id"], {
+            "label": item["plan__product__name"],
+            "months": {},
+            "qty": 0,
+            "gross": Decimal("0"),
+        })
+        product["months"][item["plan__month"]] = item
+        product["qty"] += item["qty"] or 0
+        product["gross"] += item["gross"] or Decimal("0")
+        month_totals[item["plan__month"]]["qty"] += item["qty"] or 0
+        month_totals[item["plan__month"]]["gross"] += item["gross"] or Decimal("0")
+
+    rows = []
+    for product in products.values():
+        cells = []
+        for month in months:
+            item = product["months"].get(month, {})
+            cells.append({"values": values(item.get("qty"), item.get("gross"))})
+        rows.append({
+            "label": product["label"],
+            "cells": cells,
+            "total": values(product["qty"], product["gross"]),
+        })
+
+    grand_qty = sum(item["qty"] for item in month_totals.values())
+    grand_gross = sum((item["gross"] for item in month_totals.values()), Decimal("0"))
+    return {
+        "start": start,
+        "end": end,
+        "error": error,
+        "scenario_options": scenario_options,
+        "selected_scenario": selected_scenario,
+        "selected_status": selected_status,
+        "product_statuses": product_statuses,
+        "selected_product_status": selected_product_status,
+        "categories": categories,
+        "selected_category": selected_category,
+        "product_options": product_options,
+        "selected_product": selected_product,
+        "metric_options": [
+            {**metric_definitions[key], "selected": key in selected_metric_keys}
+            for key in ("qty", "gross")
+        ],
+        "metrics": metrics,
+        "months": months,
+        "rows": rows,
+        "month_totals": [{"values": values(**month_totals[month])} for month in months],
+        "grand_total": values(grand_qty, grand_gross),
+    }
+
+
 def _sales_projection_preview(request, scenario, month):
     if scenario.status != SalesPlanningScenario.Status.DRAFT:
         raise ValidationError("Scenario sudah approved dan tidak dapat diubah.")
@@ -1008,6 +1148,13 @@ def planning_filter_options(request):
         "categories": list(categories.values("id", "name")),
         "subcategories": list(subcategories.values("id", "name")),
         "products": list(products.order_by("name", "code").values("id", "name")),
+    })
+
+
+@login_required
+def forecast(request):
+    return render(request, "sales/forecast.html", {
+        "forecast": _sales_forecast_matrix(request),
     })
 
 

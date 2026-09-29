@@ -37,10 +37,51 @@ class SalesReportRouteTests(TestCase):
         return product, sku
 
     def test_sales_report_routes_render(self):
-        for name in ("sales:planning_builder", "sales:product_performance", "sales:pivot_analysis", "sales:traffic_analysis", "sales:pareto", "sales:transactions", "sales:input_transaction"):
+        for name in ("sales:planning_builder", "sales:forecast", "sales:product_performance", "sales:pivot_analysis", "sales:traffic_analysis", "sales:pareto", "sales:transactions", "sales:input_transaction"):
             with self.subTest(name=name):
                 response = self.client.get(reverse(name))
                 self.assertEqual(response.status_code, 200)
+
+    def test_forecast_reads_saved_targets_into_product_month_matrix(self):
+        product, sku = self._planning_product("FORECAST-A")
+        other, other_sku = self._planning_product("FORECAST-B")
+        scenario = SalesPlanningScenario.objects.create(
+            name="Forecast Q4",
+            start_month=date(2026, 10, 1),
+            end_month=date(2026, 11, 1),
+            created_by=self.user,
+        )
+        for item_product, item_sku, month, qty, gross in (
+            (product, sku, date(2026, 10, 1), 10, Decimal("1000000")),
+            (product, sku, date(2026, 11, 1), 12, Decimal("1200000")),
+            (other, other_sku, date(2026, 11, 1), 5, Decimal("500000")),
+        ):
+            plan = SalesPlan.objects.create(
+                scenario=scenario,
+                product=item_product,
+                month=month,
+                quantity_target=qty,
+                gross_sales_target=gross,
+            )
+            SalesPlanSKU.objects.create(
+                plan=plan,
+                sku=item_sku,
+                quantity_target=qty,
+                gross_sales_target=gross,
+            )
+
+        response = self.client.get(reverse("sales:forecast"), {
+            "start_month": "2026-10",
+            "end_month": "2026-11",
+        })
+
+        self.assertEqual(response.status_code, 200)
+        forecast = response.context["forecast"]
+        self.assertEqual(forecast["months"], [date(2026, 10, 1), date(2026, 11, 1)])
+        self.assertEqual([row["label"] for row in forecast["rows"]], [product.name, other.name])
+        self.assertEqual([item["value"] for item in forecast["grand_total"]], [27, Decimal("2700000")])
+        self.assertContains(response, "Planning Builder")
+        self.assertContains(response, "Forecast")
 
     def test_traffic_analysis_uses_gross_sales_and_unique_visitors(self):
         status = ProductStatus.objects.create(code="TRAFFIC-REGULAR", name="Regular")

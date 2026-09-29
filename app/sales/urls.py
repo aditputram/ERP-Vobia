@@ -10,6 +10,7 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("planning-builder/", views.planning_builder, name="planning_builder"),
     path("planning-builder/filter-options/", views.planning_filter_options, name="planning_filter_options"),
+    path("forecast/", views.forecast, name="forecast"),
     path("product-performance/", views.product_performance, name="product_performance"),
     path("pivot-analysis/", views.product_performance, {"pivot_only": True}, name="pivot_analysis"),
     path("traffic-analysis/", views.traffic_analysis, name="traffic_analysis"),

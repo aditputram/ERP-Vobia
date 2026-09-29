@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Sales Forecast · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header"><div><p class="eyebrow">SALES · SALES PLANNING</p><h1>Forecast</h1><p>Target penjualan yang sudah tersimpan di Planning Builder.</p></div></header>
+
+<form method="get" class="panel report-filter product-performance-filter" data-auto-submit data-preserve-scroll>
+  <label>Mulai<input type="month" name="start_month" value="{{ forecast.start|date:'Y-m' }}"></label>
+  <label>Sampai<input type="month" name="end_month" value="{{ forecast.end|date:'Y-m' }}"></label>
+  <label>Scenario<select name="scenario"><option value="">All Scenarios</option>{% for item in forecast.scenario_options %}<option value="{{ item.id }}" {% if forecast.selected_scenario == item.id|stringformat:'s' %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+  <label>Status Scenario<select name="scenario_status"><option value="">All Status</option><option value="DRAFT" {% if forecast.selected_status == 'DRAFT' %}selected{% endif %}>Draft</option><option value="APPROVED" {% if forecast.selected_status == 'APPROVED' %}selected{% endif %}>Approved</option></select></label>
+  <label>Status Produk<select name="product_status"><option value="">All Product Status</option>{% for item in forecast.product_statuses %}<option value="{{ item }}" {% if forecast.selected_product_status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+  <label>Category<select name="category"><option value="">All Categories</option>{% for item in forecast.categories %}<option value="{{ item }}" {% if forecast.selected_category == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+  <label>Product<select name="product"><option value="">All Products</option>{% for item in forecast.product_options %}<option value="{{ item.plan__product_id }}" {% if forecast.selected_product == item.plan__product_id|stringformat:'s' %}selected{% endif %}>{{ item.plan__product__name }}</option>{% endfor %}</select></label>
+  <div class="filter-field multi-select-field" data-multi-select data-all-label="Pilih Metric">
+    <span class="filter-label">Metric</span>
+    <button class="multi-select-trigger" type="button" aria-expanded="false"><span data-filter-summary>{% if forecast.metrics|length == 1 %}{{ forecast.metrics.0.label }}{% else %}{{ forecast.metrics|length }} selected{% endif %}</span><span aria-hidden="true">⌄</span></button>
+    <div class="multi-select-menu" data-filter-menu hidden>
+      <label class="multi-select-search">Search Metric<input type="search" placeholder="Ketik metric..." autocomplete="off" data-filter-search></label>
+      <div class="multi-select-toolbar"><button type="button" data-filter-select-visible>Select All</button><span data-filter-result-count>{{ forecast.metric_options|length }} pilihan</span><button type="button" data-filter-clear>Clear All</button></div>
+      <div class="multi-select-options">{% for item in forecast.metric_options %}<label class="multi-select-option"><input type="checkbox" name="metric" value="{{ item.key }}" {% if item.selected %}checked{% endif %}><span>{{ item.label }}</span></label>{% endfor %}</div>
+    </div>
+  </div>
+  <a class="secondary-button" href="{% url 'sales:forecast' %}">Reset</a>
+</form>
+
+<section class="panel section-gap product-pivot-panel">
+  <div class="panel-header"><div><p class="eyebrow">SALES FORECAST</p><h2>Product × Bulan</h2><small>{{ forecast.start|date:"M Y" }} – {{ forecast.end|date:"M Y" }}</small></div><span class="pill">{{ forecast.metrics|length }} metric</span></div>
+  {% if forecast.error %}<div class="notice error">{{ forecast.error }}</div>{% endif %}
+  <div class="table-wrap product-pivot-wrap"><table class="product-pivot-table">
+    <thead><tr><th rowspan="2" class="pivot-sticky-column">Product</th>{% for month in forecast.months %}<th colspan="{{ forecast.metrics|length }}"{% if not forloop.first %} class="pivot-group-start"{% endif %}>{{ month|date:"M Y" }}</th>{% endfor %}<th colspan="{{ forecast.metrics|length }}" class="pivot-total-column pivot-group-start">Total</th></tr><tr>{% for month in forecast.months %}{% for metric in forecast.metrics %}<th{% if forloop.first and not forloop.parentloop.first %} class="pivot-group-start"{% endif %}>{{ metric.label }}</th>{% endfor %}{% endfor %}{% for metric in forecast.metrics %}<th class="pivot-total-column{% if forloop.first %} pivot-group-start{% endif %}">{{ metric.label }}</th>{% endfor %}</tr></thead>
+    <tbody>{% for row in forecast.rows %}<tr><th class="pivot-sticky-column">{{ row.label }}</th>{% for cell in row.cells %}{% for item in cell.values %}<td{% if forloop.first and not forloop.parentloop.first %} class="pivot-group-start"{% endif %}>{% include "sales/includes/pivot_value.html" with item=item %}</td>{% endfor %}{% endfor %}{% for item in row.total %}<td class="pivot-total-column{% if forloop.first %} pivot-group-start{% endif %}">{% include "sales/includes/pivot_value.html" with item=item %}</td>{% endfor %}</tr>{% empty %}<tr><td colspan="99"><div class="empty-state">Belum ada target tersimpan untuk filter ini.</div></td></tr>{% endfor %}</tbody>
+    {% if forecast.rows %}<tfoot><tr><th class="pivot-sticky-column">Total</th>{% for total in forecast.month_totals %}{% for item in total.values %}<td{% if forloop.first and not forloop.parentloop.first %} class="pivot-group-start"{% endif %}>{% include "sales/includes/pivot_value.html" with item=item %}</td>{% endfor %}{% endfor %}{% for item in forecast.grand_total %}<td class="pivot-total-column{% if forloop.first %} pivot-group-start{% endif %}">{% include "sales/includes/pivot_value.html" with item=item %}</td>{% endfor %}</tr></tfoot>{% endif %}
+  </table></div>
+</section>
+
+{% include "includes/multi_select_script.html" %}
+{% endblock %}

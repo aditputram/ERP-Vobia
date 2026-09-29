@@ -24,7 +24,7 @@ MODULE_TABS = {
         ),
         (
             "product_performance",
-            "Product Performance",
+            "Sales Analytics",
             "Sales",
             ("sales:product_performance", "sales:pivot_analysis", "sales:traffic_analysis"),
         ),

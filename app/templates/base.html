@@ -142,9 +142,12 @@
                 <a class="nav-item {% if request.resolver_match.url_name == 'planning_builder' and request.resolver_match.namespace == 'sales' %}active{% endif %}" href="{% url 'sales:planning_builder' %}"><span>Sales Planning</span></a>
                 {% endif %}
                 {% if tab_permissions.sales.product_performance %}
-                <a class="nav-item {% if request.resolver_match.url_name == 'product_performance' %}active{% endif %}" href="{% url 'sales:product_performance' %}"><span>Product Performance</span></a>
-                <a class="nav-item {% if request.resolver_match.url_name == 'pivot_analysis' %}active{% endif %}" href="{% url 'sales:pivot_analysis' %}"><span>Pivot Analysis</span></a>
-                <a class="nav-item {% if request.resolver_match.url_name == 'traffic_analysis' %}active{% endif %}" href="{% url 'sales:traffic_analysis' %}"><span>Traffic Analysis</span></a>
+                <button class="nav-item nav-group-toggle {% if request.resolver_match.url_name == 'product_performance' or request.resolver_match.url_name == 'pivot_analysis' or request.resolver_match.url_name == 'traffic_analysis' %}active{% endif %}" type="button" data-nav-group-toggle="sales-analytics" data-nav-group-active="{% if request.resolver_match.url_name == 'product_performance' or request.resolver_match.url_name == 'pivot_analysis' or request.resolver_match.url_name == 'traffic_analysis' %}true{% else %}false{% endif %}" aria-expanded="{% if request.resolver_match.url_name == 'product_performance' or request.resolver_match.url_name == 'pivot_analysis' or request.resolver_match.url_name == 'traffic_analysis' %}true{% else %}false{% endif %}"><span>Sales Analytics</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+                <div class="nav-subitems" data-nav-group-panel="sales-analytics"{% if request.resolver_match.url_name != 'product_performance' and request.resolver_match.url_name != 'pivot_analysis' and request.resolver_match.url_name != 'traffic_analysis' %} hidden{% endif %}>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'product_performance' %}active{% endif %}" href="{% url 'sales:product_performance' %}">Product Performance</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'pivot_analysis' %}active{% endif %}" href="{% url 'sales:pivot_analysis' %}">Pivot Analysis</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'traffic_analysis' %}active{% endif %}" href="{% url 'sales:traffic_analysis' %}">Traffic Analysis</a>
+                </div>
                 {% endif %}
                 {% if tab_permissions.sales.pareto %}
                 <a class="nav-item {% if request.resolver_match.url_name == 'pareto' %}active{% endif %}" href="{% url 'sales:pareto' %}"><span>Pareto Analysis</span></a>

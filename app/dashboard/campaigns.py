@@ -269,7 +269,8 @@ def campaign_detail(request, campaign_id):
             video_ids = [tiktok.video_id_from_url(item.post_url) for item in tiktok_items]
             by_id = tiktok.query_videos(video_ids)
             business_by_id, business_error = tiktok.query_business_videos(video_ids)
-            report_error = " · ".join(filter(None, (report_error, business_error)))
+            comments_by_id, comments_error = tiktok.query_business_comments(video_ids)
+            report_error = " · ".join(filter(None, (report_error, business_error, comments_error)))
             for creative_item in tiktok_items:
                 video_id = tiktok.video_id_from_url(creative_item.post_url)
                 media = by_id.get(video_id)
@@ -284,6 +285,10 @@ def campaign_detail(request, campaign_id):
                     "comments": media["comments"], "saves": business.get("favorites"), "shares": media["shares"],
                     "engagement": media["engagement"], "er": media["er"],
                 }
+                comment_data = comments_by_id.get(video_id)
+                if comment_data is not None:
+                    creative_item.comments = comment_data.get("comments", [])
+                    creative_item.comments_complete = bool(comment_data.get("complete"))
                 social["TikTok"]["matched"] += 1
                 social["TikTok"]["views"] += media["views"]
                 social["TikTok"]["engagement"] += media["engagement"]

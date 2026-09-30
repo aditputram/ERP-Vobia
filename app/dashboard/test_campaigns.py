@@ -163,9 +163,13 @@ class CampaignTests(TestCase):
         self.assertContains(response, "View Comments (1)")
         self.assertContains(response, "Great post")
 
+    @patch("dashboard.campaigns.tiktok.query_business_comments", return_value=({
+        "123": {"comments": [{"username": "viewer", "text": "TikTok bagus", "like_count": 2}], "complete": True},
+        "456": {"comments": [], "complete": True},
+    }, ""))
     @patch("dashboard.campaigns.tiktok.query_business_videos", return_value=({"123": {"reach": 800, "favorites": 300}}, ""))
     @patch("dashboard.campaigns.tiktok.query_videos")
-    def test_tiktok_creative_matches_directly_by_video_id(self, query_videos, _query_business):
+    def test_tiktok_creative_matches_directly_by_video_id(self, query_videos, _query_business, _query_comments):
         CampaignCreative.objects.create(
             campaign=self.campaign, platform="TIKTOK",
             post_url="https://www.tiktok.com/@vobia.id/video/123?lang=en",
@@ -196,11 +200,15 @@ class CampaignTests(TestCase):
         self.assertEqual(response.context["social"]["TikTok"]["reach"], 800)
         self.assertEqual(response.context["social"]["TikTok"]["avg_reach"], 800)
         self.assertContains(response, "10,00%")
+        self.assertContains(response, "View Comments (1)")
+        self.assertContains(response, "TikTok bagus")
+        self.assertContains(response, "View Comments (0)")
         self.assertNotContains(response, "Menunggu koneksi dan persetujuan API TikTok")
 
+    @patch("dashboard.campaigns.tiktok.query_business_comments", return_value=({}, ""))
     @patch("dashboard.campaigns.tiktok.query_business_videos", return_value=({}, ""))
     @patch("dashboard.campaigns.tiktok.query_videos")
-    def test_tiktok_missing_reach_stays_unavailable_instead_of_zero(self, query_videos, _query_business):
+    def test_tiktok_missing_reach_stays_unavailable_instead_of_zero(self, query_videos, _query_business, _query_comments):
         CampaignCreative.objects.create(
             campaign=self.campaign, platform="TIKTOK",
             post_url="https://www.tiktok.com/@vobia.id/video/123",
@@ -214,6 +222,8 @@ class CampaignTests(TestCase):
 
         self.assertIsNone(response.context["social"]["TikTok"]["reach"])
         self.assertIsNone(response.context["social"]["TikTok"]["avg_reach"])
+        self.assertContains(response, "Komentar TikTok belum tersedia")
+        self.assertNotContains(response, "Periksa permission komentar Instagram")
 
     def test_create_snapshots_target_and_timeline_validation(self):
         response = self.client.post(reverse("dashboard:campaign_create"), {

@@ -54,6 +54,11 @@ def business_query_path(video_ids):
     return store_path().parent / f"tiktok-business-videos-{digest}.json"
 
 
+def business_comments_query_path(video_ids):
+    digest = hashlib.sha256(",".join(video_ids).encode()).hexdigest()[:24]
+    return store_path().parent / f"tiktok-business-comments-{digest}.json"
+
+
 def write_cache(path, value):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.parent.is_symlink() or path.is_symlink():
@@ -418,6 +423,20 @@ def query_business_videos(video_ids, force=False):
         for video_id, item in (result or {}).items()
     }
     return normalized, error
+
+
+def query_business_comments(video_ids, force=False):
+    from . import tiktok_business
+
+    ids = sorted(dict.fromkeys(str(item) for item in video_ids if item))
+    if not ids or not tiktok_business.store_path().exists():
+        return {}, ""
+    result, error = cached_fetch(
+        business_comments_query_path(ids),
+        lambda: tiktok_business.fetch_video_comments(ids),
+        force=force,
+    )
+    return result or {}, error
 
 
 @never_cache

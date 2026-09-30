@@ -99,6 +99,33 @@ class TikTokConnectionTests(TestCase):
         self.assertIn("video_ids", request_url)
         self.assertNotIn("cursor=0", request_url)
 
+    @patch.object(tiktok_business, "access_token", return_value="BUSINESS_PRIVATE")
+    @patch.object(tiktok_business, "api_request")
+    def test_business_video_comments_returns_newest_public_comments(self, api_request, _token):
+        api_request.return_value = {
+            "comments": [{
+                "comment_id": "comment-1",
+                "unique_identifier": "viewer.one",
+                "display_name": "Viewer One",
+                "text": "Bagus banget",
+                "create_time": "1788048000",
+                "likes": 7,
+            }],
+            "has_more": True,
+        }
+
+        result = tiktok_business.fetch_video_comments(["123"], saved={"open_id": "business-1"})
+
+        self.assertEqual(result["123"]["comments"][0]["username"], "viewer.one")
+        self.assertEqual(result["123"]["comments"][0]["text"], "Bagus banget")
+        self.assertEqual(result["123"]["comments"][0]["like_count"], 7)
+        self.assertFalse(result["123"]["complete"])
+        request_url = api_request.call_args.args[0]
+        self.assertIn("business_id=business-1", request_url)
+        self.assertIn("video_id=123", request_url)
+        self.assertIn("status=PUBLIC", request_url)
+        self.assertIn("max_count=20", request_url)
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

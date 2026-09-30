@@ -290,6 +290,44 @@ def fetch_video_insights(video_ids, *, saved=None, token=None):
 
 
 @sensitive_variables()
+def fetch_video_comments(video_ids, *, saved=None, token=None):
+    """Fetch the 20 newest public comments for each owned TikTok video."""
+    saved = saved or load_connection()
+    token = token or access_token()
+    results = {}
+    for video_id in dict.fromkeys(str(item) for item in video_ids if item):
+        page = api_request(
+            "https://business-api.tiktok.com/open_api/v1.3/business/comment/list/?" + urlencode({
+                "business_id": saved["open_id"],
+                "video_id": video_id,
+                "status": "PUBLIC",
+                "sort_field": "create_time",
+                "sort_order": "desc",
+                "cursor": 0,
+                "max_count": 20,
+            }),
+            token=token,
+        )
+        comments = []
+        for item in page.get("comments", []):
+            if not isinstance(item, dict):
+                continue
+            username = item.get("unique_identifier") or item.get("username") or item.get("display_name") or "TikTok user"
+            comments.append({
+                "id": str(item.get("comment_id") or "")[:80],
+                "username": str(username).lstrip("@")[:80],
+                "text": str(item.get("text") or "")[:2000],
+                "timestamp": str(item.get("create_time") or "")[:40],
+                "like_count": nonnegative_int(item.get("likes", item.get("like_count"))),
+            })
+        results[video_id] = {
+            "comments": comments,
+            "complete": not bool(page.get("has_more")),
+        }
+    return results
+
+
+@sensitive_variables()
 def fetch_report(start, end):
     saved = load_connection()
     token = access_token()

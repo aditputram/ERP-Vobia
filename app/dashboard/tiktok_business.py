@@ -5,6 +5,7 @@ import os
 import secrets
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
 from urllib.error import HTTPError
@@ -294,8 +295,11 @@ def fetch_video_comments(video_ids, *, saved=None, token=None):
     """Fetch the 20 newest public comments for each owned TikTok video."""
     saved = saved or load_connection()
     token = token or access_token()
-    results = {}
-    for video_id in dict.fromkeys(str(item) for item in video_ids if item):
+    ids = list(dict.fromkeys(str(item) for item in video_ids if item))
+    if not ids:
+        return {}
+
+    def fetch_one(video_id):
         page = api_request(
             "https://business-api.tiktok.com/open_api/v1.3/business/comment/list/?" + urlencode({
                 "business_id": saved["open_id"],
@@ -320,11 +324,13 @@ def fetch_video_comments(video_ids, *, saved=None, token=None):
                 "timestamp": str(item.get("create_time") or "")[:40],
                 "like_count": nonnegative_int(item.get("likes", item.get("like_count"))),
             })
-        results[video_id] = {
+        return video_id, {
             "comments": comments,
             "complete": not bool(page.get("has_more")),
         }
-    return results
+
+    with ThreadPoolExecutor(max_workers=min(3, len(ids))) as pool:
+        return dict(pool.map(fetch_one, ids))
 
 
 @sensitive_variables()

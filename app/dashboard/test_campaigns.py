@@ -165,7 +165,6 @@ class CampaignTests(TestCase):
 
     @patch("dashboard.campaigns.tiktok.query_business_comments", return_value=({
         "123": {"comments": [{"username": "viewer", "text": "TikTok bagus", "like_count": 2}], "complete": True},
-        "456": {"comments": [], "complete": True},
     }, ""))
     @patch("dashboard.campaigns.tiktok.query_business_videos", return_value=({"123": {"reach": 800, "favorites": 300}}, ""))
     @patch("dashboard.campaigns.tiktok.query_videos")
@@ -185,8 +184,8 @@ class CampaignTests(TestCase):
                 "engagement": 100, "er": 10,
             },
             "456": {
-                "views": 500, "likes": 40, "comments": 5, "shares": 5,
-                "engagement": 50, "er": 10,
+                "views": 500, "likes": 40, "comments": 0, "shares": 5,
+                "engagement": 45, "er": 9,
             },
         }
         response = self.client.get(reverse("dashboard:campaign_detail", args=[self.campaign.id]))
@@ -203,6 +202,7 @@ class CampaignTests(TestCase):
         self.assertContains(response, "View Comments (1)")
         self.assertContains(response, "TikTok bagus")
         self.assertContains(response, "View Comments (0)")
+        _query_comments.assert_called_once_with(["123"])
         self.assertNotContains(response, "Menunggu koneksi dan persetujuan API TikTok")
 
     @patch("dashboard.campaigns.tiktok.query_business_comments", return_value=({}, ""))

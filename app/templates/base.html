@@ -150,7 +150,7 @@
                 <div class="nav-subitems" data-nav-group-panel="sales-analytics"{% if request.resolver_match.url_name != 'product_performance' and request.resolver_match.url_name != 'pivot_analysis' and request.resolver_match.url_name != 'traffic_analysis' and request.resolver_match.url_name != 'pareto' %} hidden{% endif %}>
                     {% if tab_permissions.sales.product_performance %}
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'product_performance' %}active{% endif %}" href="{% url 'sales:product_performance' %}">Product Performance</a>
-                    <a class="nav-subitem {% if request.resolver_match.url_name == 'pivot_analysis' %}active{% endif %}" href="{% url 'sales:pivot_analysis' %}">Pivot Analysis</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'pivot_analysis' %}active{% endif %}" href="{% url 'sales:pivot_analysis' %}">Data Explorer</a>
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'traffic_analysis' %}active{% endif %}" href="{% url 'sales:traffic_analysis' %}">Traffic Analysis</a>
                     {% endif %}
                     {% if tab_permissions.sales.pareto %}<a class="nav-subitem {% if request.resolver_match.url_name == 'pareto' %}active{% endif %}" href="{% url 'sales:pareto' %}">Pareto Analysis</a>{% endif %}

@@ -1799,9 +1799,9 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual([item["label"] for item in pivot["metrics"]], ["Qty", "Gross Sales", "GPM Rate"])
         self.assertEqual(pivot["rows"][0]["label"], "Knitwear")
         self.assertEqual([item["value"] for item in pivot["grand_total"]], [2, Decimal("200000"), Decimal("40")])
-        self.assertContains(response, "PIVOT ANALYSIS")
+        self.assertContains(response, "DATA EXPLORER")
         self.assertContains(response, "Knitwear")
-        self.assertNotContains(self.client.get(reverse("sales:product_performance")), "PIVOT ANALYSIS")
+        self.assertNotContains(self.client.get(reverse("sales:product_performance")), "DATA EXPLORER")
 
     def test_pivot_str_uses_sales_qty_divided_by_beginning_qty(self):
         status = ProductStatus.objects.create(code="STR-REGULAR", name="STR Regular")

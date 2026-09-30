@@ -10,7 +10,8 @@ from . import instagram_report
 from .models import SocialDailyMetric, SocialPeriodMetric, SocialSyncRun
 from .social_sync import (
     daily_series, manual_refresh_state, run_manual_refresh, sync_period_metrics,
-    supported_period_ranges, sync_platform, sync_status,
+    supported_period_ranges, sync_platform, sync_status, tiktok_partial_days,
+    tiktok_quality_issues,
 )
 
 
@@ -81,6 +82,49 @@ class SocialSyncTests(TestCase):
 
         fetched_days = fetch.call_args.args[0]
         self.assertEqual(fetched_days, sorted({zero_day, *(self.day - timedelta(days=i) for i in range(4))}))
+
+    def test_tiktok_quality_detects_partial_daily_payload(self):
+        issues = tiktok_quality_issues({
+            "reach": 0, "impressions": 70462, "total_engagement": 560,
+            "accounts_engaged": 0,
+        })
+
+        self.assertEqual(issues, [
+            "reach_zero_with_views",
+            "accounts_engaged_zero_with_engagement",
+        ])
+
+    @patch("dashboard.social_sync.fetch_tiktok_days")
+    def test_partial_tiktok_sync_preserves_previous_valid_values_and_stays_retryable(self, fetch):
+        SocialDailyMetric.objects.create(
+            platform="TIKTOK", account="vobia.id", date=self.day,
+            reach=99, impressions=100, total_engagement=10, accounts_engaged=8,
+            synced_at=timezone.now(),
+        )
+        fetch.return_value = [(self.day, {
+            **self.values,
+            "reach": 0, "impressions": 70462,
+            "total_engagement": 560, "accounts_engaged": 0,
+        })]
+
+        run = sync_platform(
+            "TIKTOK", self.day, lookback_days=1,
+            idempotency_key="daily:partial-tiktok",
+        )
+
+        row = SocialDailyMetric.objects.get(platform="TIKTOK", date=self.day)
+        self.assertEqual(run.status, SocialSyncRun.Status.PARTIAL)
+        self.assertEqual((row.reach, row.accounts_engaged), (99, 8))
+        self.assertEqual(row.quality_status, SocialDailyMetric.Quality.PARTIAL)
+        self.assertEqual(tiktok_partial_days(self.day, self.day)[0]["date"], self.day)
+
+        fetch.return_value = [(self.day, {**self.values, "accounts_engaged": 1})]
+        retry = sync_platform(
+            "TIKTOK", self.day, lookback_days=1,
+            idempotency_key="daily:partial-tiktok",
+        )
+        self.assertEqual(retry.status, SocialSyncRun.Status.COMPLETED)
+        self.assertEqual(fetch.call_count, 2)
 
     @patch("dashboard.social_sync.fetch_instagram_days")
     def test_failed_sync_keeps_last_valid_snapshot(self, fetch):
@@ -277,8 +321,8 @@ class SocialSyncTests(TestCase):
 
         repair_state.return_value = SocialSyncRun(status="COMPLETED")
         response = self.client.get(reverse("dashboard:instagram_dashboard"))
-        self.assertContains(response, "Sudah dicoba ulang hari ini")
-        self.assertNotContains(response, "Lengkapi data")
+        self.assertContains(response, "Lengkapi data")
+        self.assertNotContains(response, "Sudah dicoba ulang hari ini")
 
     @patch("dashboard.instagram_report.get_tiktok_report", return_value=(None, "Snapshot TikTok periode ini belum tersedia."))
     @patch("dashboard.instagram_report.get_report", return_value=(None, "Snapshot periode ini belum tersedia."))
@@ -390,7 +434,7 @@ class SocialSyncTests(TestCase):
             )
         SocialDailyMetric.objects.create(
             platform="TIKTOK", account="vobia.id", date=start,
-            reach=0, impressions=0, synced_at=timezone.now(),
+            reach=0, impressions=20, synced_at=timezone.now(),
         )
         instagram_days.side_effect = lambda days: [(day, self.values) for day in days]
         tiktok_days.side_effect = lambda days: [(day, self.values) for day in days]
@@ -403,6 +447,57 @@ class SocialSyncTests(TestCase):
         self.assertEqual(coordinator.idempotency_key, f"manual-repair-global:{today.isoformat()}")
         self.assertEqual(coordinator.status, SocialSyncRun.Status.COMPLETED)
         self.assertTrue(all(run.status == SocialSyncRun.Status.COMPLETED for run in runs))
+
+    @patch("dashboard.social_sync.sync_period_metrics")
+    @patch("dashboard.social_sync.fetch_tiktok_days")
+    @patch("dashboard.social_sync.fetch_instagram_days")
+    def test_completed_repair_can_retry_same_day_while_data_is_partial(
+        self, instagram_days, tiktok_days, _period_sync,
+    ):
+        today = timezone.localdate()
+        cutoff = today - timedelta(days=1)
+        start = today.replace(day=1)
+        for key in ("manual-global", "manual-repair-global"):
+            SocialSyncRun.objects.create(
+                idempotency_key=f"{key}:{today.isoformat()}",
+                platform="INSTAGRAM", account="vobia.id:manual-refresh", source="manual",
+                status=SocialSyncRun.Status.COMPLETED, cutoff=cutoff,
+                started_at=timezone.now(), completed_at=timezone.now(), snapshot_at=timezone.now(),
+            )
+        SocialDailyMetric.objects.create(
+            platform="TIKTOK", account="vobia.id", date=start,
+            reach=0, impressions=20, synced_at=timezone.now(),
+        )
+        instagram_days.side_effect = lambda days: [(day, self.values) for day in days]
+        tiktok_days.side_effect = lambda days: [(day, self.values) for day in days]
+
+        coordinator, _runs, claimed = run_manual_refresh(
+            "aditya", required_range=(start, cutoff),
+        )
+
+        self.assertTrue(claimed)
+        self.assertEqual(coordinator.idempotency_key, f"manual-repair-global:{today.isoformat()}")
+        self.assertGreater(tiktok_days.call_count, 0)
+
+    @patch("dashboard.instagram_report.get_tiktok_report", return_value=(None, ""))
+    @patch("dashboard.instagram_report.get_report", return_value=(None, ""))
+    def test_dashboard_labels_partial_tiktok_data_as_provisional(self, _instagram, _tiktok):
+        day = timezone.localdate() - timedelta(days=1)
+        SocialDailyMetric.objects.create(
+            platform="TIKTOK", account="vobia.id", date=day,
+            reach=0, impressions=70462, total_engagement=560,
+            accounts_engaged=0, synced_at=timezone.now(),
+        )
+        user = get_user_model().objects.create_user(
+            "marketing-partial-viewer", password="Strong-Test-2026!",
+            module_access={"marketing": "view"},
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard:instagram_dashboard"))
+
+        self.assertContains(response, "PROVISIONAL")
+        self.assertContains(response, "Data TikTok belum lengkap pada 1 tanggal")
 
     @patch("dashboard.instagram_report.get_tiktok_report", return_value=(None, ""))
     @patch("dashboard.instagram_report.get_report", return_value=(None, ""))

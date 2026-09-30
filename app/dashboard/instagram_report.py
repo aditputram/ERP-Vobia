@@ -27,7 +27,7 @@ from .tiktok import (
 from .models import SocialDailyMetric
 from .social_sync import (
     daily_series, manual_refresh_state, manual_repair_state, period_metric, run_manual_refresh,
-    suspicious_tiktok_days, supported_period_ranges, sync_status,
+    suspicious_tiktok_days, supported_period_ranges, sync_status, tiktok_partial_days,
 )
 
 
@@ -487,6 +487,7 @@ def dashboard(request):
             error = "Periode pembanding belum tersedia. " + comparison_error
     instagram_series = daily_series(SocialDailyMetric.Platform.INSTAGRAM, start, end) if form.is_valid() else []
     tiktok_series = daily_series(SocialDailyMetric.Platform.TIKTOK, start, end) if form.is_valid() else []
+    tiktok_partial = tiktok_partial_days(start, end) if form.is_valid() else []
     instagram_sync = sync_status(SocialDailyMetric.Platform.INSTAGRAM)
     tiktok_sync = sync_status(SocialDailyMetric.Platform.TIKTOK)
     main_keys = ("reach", "views", "total_interactions", "accounts_engaged", "profile_views", "website_clicks")
@@ -541,4 +542,5 @@ def dashboard(request):
         "manual_refresh_run": manual_refresh_state(),
         "period_snapshot_missing": period_snapshot_missing,
         "manual_repair_run": manual_repair_state(),
+        "tiktok_partial_days": tiktok_partial,
     })

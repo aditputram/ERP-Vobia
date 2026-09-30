@@ -27,16 +27,45 @@ METRICS = (
     "new_followers", "lost_followers",
 )
 
+TIKTOK_QUALITY_LABELS = {
+    "reach_zero_with_views": "Reach kosong walaupun Views tersedia",
+    "views_zero_with_reach": "Views kosong walaupun Reach tersedia",
+    "accounts_engaged_zero_with_engagement": "Accounts Engaged kosong walaupun Engagement tersedia",
+}
+
+
+def tiktok_quality_issues(values):
+    """Return contradictions that prove a TikTok daily payload is incomplete."""
+    value = lambda name: values.get(name) if isinstance(values, dict) else getattr(values, name)
+    issues = []
+    if (value("impressions") or 0) > 0 and not value("reach"):
+        issues.append("reach_zero_with_views")
+    if (value("reach") or 0) > 0 and not value("impressions"):
+        issues.append("views_zero_with_reach")
+    if (value("total_engagement") or 0) > 0 and not value("accounts_engaged"):
+        issues.append("accounts_engaged_zero_with_engagement")
+    return issues
+
+
+def tiktok_partial_days(start, end):
+    rows = SocialDailyMetric.objects.filter(
+        platform=SocialDailyMetric.Platform.TIKTOK,
+        account=ACCOUNT,
+        date__range=(start, end),
+    ).order_by("date")
+    result = []
+    for row in rows:
+        issues = tiktok_quality_issues(row)
+        if row.quality_status == SocialDailyMetric.Quality.PARTIAL or issues:
+            result.append({
+                "date": row.date,
+                "issues": row.quality_note or ", ".join(TIKTOK_QUALITY_LABELS[item] for item in issues),
+            })
+    return result
+
 
 def suspicious_tiktok_days(start, end):
-    return set(
-        SocialDailyMetric.objects.filter(
-            platform=SocialDailyMetric.Platform.TIKTOK,
-            account=ACCOUNT,
-            date__range=(start, end),
-            reach=0,
-        ).values_list("date", flat=True)
-    )
+    return {item["date"] for item in tiktok_partial_days(start, end)}
 
 
 def supported_period_ranges(cutoff):
@@ -54,9 +83,14 @@ def supported_period_ranges(cutoff):
     return sorted(ranges)
 
 
-def _complete_period_values(rows_by_date, start, end):
+def _complete_period_values(rows_by_date, start, end, *, platform):
     rows = [rows_by_date.get(start + timedelta(days=offset)) for offset in range((end - start).days + 1)]
     if any(row is None for row in rows):
+        return None
+    if platform == SocialDailyMetric.Platform.TIKTOK and any(
+        row.quality_status == SocialDailyMetric.Quality.PARTIAL or tiktok_quality_issues(row)
+        for row in rows
+    ):
         return None
 
     def total(name):
@@ -115,7 +149,9 @@ def sync_period_metrics(cutoff):
         platform: {
             date_range: values
             for date_range in ranges
-            if (values := _complete_period_values(rows_by_platform[platform], *date_range)) is not None
+            if (values := _complete_period_values(
+                rows_by_platform[platform], *date_range, platform=platform,
+            )) is not None
         }
         for platform in PLATFORMS
     }
@@ -199,7 +235,7 @@ def fetch_tiktok_days(days):
     return result
 
 
-def _claim(platform, cutoff, source, actor, key, *, account=ACCOUNT):
+def _claim(platform, cutoff, source, actor, key, *, account=ACCOUNT, retry_completed=False):
     now = timezone.now()
     with transaction.atomic():
         run, created = SocialSyncRun.objects.select_for_update().get_or_create(
@@ -210,7 +246,7 @@ def _claim(platform, cutoff, source, actor, key, *, account=ACCOUNT):
                 "cutoff": cutoff, "started_at": now,
             },
         )
-        if not created and run.status == SocialSyncRun.Status.COMPLETED:
+        if not created and run.status == SocialSyncRun.Status.COMPLETED and not retry_completed:
             return run, False
         if (
             not created and run.status == SocialSyncRun.Status.RUNNING
@@ -230,10 +266,12 @@ def _claim(platform, cutoff, source, actor, key, *, account=ACCOUNT):
 
 def sync_platform(
     platform, cutoff, *, lookback_days=4, source="scheduler", actor="",
-    idempotency_key=None, required_range=None,
+    idempotency_key=None, required_range=None, retry_completed=False,
 ):
     key = idempotency_key or f"daily:{platform.lower()}:{cutoff.isoformat()}"
-    run, claimed = _claim(platform, cutoff, source, actor, key)
+    run, claimed = _claim(
+        platform, cutoff, source, actor, key, retry_completed=retry_completed,
+    )
     if not claimed:
         return run
     days = {cutoff - timedelta(days=offset) for offset in range(lookback_days)}
@@ -254,16 +292,53 @@ def sync_platform(
     try:
         rows = fetch_instagram_days(days) if platform == SocialDailyMetric.Platform.INSTAGRAM else fetch_tiktok_days(days)
         synced_at = timezone.now()
+        existing = {
+            row.date: row for row in SocialDailyMetric.objects.filter(
+                platform=platform, account=ACCOUNT, date__in=days,
+            )
+        }
+        partial_days = []
         with transaction.atomic():
             for day, values in rows:
+                values = dict(values)
+                issues = tiktok_quality_issues(values) if platform == SocialDailyMetric.Platform.TIKTOK else []
+                previous = existing.get(day)
+                if previous and issues:
+                    for name in METRICS:
+                        if values.get(name) is None and getattr(previous, name) is not None:
+                            values[name] = getattr(previous, name)
+                    for name, issue in (
+                        ("reach", "reach_zero_with_views"),
+                        ("impressions", "views_zero_with_reach"),
+                        ("accounts_engaged", "accounts_engaged_zero_with_engagement"),
+                    ):
+                        if issue in issues and getattr(previous, name) not in (None, 0):
+                            values[name] = getattr(previous, name)
+                quality_note = ", ".join(TIKTOK_QUALITY_LABELS[item] for item in issues)
+                if issues:
+                    partial_days.append(day)
                 SocialDailyMetric.objects.update_or_create(
                     platform=platform, account=ACCOUNT, date=day,
-                    defaults={**values, "synced_at": synced_at},
+                    defaults={
+                        **values,
+                        "quality_status": (
+                            SocialDailyMetric.Quality.PARTIAL if issues
+                            else SocialDailyMetric.Quality.COMPLETE
+                        ),
+                        "quality_note": quality_note,
+                        "synced_at": synced_at,
+                    },
                 )
-            run.status = SocialSyncRun.Status.COMPLETED
+            run.status = (
+                SocialSyncRun.Status.PARTIAL if partial_days
+                else SocialSyncRun.Status.COMPLETED
+            )
             run.completed_at = synced_at
             run.snapshot_at = synced_at
-            run.error = ""
+            run.error = (
+                f"Data TikTok parsial pada {len(partial_days)} tanggal; akan dicoba ulang."
+                if partial_days else ""
+            )
             run.save(update_fields=("status", "completed_at", "snapshot_at", "error"))
     except (InstagramError, TikTokConnectionError, OSError, KeyError, ValueError):
         run.status = SocialSyncRun.Status.FAILED
@@ -280,14 +355,14 @@ def sync_platform(
 
 def sync_daily(
     *, cutoff=None, lookback_days=4, source="scheduler", actor="",
-    key_prefix="daily", required_range=None,
+    key_prefix="daily", required_range=None, retry_completed=False,
 ):
     cutoff = cutoff or timezone.localdate() - timedelta(days=1)
     return [
         sync_platform(
             platform, cutoff, lookback_days=lookback_days, source=source, actor=actor,
             idempotency_key=f"{key_prefix}:{platform.lower()}:{cutoff.isoformat()}",
-            required_range=required_range,
+            required_range=required_range, retry_completed=retry_completed,
         )
         for platform in PLATFORMS
     ]
@@ -297,7 +372,23 @@ def daily_series(platform, start, end):
     rows = SocialDailyMetric.objects.filter(
         platform=platform, account=ACCOUNT, date__range=(start, end),
     ).order_by("date")
-    return [{"date": row.date.isoformat(), **{name: getattr(row, name) for name in METRICS}} for row in rows]
+    result = []
+    for row in rows:
+        values = {name: getattr(row, name) for name in METRICS}
+        issues = tiktok_quality_issues(row) if platform == SocialDailyMetric.Platform.TIKTOK else []
+        if row.quality_status == SocialDailyMetric.Quality.PARTIAL or issues:
+            if "reach_zero_with_views" in issues:
+                values["reach"] = None
+            if "views_zero_with_reach" in issues:
+                values["impressions"] = None
+            if "accounts_engaged_zero_with_engagement" in issues:
+                values["accounts_engaged"] = None
+            values["quality_status"] = SocialDailyMetric.Quality.PARTIAL
+            values["quality_note"] = row.quality_note or ", ".join(
+                TIKTOK_QUALITY_LABELS[item] for item in issues
+            )
+        result.append({"date": row.date.isoformat(), **values})
+    return result
 
 
 def sync_status(platform):
@@ -340,12 +431,14 @@ def run_manual_refresh(actor, required_range=None):
     coordinator, claimed = _claim(
         SocialDailyMetric.Platform.INSTAGRAM, cutoff, "manual", actor,
         f"{key_stem}-global:{today.isoformat()}", account=MANUAL_LOCK_ACCOUNT,
+        retry_completed=repair,
     )
     if not claimed:
         return coordinator, [], False
     runs = sync_daily(
         cutoff=cutoff, lookback_days=4, source="manual", actor=actor,
         key_prefix=f"{key_stem}:{today.isoformat()}", required_range=required_range,
+        retry_completed=repair,
     )
     period_metrics_completed = True
     try:
@@ -358,10 +451,19 @@ def run_manual_refresh(actor, required_range=None):
         all(run.status == SocialSyncRun.Status.COMPLETED for run in runs)
         and period_metrics_completed
     )
-    coordinator.status = SocialSyncRun.Status.COMPLETED if completed else SocialSyncRun.Status.FAILED
+    partial = any(run.status == SocialSyncRun.Status.PARTIAL for run in runs)
+    coordinator.status = (
+        SocialSyncRun.Status.COMPLETED if completed
+        else SocialSyncRun.Status.PARTIAL if partial
+        else SocialSyncRun.Status.FAILED
+    )
     coordinator.completed_at = timezone.now()
     coordinator.snapshot_at = coordinator.completed_at if completed else None
-    coordinator.error = "" if completed else "Refresh belum lengkap; dapat dicoba lagi."
+    coordinator.error = (
+        "" if completed else
+        "Data platform masih parsial; dapat dicoba lagi." if partial else
+        "Refresh belum lengkap; dapat dicoba lagi."
+    )
     coordinator.save(update_fields=("status", "completed_at", "snapshot_at", "error"))
     return coordinator, runs, True
 

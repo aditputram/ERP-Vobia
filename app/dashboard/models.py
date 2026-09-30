@@ -136,6 +136,10 @@ class SocialDailyMetric(models.Model):
         INSTAGRAM = "INSTAGRAM", "Instagram"
         TIKTOK = "TIKTOK", "TikTok"
 
+    class Quality(models.TextChoices):
+        COMPLETE = "COMPLETE", "Complete"
+        PARTIAL = "PARTIAL", "Partial"
+
     platform = models.CharField(max_length=20, choices=Platform.choices)
     account = models.CharField(max_length=100)
     date = models.DateField()
@@ -150,6 +154,8 @@ class SocialDailyMetric(models.Model):
     shares = models.PositiveBigIntegerField(null=True, blank=True)
     new_followers = models.PositiveBigIntegerField(null=True, blank=True)
     lost_followers = models.PositiveBigIntegerField(null=True, blank=True)
+    quality_status = models.CharField(max_length=20, choices=Quality.choices, default=Quality.COMPLETE)
+    quality_note = models.CharField(max_length=255, blank=True)
     synced_at = models.DateTimeField()
 
     class Meta:
@@ -194,6 +200,7 @@ class SocialSyncRun(models.Model):
     class Status(models.TextChoices):
         RUNNING = "RUNNING", "Running"
         COMPLETED = "COMPLETED", "Completed"
+        PARTIAL = "PARTIAL", "Partial"
         FAILED = "FAILED", "Failed"
 
     idempotency_key = models.CharField(max_length=120, unique=True)

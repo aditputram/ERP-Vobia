@@ -316,7 +316,7 @@ def fetch_video_comments(video_ids, *, saved=None, token=None):
         for item in page.get("comments", []):
             if not isinstance(item, dict):
                 continue
-            username = item.get("unique_identifier") or item.get("username") or item.get("display_name") or "TikTok user"
+            username = item.get("display_name") or item.get("username") or item.get("unique_identifier") or "TikTok user"
             comments.append({
                 "id": str(item.get("comment_id") or "")[:80],
                 "username": str(username).lstrip("@")[:80],

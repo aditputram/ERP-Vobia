@@ -116,7 +116,7 @@ class TikTokConnectionTests(TestCase):
 
         result = tiktok_business.fetch_video_comments(["123"], saved={"open_id": "business-1"})
 
-        self.assertEqual(result["123"]["comments"][0]["username"], "viewer.one")
+        self.assertEqual(result["123"]["comments"][0]["username"], "Viewer One")
         self.assertEqual(result["123"]["comments"][0]["text"], "Bagus banget")
         self.assertEqual(result["123"]["comments"][0]["like_count"], 7)
         self.assertFalse(result["123"]["complete"])

@@ -56,7 +56,7 @@ def business_query_path(video_ids):
 
 def business_comments_query_path(video_ids):
     digest = hashlib.sha256(",".join(video_ids).encode()).hexdigest()[:24]
-    return store_path().parent / f"tiktok-business-comments-{digest}.json"
+    return store_path().parent / f"tiktok-business-comments-v2-{digest}.json"
 
 
 def write_cache(path, value):

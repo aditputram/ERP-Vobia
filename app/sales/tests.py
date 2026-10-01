@@ -5,8 +5,9 @@ import uuid
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import RequestFactory, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
@@ -1862,7 +1863,7 @@ class SalesReportRouteTests(TestCase):
             "period": "2026-08",
             "pivot_row": "category",
             "pivot_column": "source",
-            "metric": ["qty", "gross", "gpm_rate"],
+            "metric": ["qty", "gross", "discount_rate", "gpm_rate"],
         })
 
         self.assertEqual(response.status_code, 200)
@@ -1872,12 +1873,30 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(pivot["row_label"], "Category")
         self.assertEqual(pivot["column_label"], "Source")
         self.assertEqual([item["label"] for item in pivot["columns"]], ["Shopee"])
-        self.assertEqual([item["label"] for item in pivot["metrics"]], ["Qty", "Gross Sales", "GPM Rate"])
+        self.assertEqual([item["label"] for item in pivot["metrics"]], ["Qty", "Gross Sales", "Discount Rate", "GPM Rate"])
         self.assertEqual(pivot["rows"][0]["label"], "Knitwear")
-        self.assertEqual([item["value"] for item in pivot["grand_total"]], [2, Decimal("200000"), Decimal("40")])
+        self.assertEqual(
+            [item["value"] for item in pivot["grand_total"]],
+            [2, Decimal("200000"), Decimal("10"), Decimal("40")],
+        )
         self.assertContains(response, "DATA EXPLORER")
+        self.assertContains(response, "Discount Rate")
         self.assertContains(response, "Knitwear")
         self.assertNotContains(self.client.get(reverse("sales:product_performance")), "DATA EXPLORER")
+
+    def test_data_explorer_skips_unselected_traffic_and_stock_queries(self):
+        traffic_table = TrafficProductMetric._meta.db_table.lower()
+        stock_table = MerchandisingMonthlySnapshot._meta.db_table.lower()
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(reverse("sales:pivot_analysis"), {
+                "metric": ["qty", "gross", "discount_rate"],
+            })
+
+        sql = "\n".join(query["sql"].lower() for query in queries.captured_queries)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(traffic_table, sql)
+        self.assertNotIn(stock_table, sql)
 
     def test_pivot_str_uses_sales_qty_divided_by_beginning_qty(self):
         status = ProductStatus.objects.create(code="STR-REGULAR", name="STR Regular")

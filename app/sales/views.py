@@ -66,6 +66,7 @@ PRODUCT_PERFORMANCE_METRICS = (
     ("gross", "Gross Sales", "money"),
     ("net", "Net Sales", "money"),
     ("discount", "Discount", "money"),
+    ("discount_rate", "Discount Rate", "percent"),
     ("cogs", "COGS", "money"),
     ("gpm", "Gross Profit", "money"),
     ("gpm_rate", "GPM Rate", "percent"),
@@ -1552,6 +1553,7 @@ def _product_performance_pivot(lines, request):
     if not selected_metric_keys:
         selected_metric_keys = ["qty", "gross", "net"]
     selected_metrics = [metric_definitions[key] for key in selected_metric_keys]
+    include_str = "str" in selected_metric_keys
 
     dimensions = {
         "product": F("product_name_snapshot"),
@@ -1571,32 +1573,35 @@ def _product_performance_pivot(lines, request):
         "category": F("category_snapshot"),
     }
 
-    stock_keys = list(
-        lines.filter(sku_id__isnull=False)
-        .annotate(stock_month=TruncMonth("order__order_date"))
-        .values_list("sku_id", "stock_month")
-        .distinct()
-    )
-    active_batch_id = (
-        MerchandisingMonthlySnapshot.objects.filter(batch__is_active=True)
-        .order_by("-batch__imported_at")
-        .values_list("batch_id", flat=True)
-        .first()
-    )
     beginning_by_stock_key = {}
-    if active_batch_id and stock_keys:
-        sku_ids = {sku_id for sku_id, _month in stock_keys}
-        months = {month for _sku_id, month in stock_keys}
-        beginning_by_stock_key = {
-            (row["sku_id"], row["month"]): row["beginning_qty"]
-            for row in MerchandisingMonthlySnapshot.objects.filter(
-                batch_id=active_batch_id,
-                sku_id__in=sku_ids,
-                month__in=months,
-            ).values("sku_id", "month", "beginning_qty")
-        }
+    if include_str:
+        stock_keys = list(
+            lines.filter(sku_id__isnull=False)
+            .annotate(stock_month=TruncMonth("order__order_date"))
+            .values_list("sku_id", "stock_month")
+            .distinct()
+        )
+        active_batch_id = (
+            MerchandisingMonthlySnapshot.objects.filter(batch__is_active=True)
+            .order_by("-batch__imported_at")
+            .values_list("batch_id", flat=True)
+            .first()
+        )
+        if active_batch_id and stock_keys:
+            sku_ids = {sku_id for sku_id, _month in stock_keys}
+            months = {month for _sku_id, month in stock_keys}
+            beginning_by_stock_key = {
+                (row["sku_id"], row["month"]): row["beginning_qty"]
+                for row in MerchandisingMonthlySnapshot.objects.filter(
+                    batch_id=active_batch_id,
+                    sku_id__in=sku_ids,
+                    month__in=months,
+                ).values("sku_id", "month", "beginning_qty")
+            }
 
     def beginning_totals(*dimension_names):
+        if not include_str:
+            return {}
         annotations = {
             f"pivot_{index}": dimensions[name]
             for index, name in enumerate(dimension_names)
@@ -1654,6 +1659,7 @@ def _product_performance_pivot(lines, request):
             "gross": gross,
             "net": net,
             "discount": gross - net,
+            "discount_rate": (gross - net) / gross * 100 if gross else None,
             "cogs": cogs,
             "gpm": gpm,
             "gpm_rate": gpm / gross * 100 if gross else None,
@@ -2415,8 +2421,12 @@ def traffic_analysis(request):
 @login_required
 def product_performance(request, pivot_only=False):
     all_counted = SalesOrderLine.objects.filter(is_counted=True)
-    latest = all_counted.order_by("-order__order_date").values_list("order__order_date", flat=True).first() or date.today()
-    earliest = all_counted.order_by("order__order_date").values_list("order__order_date", flat=True).first() or latest
+    date_bounds = all_counted.aggregate(
+        earliest=Min("order__order_date"),
+        latest=Max("order__order_date"),
+    )
+    latest = date_bounds["latest"] or date.today()
+    earliest = date_bounds["earliest"] or latest
     month_options = _pareto_period_options(earliest, latest)["month"]
     period_type = request.GET.get("period_type", "custom")
     if period_type not in {"custom", "month"}:
@@ -2444,94 +2454,96 @@ def product_performance(request, pivot_only=False):
     ).filter(
         order__order_date__range=(start, end),
     ).exclude(product_name_snapshot="")
-    sales_monthly = {
-        row["month"]: row
-        for row in lines.annotate(month=TruncMonth("order__order_date")).values("month").annotate(
-            qty=Sum("quantity"),
-            net=Sum("total_net_sales"),
-            gross=Sum("total_gross_sales"),
-            orders=Count("order_id", distinct=True),
-        ).order_by("month")
-    }
-    traffic = TrafficProductMetric.objects.filter(period_start__lte=end, period_end__gte=start)
     sources = [item for item in request.GET.getlist("source") if item]
     source_groups = [item for item in request.GET.getlist("source_group") if item]
-    if sources:
-        traffic_sources = [source for source in sources if source in {"Shopee", "Tiktok"}]
-        traffic = traffic.filter(source__in=traffic_sources) if traffic_sources else traffic.none()
-    if source_groups and "Marketplace" not in source_groups:
-        traffic = traffic.none()
-    if product_statuses and not products:
-        traffic = traffic.filter(product__status__name__in=product_statuses)
-    if categories and not products:
-        traffic = traffic.filter(Q(product__category__name__in=categories) | Q(category_snapshot__in=categories))
-    if products:
-        selected_product_ids = Product.objects.filter(name__in=products).values_list("id", flat=True)
-        product_filter = Q(product_id__in=selected_product_ids)
-        for mapping in MarketplaceProductMapping.objects.filter(product_id__in=selected_product_ids, is_active=True):
-            product_filter |= Q(source=mapping.source, marketplace_product_code_snapshot=mapping.marketplace_product_code)
-        traffic = traffic.filter(product_filter)
-    listing_monthly = {}
-    for metric in traffic.annotate(month=TruncMonth("period_start")).values(
-        "month", "source", "marketplace_product_code_snapshot", "traffic_product_key", "views", "clicks", "visitors"
-    ):
-        listing_key = metric["marketplace_product_code_snapshot"] or metric["traffic_product_key"]
-        key = (metric["month"], metric["source"], listing_key)
-        current = listing_monthly.setdefault(key, {"views": 0, "clicks": 0, "visitors": 0})
-        for field in current:
-            current[field] = max(current[field], metric[field])
-    traffic_monthly = {}
-    for (month, _source, _listing), metric in listing_monthly.items():
-        monthly = traffic_monthly.setdefault(month, {"views": 0, "clicks": 0, "visitors": 0})
-        for field in monthly:
-            monthly[field] += metric[field]
-    months = sorted(set(sales_monthly) | set(traffic_monthly))
     rows = []
-    previous_net = None
-    for month in months:
-        sale = sales_monthly.get(month, {})
-        visit = traffic_monthly.get(month, {})
-        gross = sale.get("gross") or 0
-        net = sale.get("net") or 0
-        orders = sale.get("orders") or 0
-        visitors = visit.get("visitors") or 0
-        discount = gross - net
-        row = {
-            "month": month,
-            "label": f"{month.month}. {MONTH_NAMES[month.month - 1]}",
-            "views": visit.get("views") or 0,
-            "clicks": visit.get("clicks") or 0,
-            "visitors": visitors,
-            "qty": sale.get("qty") or 0,
-            "net": net,
-            "gross": gross,
-            "orders": orders,
-            "discount": discount,
-            "discount_rate": discount / gross if gross else None,
-            "growth": (net - previous_net) / previous_net if previous_net else None,
-            "cvr": Decimal(orders) / Decimal(visitors) if visitors else None,
-            "aov": net / orders if orders else None,
+    traffic_totals = {"views": 0, "clicks": 0, "visitors": 0}
+    if not pivot_only:
+        sales_monthly = {
+            row["month"]: row
+            for row in lines.annotate(month=TruncMonth("order__order_date")).values("month").annotate(
+                qty=Sum("quantity"),
+                net=Sum("total_net_sales"),
+                gross=Sum("total_gross_sales"),
+                orders=Count("order_id", distinct=True),
+            ).order_by("month")
         }
-        previous_net = net
-        row["discount_rate_pct"] = row["discount_rate"] * 100 if row["discount_rate"] is not None else None
-        row["growth_pct"] = row["growth"] * 100 if row["growth"] is not None else None
-        row["cvr_pct"] = row["cvr"] * 100 if row["cvr"] is not None else None
-        rows.append(row)
-    max_traffic = max((row["views"] for row in rows), default=0)
-    max_net = max((row["net"] for row in rows), default=0)
-    for row in rows:
-        row["traffic_bar"] = float(row["views"] / max_traffic * 100) if max_traffic else 0
-        row["sales_bar"] = float(row["net"] / max_net * 100) if max_net else 0
+        traffic = TrafficProductMetric.objects.filter(period_start__lte=end, period_end__gte=start)
+        if sources:
+            traffic_sources = [source for source in sources if source in {"Shopee", "Tiktok"}]
+            traffic = traffic.filter(source__in=traffic_sources) if traffic_sources else traffic.none()
+        if source_groups and "Marketplace" not in source_groups:
+            traffic = traffic.none()
+        if product_statuses and not products:
+            traffic = traffic.filter(product__status__name__in=product_statuses)
+        if categories and not products:
+            traffic = traffic.filter(Q(product__category__name__in=categories) | Q(category_snapshot__in=categories))
+        if products:
+            selected_product_ids = Product.objects.filter(name__in=products).values_list("id", flat=True)
+            product_filter = Q(product_id__in=selected_product_ids)
+            for mapping in MarketplaceProductMapping.objects.filter(product_id__in=selected_product_ids, is_active=True):
+                product_filter |= Q(source=mapping.source, marketplace_product_code_snapshot=mapping.marketplace_product_code)
+            traffic = traffic.filter(product_filter)
+        listing_monthly = {}
+        for metric in traffic.annotate(month=TruncMonth("period_start")).values(
+            "month", "source", "marketplace_product_code_snapshot", "traffic_product_key", "views", "clicks", "visitors"
+        ):
+            listing_key = metric["marketplace_product_code_snapshot"] or metric["traffic_product_key"]
+            key = (metric["month"], metric["source"], listing_key)
+            current = listing_monthly.setdefault(key, {"views": 0, "clicks": 0, "visitors": 0})
+            for field in current:
+                current[field] = max(current[field], metric[field])
+        traffic_monthly = {}
+        for (month, _source, _listing), metric in listing_monthly.items():
+            monthly = traffic_monthly.setdefault(month, {"views": 0, "clicks": 0, "visitors": 0})
+            for field in monthly:
+                monthly[field] += metric[field]
+        months = sorted(set(sales_monthly) | set(traffic_monthly))
+        previous_net = None
+        for month in months:
+            sale = sales_monthly.get(month, {})
+            visit = traffic_monthly.get(month, {})
+            gross = sale.get("gross") or 0
+            net = sale.get("net") or 0
+            orders = sale.get("orders") or 0
+            visitors = visit.get("visitors") or 0
+            discount = gross - net
+            row = {
+                "month": month,
+                "label": f"{month.month}. {MONTH_NAMES[month.month - 1]}",
+                "views": visit.get("views") or 0,
+                "clicks": visit.get("clicks") or 0,
+                "visitors": visitors,
+                "qty": sale.get("qty") or 0,
+                "net": net,
+                "gross": gross,
+                "orders": orders,
+                "discount": discount,
+                "discount_rate": discount / gross if gross else None,
+                "growth": (net - previous_net) / previous_net if previous_net else None,
+                "cvr": Decimal(orders) / Decimal(visitors) if visitors else None,
+                "aov": net / orders if orders else None,
+            }
+            previous_net = net
+            row["discount_rate_pct"] = row["discount_rate"] * 100 if row["discount_rate"] is not None else None
+            row["growth_pct"] = row["growth"] * 100 if row["growth"] is not None else None
+            row["cvr_pct"] = row["cvr"] * 100 if row["cvr"] is not None else None
+            rows.append(row)
+        max_traffic = max((row["views"] for row in rows), default=0)
+        max_net = max((row["net"] for row in rows), default=0)
+        for row in rows:
+            row["traffic_bar"] = float(row["views"] / max_traffic * 100) if max_traffic else 0
+            row["sales_bar"] = float(row["net"] / max_net * 100) if max_net else 0
+        traffic_totals = {
+            field: sum(month[field] for month in traffic_monthly.values())
+            for field in ("views", "clicks", "visitors")
+        }
     filter_options = _filter_options()
     filter_options.update({
         "product_statuses": filter_state["product_statuses"],
         "categories": filter_state["categories"],
         "products": filter_state["products"],
     })
-    traffic_totals = {
-        field: sum(month[field] for month in traffic_monthly.values())
-        for field in ("views", "clicks", "visitors")
-    }
     return render(request, "sales/product_performance.html", {
         "pivot_only": pivot_only,
         "rows": rows,
@@ -2540,7 +2552,7 @@ def product_performance(request, pivot_only=False):
         "period_type": period_type,
         "period_value": period_value,
         "month_options": month_options,
-        "totals": _totals(lines),
+        "totals": _totals(lines) if not pivot_only else {},
         "pivot": _product_performance_pivot(lines, request) if pivot_only else None,
         "traffic_totals": traffic_totals,
         "source_groups": ("Marketplace", "Other"),

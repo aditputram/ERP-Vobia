@@ -741,6 +741,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .product-pivot-table tbody tr:nth-child(even)>* { background:#f5f5f1; }
 .product-pivot-table tfoot .pivot-sticky-column,.product-pivot-table tfoot .pivot-total-column { background:#f3f8df; font-weight:850; }
 .product-pivot-table tfoot td,.product-pivot-table tfoot th { border-top:1px solid #ccd99d; font-weight:850; }
+.data-explorer-table th,.data-explorer-table td { min-width:62px; padding:3px 3px; font-size:10px; line-height:1.1; }
+.data-explorer-table thead th { height:28px; }
+.data-explorer-table thead tr:nth-child(2) th { top:28px; }
+.data-explorer-table .pivot-sticky-column { padding-left:5px; padding-right:5px; }
 .traffic-analysis-table th,.traffic-analysis-table td { padding:8px 10px; white-space:nowrap; }
 .traffic-analysis-table th:not(:first-child),.traffic-analysis-table td:not(:first-child) { text-align:center; }
 .traffic-analysis-table tbody tr:nth-child(even) { background:#f7f7f3; }

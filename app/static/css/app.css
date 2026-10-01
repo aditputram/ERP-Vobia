@@ -482,6 +482,26 @@ tbody tr:last-child td { border-bottom: 0; }
 .projection-table .po-locked-input:disabled { border-color: #ddd9c8; color: #777166; background: #f0eee5; cursor: not-allowed; opacity: 1; }
 .potential-sales-table th, .potential-sales-table td { padding: 8px 10px; }
 .potential-sales-table .table-subcopy { margin-top: 2px; white-space: nowrap; }
+.potential-product-list { display: grid; gap: 8px; }
+.potential-product-row { overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: white; }
+.potential-product-row > summary { display: grid; grid-template-columns: minmax(220px, 1.8fr) repeat(4, minmax(105px, .7fr)) 22px; gap: 12px; align-items: center; min-height: 66px; padding: 11px 14px; cursor: pointer; list-style: none; }
+.potential-product-row > summary::-webkit-details-marker { display: none; }
+.potential-product-row > summary::after { content: "⌄"; color: var(--muted); font-size: 18px; font-weight: 850; transition: transform .15s ease; }
+.potential-product-row[open] > summary::after { transform: rotate(180deg); }
+.potential-product-row[open] > summary { background: #f8f9f1; }
+.potential-product-row > summary > span { display: grid; gap: 3px; min-width: 0; }
+.potential-product-row > summary small { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.potential-product-row > summary strong { font-size: 11px; }
+.potential-product-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px !important; }
+.potential-product-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0 !important; text-transform: none !important; }
+.potential-size-wrap { border-top: 1px solid var(--line); }
+.potential-size-table { min-width: 1380px; }
+.potential-size-table th, .potential-size-table td { text-align: center; white-space: nowrap; }
+.potential-size-table th:first-child, .potential-size-table td:first-child, .potential-size-table th:last-child, .potential-size-table td:last-child { text-align: left; }
+.potential-size-table thead th { background: #eef7c9; color: #27300d; }
+.potential-size-table tbody tr:nth-child(even) { background: #f7f7f3; }
+.potential-size-table tbody .potential-size-affected { background: #fbfde8; }
+@media (max-width: 900px) { .potential-product-row > summary { grid-template-columns: minmax(180px, 1.5fr) repeat(2, minmax(90px, .7fr)) 22px; } .potential-product-row > summary > span:nth-child(3), .potential-product-row > summary > span:nth-child(5) { display: none; } }
 .forecast-recommendation-wrap { max-height: 640px; overflow: auto; }
 .forecast-recommendation-table { min-width: 1180px; }
 .forecast-recommendation-table th, .forecast-recommendation-table td { padding: 8px 10px; text-align: center; white-space: nowrap; }

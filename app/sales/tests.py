@@ -116,19 +116,45 @@ class SalesReportRouteTests(TestCase):
             size="M",
             current_retail_price=Decimal("275000"),
         )
+        size_l = SKU.objects.create(
+            sku="POTENTIAL-OCEANIA-L",
+            product_variant=variant,
+            size="L",
+            current_retail_price=Decimal("275000"),
+        )
         size_xl = SKU.objects.create(
             sku="POTENTIAL-OCEANIA-XL",
             product_variant=variant,
             size="XL",
             current_retail_price=Decimal("275000"),
         )
-        for sku, qty in ((size_m, 0), (size_xl, 20)):
+        for sku, qty in ((size_m, 0), (size_l, 5), (size_xl, 20)):
             FIFOOpeningSnapshot.objects.create(
                 sku=sku,
                 cutover_date=date(2026, 7, 31),
                 opening_qty=Decimal(qty),
                 frozen_unit_cogs=Decimal("100000"),
                 recorded_by=self.user,
+            )
+        batch = MerchandisingSnapshotBatch.objects.create(
+            source_workbook_id="potential-sales",
+            source_file_name="potential-sales.xlsx",
+            source_sha256="p" * 64,
+            imported_by=self.user,
+            is_active=True,
+        )
+        for source_row, (sku, beginning) in enumerate(
+            ((size_m, 100), (size_l, 50), (size_xl, 40)), start=1
+        ):
+            MerchandisingMonthlySnapshot.objects.create(
+                batch=batch,
+                sku=sku,
+                source_row=source_row,
+                month=date(2026, 7, 1),
+                status_snapshot=status.name,
+                product_snapshot=product.name,
+                category_snapshot=category.name,
+                beginning_qty=Decimal(beginning),
             )
 
         for index, (order_date, quantity) in enumerate(
@@ -206,12 +232,29 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(august_row["lost_days"], 31)
         self.assertEqual(august_row["lost_qty"], Decimal("112"))
         self.assertEqual(august.context["report"]["product_count"], 1)
+        self.assertEqual(august.context["report"]["displayed_sku_count"], 3)
         self.assertContains(august, "POTENTIAL-OCEANIA-M")
+        self.assertContains(august, "POTENTIAL-OCEANIA-L")
+        self.assertContains(august, "POTENTIAL-OCEANIA-XL")
         self.assertContains(august, "112 pcs")
 
         july_row = july.context["report"]["rows"][0]
         self.assertEqual(july_row["lost_days"], 26)
         self.assertEqual(july_row["lost_qty"], Decimal("94"))
+        july_product = july.context["report"]["products"][0]
+        self.assertEqual(july_product["affected_sizes"], ["M"])
+        self.assertEqual(len(july_product["sizes"]), 3)
+        july_sizes = {row["size"]: row for row in july_product["sizes"]}
+        self.assertEqual(july_sizes["M"]["beginning_qty"], Decimal("100"))
+        self.assertEqual(july_sizes["M"]["str"], Decimal("18"))
+        self.assertEqual(july_sizes["L"]["lost_qty"], Decimal("0"))
+        self.assertEqual(july_sizes["XL"]["lost_qty"], Decimal("0"))
+        self.assertEqual(
+            [cell["month"] for cell in july_sizes["M"]["history_cells"]],
+            [date(2026, 4, 1), date(2026, 5, 1), date(2026, 6, 1)],
+        )
+        self.assertContains(july, "Sales Apr 2026")
+        self.assertContains(july, "Beginning Jul 2026")
 
     @patch("sales.views.timezone.localdate", return_value=date(2026, 10, 1))
     def test_forecast_recommendation_uses_percentage_trend_on_actual_plus_lost(self, _mock_today):

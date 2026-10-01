@@ -2120,22 +2120,144 @@ def _potential_sales_context(request):
         selected_value = month_options[-1]["value"]
     selected_month = datetime.strptime(selected_value, "%Y-%m").date()
     cutoff = min(latest, _shift_month(selected_month, 1) - timedelta(days=1))
-    rows = _potential_lost_sku_rows(selected_month, cutoff)
+    affected_rows = _potential_lost_sku_rows(selected_month, cutoff)
+    affected_by_sku = {row["sku"].id: row for row in affected_rows}
+    affected_product_ids = {row["product_id"] for row in affected_rows}
+    history_months = [_shift_month(selected_month, offset) for offset in (-3, -2, -1)]
+    skus = list(
+        SKU.objects.filter(
+            is_active=True,
+            product_variant__is_active=True,
+            product_variant__product_id__in=affected_product_ids,
+        )
+        .select_related(
+            "product_variant__product__status",
+            "product_variant__product__category",
+        )
+        .order_by("product_variant__product__name", "size", "sku")
+    )
+    sku_ids = [sku.id for sku in skus]
+    sales_by_sku_month = {}
+    if sku_ids:
+        sales_rows = (
+            SalesOrderLine.objects.filter(
+                is_counted=True,
+                sku_id__in=sku_ids,
+                order__order_date__range=(history_months[0], cutoff),
+            )
+            .annotate(sales_month=TruncMonth("order__order_date"))
+            .values("sku_id", "sales_month")
+            .annotate(
+                qty=Sum("quantity"),
+                gross=Sum("total_gross_sales"),
+            )
+        )
+        for item in sales_rows:
+            sales_month = item["sales_month"]
+            if isinstance(sales_month, datetime):
+                sales_month = sales_month.date()
+            sales_by_sku_month[(item["sku_id"], sales_month.replace(day=1))] = item
+
+    active_batch_id = (
+        MerchandisingMonthlySnapshot.objects.filter(batch__is_active=True)
+        .order_by("-batch__imported_at")
+        .values_list("batch_id", flat=True)
+        .first()
+    )
+    beginning_by_sku = {}
+    if active_batch_id and sku_ids:
+        beginning_by_sku = {
+            row["sku_id"]: row["beginning_qty"]
+            for row in MerchandisingMonthlySnapshot.objects.filter(
+                batch_id=active_batch_id,
+                sku_id__in=sku_ids,
+                month=selected_month,
+            ).values("sku_id", "beginning_qty")
+        }
+
+    products = {}
+    for sku in skus:
+        product = sku.product_variant.product
+        selected_sales = sales_by_sku_month.get((sku.id, selected_month), {})
+        actual_qty = Decimal(selected_sales.get("qty") or 0)
+        actual_gross = Decimal(selected_sales.get("gross") or 0)
+        beginning_qty = beginning_by_sku.get(sku.id)
+        affected = affected_by_sku.get(sku.id)
+        lost_qty = affected["lost_qty"] if affected else Decimal("0")
+        lost_gross = affected["lost_gross"] if affected else Decimal("0")
+        size_row = {
+            "sku": sku,
+            "size": sku.size or "—",
+            "affected": bool(affected),
+            "history_cells": [
+                {
+                    "month": history_month,
+                    "qty": Decimal(
+                        sales_by_sku_month.get((sku.id, history_month), {}).get("qty") or 0
+                    ),
+                }
+                for history_month in history_months
+            ],
+            "beginning_qty": beginning_qty,
+            "str": (
+                actual_qty / Decimal(beginning_qty) * 100
+                if beginning_qty is not None and beginning_qty > 0
+                else None
+            ),
+            "actual_qty": actual_qty,
+            "actual_gross": actual_gross,
+            "lost_days": affected["lost_days"] if affected else 0,
+            "lost_qty": lost_qty,
+            "lost_gross": lost_gross,
+            "potential_qty": actual_qty + lost_qty,
+            "potential_gross": actual_gross + lost_gross,
+            "reference_month": affected["reference_month"] if affected else None,
+            "reference_start": affected["reference_start"] if affected else None,
+            "reference_end": affected["reference_end"] if affected else None,
+            "selling_days": affected["selling_days"] if affected else None,
+            "daily_rate": affected["daily_rate"] if affected else None,
+            "inventory_exception": affected["inventory_exception"] if affected else False,
+        }
+        group = products.setdefault(product.id, {
+            "product_id": product.id,
+            "product": product,
+            "article": product.article or product.name,
+            "sizes": [],
+            "affected_sizes": [],
+            "actual_qty": Decimal("0"),
+            "actual_gross": Decimal("0"),
+            "lost_qty": Decimal("0"),
+            "lost_gross": Decimal("0"),
+            "potential_qty": Decimal("0"),
+            "potential_gross": Decimal("0"),
+        })
+        group["sizes"].append(size_row)
+        if size_row["affected"]:
+            group["affected_sizes"].append(size_row["size"])
+        for field in (
+            "actual_qty", "actual_gross", "lost_qty", "lost_gross",
+            "potential_qty", "potential_gross",
+        ):
+            group[field] += size_row[field]
+    product_rows = sorted(products.values(), key=lambda row: row["product"].name.casefold())
     return {
         "month_options": month_options,
         "selected_value": selected_value,
         "selected_month": selected_month,
         "cutoff": cutoff,
-        "rows": rows,
-        "sku_count": len(rows),
-        "product_count": len({row["product_id"] for row in rows}),
-        "actual_qty": sum((row["actual_qty"] for row in rows), Decimal("0")),
-        "lost_qty": sum((row["lost_qty"] for row in rows), Decimal("0")),
-        "potential_qty": sum((row["potential_qty"] for row in rows), Decimal("0")),
-        "actual_gross": sum((row["actual_gross"] for row in rows), Decimal("0")),
-        "lost_gross": sum((row["lost_gross"] for row in rows), Decimal("0")),
-        "potential_gross": sum((row["potential_gross"] for row in rows), Decimal("0")),
-        "exception_count": sum(1 for row in rows if row["inventory_exception"]),
+        "history_months": history_months,
+        "rows": affected_rows,
+        "products": product_rows,
+        "sku_count": len(affected_rows),
+        "displayed_sku_count": len(skus),
+        "product_count": len(product_rows),
+        "actual_qty": sum((row["actual_qty"] for row in product_rows), Decimal("0")),
+        "lost_qty": sum((row["lost_qty"] for row in product_rows), Decimal("0")),
+        "potential_qty": sum((row["potential_qty"] for row in product_rows), Decimal("0")),
+        "actual_gross": sum((row["actual_gross"] for row in product_rows), Decimal("0")),
+        "lost_gross": sum((row["lost_gross"] for row in product_rows), Decimal("0")),
+        "potential_gross": sum((row["potential_gross"] for row in product_rows), Decimal("0")),
+        "exception_count": sum(1 for row in affected_rows if row["inventory_exception"]),
     }
 
 

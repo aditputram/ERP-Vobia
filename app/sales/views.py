@@ -1556,6 +1556,23 @@ def _product_performance_pivot(lines, request):
     selected_metrics = [metric_definitions[key] for key in selected_metric_keys]
     include_str = "str" in selected_metric_keys
 
+    metric_inputs = {
+        "qty": {"qty"},
+        "orders": set(),
+        "gross": {"gross"},
+        "net": {"net"},
+        "discount": {"gross", "net"},
+        "discount_rate": {"gross", "net"},
+        "cogs": {"cogs"},
+        "gpm": {"gpm"},
+        "gpm_rate": {"gpm", "gross"},
+        "aov": {"net"},
+        "avg_price": {"net", "qty"},
+        "str": {"qty"},
+    }
+    required_sums = set().union(*(metric_inputs[key] for key in selected_metric_keys))
+    include_orders = any(key in {"orders", "aov"} for key in selected_metric_keys)
+
     dimensions = {
         "product": F("product_name_snapshot"),
         "month": TruncMonth("order__order_date"),
@@ -1574,12 +1591,79 @@ def _product_performance_pivot(lines, request):
         "category": F("category_snapshot"),
     }
 
-    beginning_by_stock_key = {}
+    def aggregate(*dimension_names, orders=False):
+        annotations = {
+            f"pivot_{index}": dimensions[name]
+            for index, name in enumerate(dimension_names)
+        }
+        measures = {}
+        if "qty" in required_sums:
+            measures["qty"] = Sum("quantity")
+        if "gross" in required_sums:
+            measures["gross"] = Sum("total_gross_sales")
+        if "net" in required_sums:
+            measures["net"] = Sum("total_net_sales")
+        if "cogs" in required_sums:
+            measures["cogs"] = Sum("total_cogs")
+        if "gpm" in required_sums:
+            measures["gpm"] = Sum("gpm")
+        if orders:
+            measures["orders"] = Count("order_id", distinct=True)
+        return list(
+            lines.annotate(**annotations)
+            .values(*annotations)
+            .annotate(**measures)
+            .order_by(*annotations)
+        )
+
+    cell_rows = aggregate(row_dimension, column_dimension, orders=include_orders)
+    row_keys = list(dict.fromkeys(row["pivot_0"] for row in cell_rows))
+    column_keys = list(dict.fromkeys(row["pivot_1"] for row in cell_rows))
+    cells = {(row["pivot_0"], row["pivot_1"]): row for row in cell_rows}
+
+    def add_sums(target, row):
+        for field in required_sums:
+            target[field] = target.get(field, 0) + (row.get(field) or 0)
+
+    row_total_rows = {}
+    column_total_rows = {}
+    grand_totals = {}
+    for row in cell_rows:
+        add_sums(row_total_rows.setdefault(row["pivot_0"], {}), row)
+        add_sums(column_total_rows.setdefault(row["pivot_1"], {}), row)
+        add_sums(grand_totals, row)
+
+    if include_orders:
+        def order_totals(*dimension_names):
+            annotations = {
+                f"pivot_{index}": dimensions[name]
+                for index, name in enumerate(dimension_names)
+            }
+            return {
+                tuple(row[f"pivot_{index}"] for index in range(len(dimension_names))): row["orders"]
+                for row in lines.annotate(**annotations)
+                .values(*annotations)
+                .annotate(orders=Count("order_id", distinct=True))
+            }
+
+        for key, value in order_totals(row_dimension).items():
+            row_total_rows.setdefault(key[0], {})["orders"] = value
+        for key, value in order_totals(column_dimension).items():
+            column_total_rows.setdefault(key[0], {})["orders"] = value
+        grand_totals["orders"] = lines.aggregate(
+            orders=Count("order_id", distinct=True)
+        )["orders"] or 0
+
     if include_str:
-        stock_keys = list(
+        stock_annotations = {
+            "pivot_0": dimensions[row_dimension],
+            "pivot_1": dimensions[column_dimension],
+            "stock_month": TruncMonth("order__order_date"),
+        }
+        stock_rows = list(
             lines.filter(sku_id__isnull=False)
-            .annotate(stock_month=TruncMonth("order__order_date"))
-            .values_list("sku_id", "stock_month")
+            .annotate(**stock_annotations)
+            .values("pivot_0", "pivot_1", "sku_id", "stock_month")
             .distinct()
         )
         active_batch_id = (
@@ -1588,63 +1672,53 @@ def _product_performance_pivot(lines, request):
             .values_list("batch_id", flat=True)
             .first()
         )
-        if active_batch_id and stock_keys:
-            sku_ids = {sku_id for sku_id, _month in stock_keys}
-            months = {month for _sku_id, month in stock_keys}
+        beginning_by_stock_key = {}
+        if active_batch_id and stock_rows:
             beginning_by_stock_key = {
                 (row["sku_id"], row["month"]): row["beginning_qty"]
                 for row in MerchandisingMonthlySnapshot.objects.filter(
                     batch_id=active_batch_id,
-                    sku_id__in=sku_ids,
-                    month__in=months,
+                    sku_id__in={row["sku_id"] for row in stock_rows},
+                    month__in={row["stock_month"] for row in stock_rows},
                 ).values("sku_id", "month", "beginning_qty")
             }
 
-    def beginning_totals(*dimension_names):
-        if not include_str:
-            return {}
-        annotations = {
-            f"pivot_{index}": dimensions[name]
-            for index, name in enumerate(dimension_names)
-        }
-        totals = {}
-        rows = (
-            lines.filter(sku_id__isnull=False)
-            .annotate(**annotations, stock_month=TruncMonth("order__order_date"))
-            .values(*annotations, "sku_id", "stock_month")
-            .distinct()
-        )
-        for row in rows:
-            beginning = beginning_by_stock_key.get((row["sku_id"], row["stock_month"]))
+        beginning_cells = defaultdict(Decimal)
+        beginning_rows = defaultdict(Decimal)
+        beginning_columns = defaultdict(Decimal)
+        beginning_grand = Decimal("0")
+        seen_cells = set()
+        seen_rows = set()
+        seen_columns = set()
+        seen_grand = set()
+        for row in stock_rows:
+            stock_key = (row["sku_id"], row["stock_month"])
+            beginning = beginning_by_stock_key.get(stock_key)
             if beginning is None:
                 continue
-            key = tuple(row[f"pivot_{index}"] for index in range(len(dimension_names)))
-            totals[key] = totals.get(key, Decimal("0")) + beginning
-        return totals
-
-    def aggregate(*dimension_names):
-        annotations = {
-            f"pivot_{index}": dimensions[name]
-            for index, name in enumerate(dimension_names)
-        }
-        rows = list(
-            lines.annotate(**annotations)
-            .values(*annotations)
-            .annotate(
-                qty=Sum("quantity"),
-                orders=Count("order_id", distinct=True),
-                gross=Sum("total_gross_sales"),
-                net=Sum("total_net_sales"),
-                cogs=Sum("total_cogs"),
-                gpm=Sum("gpm"),
-            )
-            .order_by(*annotations)
-        )
-        beginnings = beginning_totals(*dimension_names)
-        for row in rows:
-            key = tuple(row[f"pivot_{index}"] for index in range(len(dimension_names)))
-            row["beginning"] = beginnings.get(key)
-        return rows
+            cell_key = (row["pivot_0"], row["pivot_1"])
+            unique_cell = (*cell_key, *stock_key)
+            if unique_cell not in seen_cells:
+                beginning_cells[cell_key] += beginning
+                seen_cells.add(unique_cell)
+            unique_row = (row["pivot_0"], *stock_key)
+            if unique_row not in seen_rows:
+                beginning_rows[row["pivot_0"]] += beginning
+                seen_rows.add(unique_row)
+            unique_column = (row["pivot_1"], *stock_key)
+            if unique_column not in seen_columns:
+                beginning_columns[row["pivot_1"]] += beginning
+                seen_columns.add(unique_column)
+            if stock_key not in seen_grand:
+                beginning_grand += beginning
+                seen_grand.add(stock_key)
+        for key, row in cells.items():
+            row["beginning"] = beginning_cells.get(key)
+        for key, row in row_total_rows.items():
+            row["beginning"] = beginning_rows.get(key)
+        for key, row in column_total_rows.items():
+            row["beginning"] = beginning_columns.get(key)
+        grand_totals["beginning"] = beginning_grand or None
 
     def metric_values(row):
         qty = row.get("qty") or 0
@@ -1681,15 +1755,6 @@ def _product_performance_pivot(lines, request):
         if dimension == "date":
             return date_format(value, "d M Y")
         return str(value)
-
-    cell_rows = aggregate(row_dimension, column_dimension)
-    row_total_rows = {row["pivot_0"]: row for row in aggregate(row_dimension)}
-    column_total_rows = {row["pivot_0"]: row for row in aggregate(column_dimension)}
-    row_keys = list(dict.fromkeys(row["pivot_0"] for row in cell_rows))
-    column_keys = list(dict.fromkeys(row["pivot_1"] for row in cell_rows))
-    cells = {(row["pivot_0"], row["pivot_1"]): row for row in cell_rows}
-    grand_totals = _totals(lines)
-    grand_totals["beginning"] = beginning_totals().get(())
 
     return {
         "dimension_options": [

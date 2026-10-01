@@ -1957,6 +1957,7 @@ class SalesReportRouteTests(TestCase):
     def test_data_explorer_skips_unselected_traffic_and_stock_queries(self):
         traffic_table = TrafficProductMetric._meta.db_table.lower()
         stock_table = MerchandisingMonthlySnapshot._meta.db_table.lower()
+        sales_table = SalesOrderLine._meta.db_table.lower()
 
         with CaptureQueriesContext(connection) as queries:
             response = self.client.get(reverse("sales:pivot_analysis"), {
@@ -1967,6 +1968,14 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(traffic_table, sql)
         self.assertNotIn(stock_table, sql)
+        self.assertEqual(
+            sum(
+                sales_table in query["sql"].lower()
+                and "sum(" in query["sql"].lower()
+                for query in queries.captured_queries
+            ),
+            1,
+        )
 
     def test_pivot_str_uses_sales_qty_divided_by_beginning_qty(self):
         status = ProductStatus.objects.create(code="STR-REGULAR", name="STR Regular")

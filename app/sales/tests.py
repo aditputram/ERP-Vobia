@@ -136,13 +136,18 @@ class SalesReportRouteTests(TestCase):
                 total_net_sales=Decimal(quantity * 100000),
             )
 
-        def potential_rows(_cutoff, selected_month, product_ids=None):
+        def potential_rows(history_months, product_ids, _monthly_actuals):
             self.assertEqual(product_ids, [product.id])
-            if selected_month == date(2026, 9, 1):
-                return [{"product_id": product.id, "lost_qty": Decimal("10")}]
-            return []
+            self.assertEqual(
+                history_months,
+                [date(2026, 7, 1), date(2026, 8, 1), date(2026, 9, 1)],
+            )
+            return {(product.id, date(2026, 9, 1)): Decimal("10")}
 
-        with patch("sales.views._potential_sales_rows", side_effect=potential_rows):
+        with patch(
+            "sales.views._forecast_potential_lost_by_month",
+            side_effect=potential_rows,
+        ):
             response = self.client.get(
                 reverse("sales:forecast_recommendation"),
                 {"target_month": "2026-10"},
@@ -159,6 +164,71 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(recommendation["recommendation_total"], Decimal("72"))
         self.assertContains(response, "Actual 70 + Lost 10")
         self.assertContains(response, "72 pcs")
+
+    @patch("sales.views.timezone.localdate", return_value=date(2026, 10, 1))
+    def test_forecast_recommendation_batches_completed_month_stockout_history(self, _mock_today):
+        status = ProductStatus.objects.create(code="BATCH-REGULAR", name="Regular")
+        category = Category.objects.create(code="BATCH-KNIT", name="Knitwear")
+        product = Product.objects.create(
+            code="BATCH-PRODUCT",
+            name="Batch Forecast Product",
+            status=status,
+            category=category,
+        )
+        variant = ProductVariant.objects.create(product=product, name="Default")
+        sku = SKU.objects.create(sku="BATCH-SKU", product_variant=variant)
+        FIFOOpeningSnapshot.objects.create(
+            sku=sku,
+            cutover_date=date(2026, 7, 31),
+            opening_qty=Decimal("100"),
+            frozen_unit_cogs=Decimal("50000"),
+            recorded_by=self.user,
+        )
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="BATCH-AUG-20",
+            order_datetime=timezone.make_aware(datetime(2026, 8, 20, 10, 0)),
+            order_date=date(2026, 8, 20),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        line = SalesOrderLine.objects.create(
+            order=order,
+            sku=sku,
+            quantity=100,
+            net_unit_price=Decimal("100000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("10000000"),
+            total_net_sales=Decimal("10000000"),
+        )
+        InventoryMovement.objects.create(
+            movement_key="SALES|BATCH-AUG-20",
+            movement_date=date(2026, 8, 20),
+            movement_type=InventoryMovement.MovementType.SALES_OUT,
+            direction=InventoryMovement.Direction.OUT,
+            sku=sku,
+            quantity=Decimal("100"),
+            source_reference=order.order_number,
+            sales_line=line,
+            posted_by=self.user,
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                reverse("sales:forecast_recommendation"),
+                {"target_month": "2026-10"},
+            )
+
+        row = response.context["recommendation"]["rows"][0]
+        self.assertEqual(
+            [cell["demand_qty"] for cell in row["cells"]],
+            [Decimal("0"), Decimal("155"), Decimal("150")],
+        )
+        self.assertLessEqual(len(queries), 20)
 
     def test_traffic_analysis_uses_gross_sales_and_unique_visitors(self):
         status = ProductStatus.objects.create(code="TRAFFIC-REGULAR", name="Regular")

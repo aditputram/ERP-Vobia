@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
@@ -21,7 +22,7 @@ from openpyxl import Workbook
 
 from audit.services import record_audit
 from accounts.access import module_level
-from inventory.models import InventoryMovement
+from inventory.models import FIFOOpeningSnapshot, InventoryMovement
 from inventory.services.fifo import CUTOVER_DATE
 from inventory.services.reporting import inventory_summary_rows
 from master_data.models import Category, MarketplaceProductMapping, Product, ProductStatus, SKU, Subcategory
@@ -1995,6 +1996,193 @@ def _percent_text(value):
     return f"{value * Decimal('100'):+.2f}%".replace(".", ",")
 
 
+def _forecast_potential_lost_by_month(history_months, product_ids, monthly_actuals):
+    """Calculate completed-month lost demand with one shared inventory read."""
+    tracking_start = CUTOVER_DATE + timedelta(days=1)
+    potential_months = [
+        month for month in history_months
+        if _shift_month(month, 1) - timedelta(days=1) > CUTOVER_DATE
+    ]
+    if not potential_months:
+        return {}
+
+    product_ids = set(product_ids)
+    actuals_by_product = defaultdict(list)
+    for item in monthly_actuals:
+        month = item["sales_month"]
+        if isinstance(month, datetime):
+            month = month.date()
+        month = month.replace(day=1)
+        if item["product_id"] in product_ids and month >= tracking_start.replace(day=1):
+            actuals_by_product[item["product_id"]].append({**item, "sales_month": month})
+    if not actuals_by_product:
+        return {}
+
+    skus = list(
+        SKU.objects.filter(
+            is_active=True,
+            product_variant__product_id__in=actuals_by_product,
+        ).select_related("product_variant__product")
+    )
+    if not skus:
+        return {}
+    sku_ids = [sku.id for sku in skus]
+    product_by_sku = {sku.id: sku.product_variant.product_id for sku in skus}
+    max_cutoff = _shift_month(potential_months[-1], 1) - timedelta(days=1)
+
+    openings = {
+        row["sku_id"]: Decimal(row["opening_qty"] or 0)
+        for row in FIFOOpeningSnapshot.objects.filter(
+            sku_id__in=sku_ids,
+            cutover_date__lte=max_cutoff,
+        ).values("sku_id", "opening_qty")
+    }
+    movement_rows = list(
+        InventoryMovement.objects.filter(
+            sku_id__in=sku_ids,
+            movement_date__lte=max_cutoff,
+        )
+        .exclude(movement_type=InventoryMovement.MovementType.OPENING)
+        .exclude(sales_line__order__affects_inventory=False)
+        .values("sku_id", "movement_date", "direction", "movement_type")
+        .annotate(total=Sum("quantity"))
+        .order_by("movement_date")
+    )
+    daily_by_sku = defaultdict(lambda: defaultdict(lambda: {
+        "in": Decimal("0"),
+        "out": Decimal("0"),
+    }))
+    known_skus = set(openings)
+    for movement in movement_rows:
+        sku_id = movement["sku_id"]
+        known_skus.add(sku_id)
+        day = daily_by_sku[sku_id][movement["movement_date"]]
+        direction = "in" if movement["direction"] == InventoryMovement.Direction.IN else "out"
+        day[direction] += Decimal(movement["total"] or 0)
+
+    first_sales = {}
+    first_sale_rows = (
+        SalesOrderLine.objects.filter(
+            is_counted=True,
+            sku_id__in=sku_ids,
+            order__order_date__range=(tracking_start, max_cutoff),
+        )
+        .annotate(sales_month=TruncMonth("order__order_date"))
+        .values("sales_month", "sku_id")
+        .annotate(first_sale_date=Min("order__order_date"))
+    )
+    for row in first_sale_rows:
+        month = row["sales_month"]
+        if isinstance(month, datetime):
+            month = month.date()
+        first_sales[(month.replace(day=1), row["sku_id"])] = row["first_sale_date"]
+
+    def balance_through(sku_id, cutoff):
+        balance = openings.get(sku_id, Decimal("0"))
+        for movement_date, totals in daily_by_sku[sku_id].items():
+            if movement_date > cutoff:
+                break
+            balance += totals["in"] - totals["out"]
+        return balance
+
+    reference_months = {
+        item["sales_month"]
+        for items in actuals_by_product.values()
+        for item in items
+        if item["sales_month"] <= potential_months[-1]
+    }
+    selling_starts = {}
+    for month in reference_months:
+        cutoff = _shift_month(month, 1) - timedelta(days=1)
+        for sku in skus:
+            balance = openings.get(sku.id, Decimal("0"))
+            for movement_date, totals in daily_by_sku[sku.id].items():
+                if movement_date >= month:
+                    break
+                balance += totals["in"] - totals["out"]
+            if sku.id not in known_skus or balance > 0:
+                start_date = month
+            else:
+                start_date = None
+                for movement_date, totals in daily_by_sku[sku.id].items():
+                    if movement_date < month:
+                        continue
+                    if movement_date > cutoff:
+                        break
+                    balance += totals["in"]
+                    if balance > 0:
+                        start_date = movement_date
+                        break
+                    balance -= totals["out"]
+            first_sale = first_sales.get((month, sku.id))
+            if first_sale and (not start_date or first_sale < start_date):
+                start_date = first_sale
+            selling_starts[(sku.id, month)] = start_date
+
+    lost_by_product_month = {}
+    for selected_month in potential_months:
+        cutoff = _shift_month(selected_month, 1) - timedelta(days=1)
+        balances_by_product = defaultdict(list)
+        starts_by_product_month = defaultdict(list)
+        latest_inventory_date = {}
+        sales_out_days = set()
+        for sku in skus:
+            product_id = product_by_sku[sku.id]
+            balances_by_product[product_id].append(balance_through(sku.id, cutoff))
+        for movement in movement_rows:
+            movement_date = movement["movement_date"]
+            if movement_date < tracking_start:
+                continue
+            if movement_date > cutoff:
+                break
+            product_id = product_by_sku[movement["sku_id"]]
+            latest_inventory_date[product_id] = max(
+                latest_inventory_date.get(product_id, movement_date), movement_date
+            )
+            if (
+                movement["movement_type"] == InventoryMovement.MovementType.SALES_OUT
+                and movement["total"]
+            ):
+                sales_out_days.add((product_id, movement_date))
+
+        for product_id, items in actuals_by_product.items():
+            eligible = [item for item in items if item["sales_month"] <= selected_month]
+            if not eligible:
+                continue
+            actual = max(eligible, key=lambda item: item["sales_month"])
+            reference_month = actual["sales_month"]
+            for sku in skus:
+                if product_by_sku[sku.id] != product_id:
+                    continue
+                start_date = selling_starts.get((sku.id, reference_month))
+                if start_date:
+                    starts_by_product_month[(product_id, reference_month)].append(start_date)
+            balances = balances_by_product.get(product_id, [])
+            starts = starts_by_product_month.get((product_id, reference_month), [])
+            sold_out_date = actual["sold_out_date"]
+            if (
+                not balances
+                or any(balance != 0 for balance in balances)
+                or not starts
+                or sold_out_date >= cutoff
+                or latest_inventory_date.get(product_id) != sold_out_date
+                or (product_id, sold_out_date) not in sales_out_days
+            ):
+                continue
+            selling_days = (sold_out_date - min(starts)).days + 1
+            actual_qty = Decimal(actual["actual_qty"] or 0)
+            lost_start = max(selected_month, sold_out_date + timedelta(days=1))
+            lost_days = max((cutoff - lost_start).days + 1, 0)
+            if selling_days <= 0 or actual_qty <= 0 or not lost_days:
+                continue
+            lost_qty = (
+                actual_qty / Decimal(selling_days) * Decimal(lost_days)
+            ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            if lost_qty > 0:
+                lost_by_product_month[(product_id, selected_month)] = lost_qty
+    return lost_by_product_month
+
+
 def _forecast_recommendation_context(request):
     today = timezone.localdate()
     current_month = today.replace(day=1)
@@ -2050,11 +2238,12 @@ def _forecast_recommendation_context(request):
         for product in products
     }
     if product_ids:
-        actuals = (
+        query_start = min(history_months[0], CUTOVER_DATE + timedelta(days=1))
+        actuals = list(
             SalesOrderLine.objects.filter(
                 is_counted=True,
                 sku__product_variant__product_id__in=product_ids,
-                order__order_date__gte=history_months[0],
+                order__order_date__gte=query_start,
                 order__order_date__lt=target_month,
             )
             .annotate(sales_month=TruncMonth("order__order_date"))
@@ -2062,7 +2251,10 @@ def _forecast_recommendation_context(request):
                 product_id=F("sku__product_variant__product_id"),
                 sales_month=F("sales_month"),
             )
-            .annotate(actual_qty=Sum("quantity"))
+            .annotate(
+                actual_qty=Sum("quantity"),
+                sold_out_date=Max("order__order_date"),
+            )
         )
         for item in actuals:
             month = item["sales_month"]
@@ -2074,14 +2266,11 @@ def _forecast_recommendation_context(request):
                     item["actual_qty"] or 0
                 )
 
-        for month in history_months:
-            cutoff = _shift_month(month, 1) - timedelta(days=1)
-            for item in _potential_sales_rows(cutoff, month, product_ids=product_ids):
-                product_id = item["product_id"]
-                if product_id in histories:
-                    histories[product_id][month]["lost_qty"] = Decimal(
-                        item["lost_qty"] or 0
-                    )
+        for (product_id, month), lost_qty in _forecast_potential_lost_by_month(
+            history_months, product_ids, actuals
+        ).items():
+            if product_id in histories:
+                histories[product_id][month]["lost_qty"] = lost_qty
 
     months_complete = all(month < current_month for month in history_months)
     rows = []

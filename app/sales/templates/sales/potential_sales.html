@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Sales Potential Sales · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">SALES · SALES PLANNING</p>
+    <h1>Potential Sales</h1>
+    <p>Lost sales karena SKU/size tidak tersedia, dihitung mulai Juli 2026.</p>
+  </div>
+</header>
+
+<form method="get" class="panel report-filter" data-auto-submit data-preserve-scroll>
+  <label>Bulan<select name="month">{% for item in report.month_options %}<option value="{{ item.value }}" {% if report.selected_value == item.value %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select></label>
+  <a class="secondary-button" href="{% url 'sales:potential_sales' %}">Reset</a>
+</form>
+
+<section class="panel section-gap">
+  <div class="panel-header">
+    <div>
+      <p class="eyebrow">LOST SALES · PER SKU/SIZE</p>
+      <h2>{{ report.selected_month|date:"F Y" }}</h2>
+      <p class="muted">Posisi data sampai {{ report.cutoff|date:"d F Y" }}. Potential Sales = Actual Sales + Potential Lost Sales.</p>
+    </div>
+    <span class="pill">{{ report.product_count }} product · {{ report.sku_count }} SKU terdampak</span>
+  </div>
+  <div class="metric-grid">
+    <article class="metric-card"><span>ACTUAL SALES TERDAMPAK</span><strong>{{ report.actual_qty|floatformat:"0g" }} pcs</strong><small>Rp {{ report.actual_gross|floatformat:"0g" }}</small></article>
+    <article class="metric-card"><span>POTENTIAL LOST SALES</span><strong>{{ report.lost_qty|floatformat:"0g" }} pcs</strong><small>Rp {{ report.lost_gross|floatformat:"0g" }}</small></article>
+    <article class="metric-card"><span>POTENTIAL SALES</span><strong>{{ report.potential_qty|floatformat:"0g" }} pcs</strong><small>Rp {{ report.potential_gross|floatformat:"0g" }}</small></article>
+    <article class="metric-card"><span>STOCK EXCEPTION</span><strong>{{ report.exception_count|floatformat:"0g" }}</strong><small>SKU dengan saldo negatif / sales tanpa stok tersedia</small></article>
+  </div>
+</section>
+
+<section class="panel section-gap">
+  <div class="panel-header">
+    <div>
+      <p class="eyebrow">DETAIL LOST SALES</p>
+      <h2>Product dan size terdampak</h2>
+      <p class="muted">Kecepatan jual memakai periode SKU masih tersedia. Jika stok sudah kosong sejak awal bulan, sistem memakai periode penjualan terakhir SKU tersebut.</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="potential-sales-table">
+      <thead><tr><th>Product</th><th>SKU / Size</th><th>Acuan Penjualan</th><th>Actual</th><th>Hari Tanpa Stok</th><th>Potential Lost</th><th>Potential Sales</th><th>Posisi Stok</th></tr></thead>
+      <tbody>
+        {% for row in report.rows %}
+        <tr>
+          <td><strong>{{ row.article }}</strong>{% if row.product.name != row.article %}<small class="table-subcopy">{{ row.product.name }}</small>{% endif %}<small class="table-subcopy">{{ row.product.status.name }} · {{ row.product.category.name }}</small></td>
+          <td><strong>{{ row.sku.sku }}</strong><small class="table-subcopy">Size {{ row.size }}</small></td>
+          <td><strong>{{ row.reference_month|date:"M Y" }} · {{ row.selling_days }} hari</strong><small class="table-subcopy">{{ row.reference_start|date:"d M" }}–{{ row.reference_end|date:"d M Y" }}</small><small class="table-subcopy">{{ row.daily_rate|floatformat:"2g" }} pcs/hari</small></td>
+          <td><strong>{{ row.actual_qty|floatformat:"0g" }} pcs</strong><small class="table-subcopy">Rp {{ row.actual_gross|floatformat:"0g" }}</small></td>
+          <td><strong>{{ row.lost_days }} hari</strong></td>
+          <td><strong>{{ row.lost_qty|floatformat:"0g" }} pcs</strong><small class="table-subcopy">Rp {{ row.lost_gross|floatformat:"0g" }}</small></td>
+          <td><strong>{{ row.potential_qty|floatformat:"0g" }} pcs</strong><small class="table-subcopy">Rp {{ row.potential_gross|floatformat:"0g" }}</small></td>
+          <td><strong>{{ row.opening_balance|floatformat:"0g" }} → {{ row.ending_balance|floatformat:"0g" }}</strong>{% if row.inventory_exception %}<small class="table-subcopy metric-negative">Stock ledger perlu dicek</small>{% else %}<small class="table-subcopy">Opening → Ending</small>{% endif %}</td>
+        </tr>
+        {% empty %}<tr><td colspan="8"><div class="empty-state">Tidak ada SKU yang terdeteksi kehilangan penjualan pada bulan ini.</div></td></tr>{% endfor %}
+      </tbody>
+      {% if report.rows %}<tfoot><tr><th colspan="3">Total</th><td><strong>{{ report.actual_qty|floatformat:"0g" }} pcs</strong></td><td>—</td><td><strong>{{ report.lost_qty|floatformat:"0g" }} pcs</strong></td><td><strong>{{ report.potential_qty|floatformat:"0g" }} pcs</strong></td><td>—</td></tr></tfoot>{% endif %}
+    </table>
+  </div>
+</section>
+{% endblock %}

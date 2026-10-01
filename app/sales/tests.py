@@ -38,7 +38,7 @@ class SalesReportRouteTests(TestCase):
         return product, sku
 
     def test_sales_report_routes_render(self):
-        for name in ("sales:planning_builder", "sales:forecast", "sales:forecast_recommendation", "sales:product_performance", "sales:pivot_analysis", "sales:traffic_analysis", "sales:pareto", "sales:transactions", "sales:input_transaction"):
+        for name in ("sales:planning_builder", "sales:forecast", "sales:potential_sales", "sales:forecast_recommendation", "sales:product_performance", "sales:pivot_analysis", "sales:traffic_analysis", "sales:pareto", "sales:transactions", "sales:input_transaction"):
             with self.subTest(name=name):
                 response = self.client.get(reverse(name))
                 self.assertEqual(response.status_code, 200)
@@ -91,11 +91,127 @@ class SalesReportRouteTests(TestCase):
         content = response.content.decode()
         planning_index = content.index(">Planning Builder</a>")
         overview_index = content.index(">Forecast Overview</a>")
+        potential_index = content.index(">Potential Sales</a>")
         recommendation_index = content.index(">Forecast Recommendation</a>")
         self.assertLess(planning_index, overview_index)
-        self.assertLess(overview_index, recommendation_index)
+        self.assertLess(overview_index, potential_index)
+        self.assertLess(potential_index, recommendation_index)
         self.assertContains(response, "CONSERVATIVE")
         self.assertContains(response, "Base dan Aggressive belum diaktifkan")
+
+    def test_potential_sales_starts_in_july_and_counts_stockout_per_sku(self):
+        status = ProductStatus.objects.create(code="POTENTIAL-REGULAR", name="Regular")
+        category = Category.objects.create(code="POTENTIAL-SHIRT", name="Shirt")
+        product = Product.objects.create(
+            code="POTENTIAL-OCEANIA",
+            article="Oceania",
+            name="Flannel Shirt - Oceania",
+            status=status,
+            category=category,
+        )
+        variant = ProductVariant.objects.create(product=product, name="Default")
+        size_m = SKU.objects.create(
+            sku="POTENTIAL-OCEANIA-M",
+            product_variant=variant,
+            size="M",
+            current_retail_price=Decimal("275000"),
+        )
+        size_xl = SKU.objects.create(
+            sku="POTENTIAL-OCEANIA-XL",
+            product_variant=variant,
+            size="XL",
+            current_retail_price=Decimal("275000"),
+        )
+        for sku, qty in ((size_m, 0), (size_xl, 20)):
+            FIFOOpeningSnapshot.objects.create(
+                sku=sku,
+                cutover_date=date(2026, 7, 31),
+                opening_qty=Decimal(qty),
+                frozen_unit_cogs=Decimal("100000"),
+                recorded_by=self.user,
+            )
+
+        for index, (order_date, quantity) in enumerate(
+            ((date(2026, 7, 1), 3), (date(2026, 7, 5), 15)), start=1
+        ):
+            order = SalesOrder.objects.create(
+                source=SalesOrder.Source.SHOPEE,
+                source_label="Shopee",
+                order_number=f"POTENTIAL-JUL-{index}",
+                order_datetime=timezone.make_aware(
+                    datetime.combine(order_date, datetime.min.time())
+                ),
+                order_date=order_date,
+                current_status="Selesai",
+                source_status="Selesai",
+                is_final=True,
+                import_origin=SalesOrder.ImportOrigin.HISTORICAL,
+                affects_inventory=False,
+                first_seen_batch_id=uuid.uuid4(),
+                latest_batch_id=uuid.uuid4(),
+            )
+            SalesOrderLine.objects.create(
+                order=order,
+                sku=size_m,
+                quantity=quantity,
+                net_unit_price=Decimal("275000"),
+                retail_price_snapshot=Decimal("275000"),
+                total_gross_sales=Decimal(quantity * 275000),
+                total_net_sales=Decimal(quantity * 275000),
+            )
+
+        august_order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="POTENTIAL-AUG-CUTOFF",
+            order_datetime=timezone.make_aware(datetime(2026, 8, 31, 10, 0)),
+            order_date=date(2026, 8, 31),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        august_line = SalesOrderLine.objects.create(
+            order=august_order,
+            sku=size_xl,
+            quantity=1,
+            net_unit_price=Decimal("275000"),
+            retail_price_snapshot=Decimal("275000"),
+            total_gross_sales=Decimal("275000"),
+            total_net_sales=Decimal("275000"),
+        )
+        InventoryMovement.objects.create(
+            movement_key="SALES|POTENTIAL-AUG-CUTOFF",
+            movement_date=date(2026, 8, 31),
+            movement_type=InventoryMovement.MovementType.SALES_OUT,
+            direction=InventoryMovement.Direction.OUT,
+            sku=size_xl,
+            quantity=Decimal("1"),
+            source_reference=august_order.order_number,
+            sales_line=august_line,
+            posted_by=self.user,
+        )
+
+        august = self.client.get(reverse("sales:potential_sales"), {"month": "2026-08"})
+        july = self.client.get(reverse("sales:potential_sales"), {"month": "2026-07"})
+
+        self.assertEqual(august.status_code, 200)
+        self.assertEqual(august.context["report"]["month_options"][0]["value"], "2026-07")
+        self.assertEqual(len(august.context["report"]["rows"]), 1)
+        august_row = august.context["report"]["rows"][0]
+        self.assertEqual(august_row["sku"], size_m)
+        self.assertEqual(august_row["reference_month"], date(2026, 7, 1))
+        self.assertEqual(august_row["selling_days"], 5)
+        self.assertEqual(august_row["lost_days"], 31)
+        self.assertEqual(august_row["lost_qty"], Decimal("112"))
+        self.assertEqual(august.context["report"]["product_count"], 1)
+        self.assertContains(august, "POTENTIAL-OCEANIA-M")
+        self.assertContains(august, "112 pcs")
+
+        july_row = july.context["report"]["rows"][0]
+        self.assertEqual(july_row["lost_days"], 26)
+        self.assertEqual(july_row["lost_qty"], Decimal("94"))
 
     @patch("sales.views.timezone.localdate", return_value=date(2026, 10, 1))
     def test_forecast_recommendation_uses_percentage_trend_on_actual_plus_lost(self, _mock_today):

@@ -24,6 +24,7 @@ MODULE_TABS = {
                 "sales:planning_builder",
                 "sales:planning_filter_options",
                 "sales:forecast",
+                "sales:potential_sales",
                 "sales:forecast_recommendation",
             ),
         ),

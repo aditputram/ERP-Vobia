@@ -745,6 +745,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .data-explorer-table thead th { height:28px; }
 .data-explorer-table thead tr:nth-child(2) th { top:28px; }
 .data-explorer-table .pivot-sticky-column { padding-left:5px; padding-right:5px; }
+.data-explorer-table .pivot-article-name { text-transform:none; letter-spacing:normal; }
 .traffic-analysis-table th,.traffic-analysis-table td { padding:8px 10px; white-space:nowrap; }
 .traffic-analysis-table th:not(:first-child),.traffic-analysis-table td:not(:first-child) { text-align:center; }
 .traffic-analysis-table tbody tr:nth-child(even) { background:#f7f7f3; }

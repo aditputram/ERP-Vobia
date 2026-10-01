@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
 from statistics import median
+from string import capwords
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -1763,6 +1764,8 @@ def _product_performance_pivot(lines, request):
             return date_format(value, "M Y")
         if dimension == "date":
             return date_format(value, "d M Y")
+        if dimension == "product":
+            return capwords(str(value))
         return str(value)
 
     return {

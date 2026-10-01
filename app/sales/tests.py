@@ -2052,8 +2052,8 @@ class SalesReportRouteTests(TestCase):
 
     def test_product_performance_builds_filtered_pivot_for_selected_month(self):
         fixtures = (
-            (date(2026, 8, 10), SalesOrder.Source.SHOPEE, "Shopee", "Knitwear", "Pivot Alpha", 2, "200000", "180000", "80000"),
-            (date(2026, 9, 10), SalesOrder.Source.TIKTOK, "Tiktok", "Shirt", "Pivot Beta", 3, "450000", "400000", "160000"),
+            (date(2026, 8, 10), SalesOrder.Source.SHOPEE, "Shopee", "Knitwear", "PIVOT ALPHA", 2, "200000", "180000", "80000"),
+            (date(2026, 9, 10), SalesOrder.Source.TIKTOK, "Tiktok", "Shirt", "PIVOT BETA", 3, "450000", "400000", "160000"),
         )
         for index, (order_day, source, source_label, category, product, qty, gross, net, gpm) in enumerate(fixtures, start=1):
             order = SalesOrder.objects.create(
@@ -2086,6 +2086,12 @@ class SalesReportRouteTests(TestCase):
 
         default_response = self.client.get(reverse("sales:pivot_analysis"))
         self.assertIn(b'value="2026-09" selected', default_response.content)
+        self.assertEqual(
+            [row["label"] for row in default_response.context["pivot"]["rows"]],
+            ["Pivot Alpha", "Pivot Beta"],
+        )
+        self.assertContains(default_response, 'pivot-sticky-column pivot-article-name">Pivot Alpha')
+        self.assertContains(default_response, 'pivot-sticky-column pivot-article-name">Pivot Beta')
 
         response = self.client.get(reverse("sales:pivot_analysis"), {
             "period_type": "month",

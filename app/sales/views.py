@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
+from statistics import median
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -1162,7 +1163,9 @@ def forecast(request):
 
 @login_required
 def forecast_recommendation(request):
-    return render(request, "sales/forecast_recommendation.html")
+    return render(request, "sales/forecast_recommendation.html", {
+        "recommendation": _forecast_recommendation_context(request),
+    })
 
 
 @login_required
@@ -1811,7 +1814,7 @@ def _dashboard_period_trend(lines, start, end, grain):
     return rows
 
 
-def _potential_sales_rows(cutoff_date, selected_month):
+def _potential_sales_rows(cutoff_date, selected_month, product_ids=None):
     """Estimate monthly demand through the cutoff for physically sold-out products."""
     if not cutoff_date or cutoff_date <= CUTOVER_DATE:
         return []
@@ -1821,6 +1824,10 @@ def _potential_sales_rows(cutoff_date, selected_month):
         sku__isnull=False,
         order__order_date__range=(tracking_start, cutoff_date),
     ).exclude(sku__product_variant__product__status__code__iexact="DISCONTINUE")
+    if product_ids is not None:
+        month_lines = month_lines.filter(
+            sku__product_variant__product_id__in=product_ids
+        )
     monthly_actuals = list(
         month_lines.annotate(sales_month=TruncMonth("order__order_date")).values(
             product_id=F("sku__product_variant__product_id"),
@@ -1958,6 +1965,183 @@ def _potential_sales_rows(cutoff_date, selected_month):
             "lost_gross": lost_gross,
         })
     return sorted(rows, key=lambda row: (-row["lost_qty"], row["article"].casefold()))
+
+
+def _conservative_forecast(demand_values):
+    """Apply the agreed percentage trend to three monthly demand values."""
+    values = [Decimal(value or 0) for value in demand_values]
+    if len(values) != 3 or values[0] <= 0 or values[1] <= 0:
+        return None, [None, None]
+    changes = [
+        (values[1] - values[0]) / values[0],
+        (values[2] - values[1]) / values[1],
+    ]
+    trend = median(changes)
+    forecast = (values[2] * (Decimal("1") + trend)).quantize(
+        Decimal("1"), rounding=ROUND_HALF_UP
+    )
+    return max(forecast, Decimal("0")), changes
+
+
+def _percent_text(value):
+    if value is None:
+        return "—"
+    return f"{value * Decimal('100'):+.2f}%".replace(".", ",")
+
+
+def _forecast_recommendation_context(request):
+    today = timezone.localdate()
+    current_month = today.replace(day=1)
+    target_value = request.GET.get("target_month", "")
+    target_month = _sales_planning_month(target_value) or current_month
+    error = ""
+    if target_value and not _sales_planning_month(target_value):
+        error = "Target Month harus berupa bulan yang valid."
+
+    forecastable_products = Product.objects.filter(is_active=True).filter(
+        Q(status__name__iexact="Regular")
+        | Q(status__name__iexact="Seasonal Regular")
+    ).select_related("status", "category")
+    status_options = list(
+        forecastable_products.order_by("status__name")
+        .values_list("status__name", flat=True).distinct()
+    )
+    selected_status = request.GET.get("product_status", "")
+    if selected_status not in status_options:
+        selected_status = ""
+    if selected_status:
+        forecastable_products = forecastable_products.filter(status__name=selected_status)
+
+    category_options = list(
+        Category.objects.filter(products__in=forecastable_products)
+        .distinct().order_by("name")
+    )
+    selected_category = request.GET.get("category", "")
+    if selected_category and not any(
+        str(category.id) == selected_category for category in category_options
+    ):
+        selected_category = ""
+    if selected_category:
+        forecastable_products = forecastable_products.filter(category_id=selected_category)
+
+    product_options = list(forecastable_products.order_by("name", "code"))
+    selected_product = request.GET.get("product", "")
+    if selected_product and not any(
+        str(product.id) == selected_product for product in product_options
+    ):
+        selected_product = ""
+    if selected_product:
+        forecastable_products = forecastable_products.filter(pk=selected_product)
+
+    products = list(forecastable_products.order_by("name", "code"))
+    product_ids = [product.id for product in products]
+    history_months = [_shift_month(target_month, offset) for offset in (-3, -2, -1)]
+    histories = {
+        product.id: {
+            month: {"actual_qty": Decimal("0"), "lost_qty": Decimal("0")}
+            for month in history_months
+        }
+        for product in products
+    }
+    if product_ids:
+        actuals = (
+            SalesOrderLine.objects.filter(
+                is_counted=True,
+                sku__product_variant__product_id__in=product_ids,
+                order__order_date__gte=history_months[0],
+                order__order_date__lt=target_month,
+            )
+            .annotate(sales_month=TruncMonth("order__order_date"))
+            .values(
+                product_id=F("sku__product_variant__product_id"),
+                sales_month=F("sales_month"),
+            )
+            .annotate(actual_qty=Sum("quantity"))
+        )
+        for item in actuals:
+            month = item["sales_month"]
+            if isinstance(month, datetime):
+                month = month.date()
+            month = month.replace(day=1)
+            if month in histories[item["product_id"]]:
+                histories[item["product_id"]][month]["actual_qty"] = Decimal(
+                    item["actual_qty"] or 0
+                )
+
+        for month in history_months:
+            cutoff = _shift_month(month, 1) - timedelta(days=1)
+            for item in _potential_sales_rows(cutoff, month, product_ids=product_ids):
+                product_id = item["product_id"]
+                if product_id in histories:
+                    histories[product_id][month]["lost_qty"] = Decimal(
+                        item["lost_qty"] or 0
+                    )
+
+    months_complete = all(month < current_month for month in history_months)
+    rows = []
+    month_totals = {
+        month: {"actual_qty": Decimal("0"), "lost_qty": Decimal("0"), "demand_qty": Decimal("0")}
+        for month in history_months
+    }
+    recommendation_total = Decimal("0")
+    ready_count = 0
+    for product in products:
+        cells = []
+        for month in history_months:
+            cell = histories[product.id][month]
+            cell["demand_qty"] = cell["actual_qty"] + cell["lost_qty"]
+            cells.append({"month": month, **cell})
+            for key in ("actual_qty", "lost_qty", "demand_qty"):
+                month_totals[month][key] += cell[key]
+        if not any(cell["demand_qty"] for cell in cells):
+            continue
+        forecast, changes = _conservative_forecast(
+            [cell["demand_qty"] for cell in cells]
+        )
+        if not months_complete:
+            forecast = None
+        trend = median([change for change in changes if change is not None]) if all(
+            change is not None for change in changes
+        ) else None
+        if forecast is not None:
+            ready_count += 1
+            recommendation_total += forecast
+        rows.append({
+            "product": product,
+            "cells": cells,
+            "change_1": changes[0],
+            "change_2": changes[1],
+            "change_1_display": _percent_text(changes[0]),
+            "change_2_display": _percent_text(changes[1]),
+            "trend": trend,
+            "trend_display": _percent_text(trend),
+            "forecast_qty": forecast,
+        })
+    rows.sort(key=lambda row: (
+        row["forecast_qty"] is None,
+        -(row["forecast_qty"] or Decimal("0")),
+        row["product"].name.casefold(),
+    ))
+
+    return {
+        "target_month": target_month,
+        "target_max": current_month,
+        "history_months": history_months,
+        "months_complete": months_complete,
+        "error": error,
+        "status_options": status_options,
+        "selected_status": selected_status,
+        "category_options": category_options,
+        "selected_category": selected_category,
+        "product_options": product_options,
+        "selected_product": selected_product,
+        "forecastable_count": len(products),
+        "analyzed_count": len(rows),
+        "ready_count": ready_count,
+        "recommendation_total": recommendation_total,
+        "rows": rows,
+        "month_totals": [month_totals[month] for month in history_months],
+    }
 
 
 @login_required

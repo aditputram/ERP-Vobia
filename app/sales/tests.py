@@ -94,8 +94,70 @@ class SalesReportRouteTests(TestCase):
         self.assertLess(planning_index, overview_index)
         self.assertLess(overview_index, recommendation_index)
         self.assertContains(response, "CONSERVATIVE")
-        self.assertContains(response, "BASE")
-        self.assertContains(response, "AGGRESSIVE")
+        self.assertContains(response, "Base dan Aggressive belum diaktifkan")
+
+    @patch("sales.views.timezone.localdate", return_value=date(2026, 10, 1))
+    def test_forecast_recommendation_uses_percentage_trend_on_actual_plus_lost(self, _mock_today):
+        status = ProductStatus.objects.create(code="RECOMMEND-REGULAR", name="Regular")
+        category = Category.objects.create(code="RECOMMEND-KNIT", name="Knitwear")
+        product = Product.objects.create(
+            code="RECOMMEND-PRODUCT",
+            name="Recommendation Product",
+            status=status,
+            category=category,
+        )
+        variant = ProductVariant.objects.create(product=product, name="Default")
+        sku = SKU.objects.create(sku="RECOMMEND-SKU", product_variant=variant)
+        for index, (order_date, quantity) in enumerate((
+            (date(2026, 7, 15), 100),
+            (date(2026, 8, 15), 90),
+            (date(2026, 9, 15), 70),
+        ), start=1):
+            order = SalesOrder.objects.create(
+                source=SalesOrder.Source.SHOPEE,
+                source_label="Shopee",
+                order_number=f"RECOMMEND-{index}",
+                order_datetime=timezone.make_aware(datetime.combine(order_date, datetime.min.time())),
+                order_date=order_date,
+                current_status="Selesai",
+                source_status="Selesai",
+                is_final=True,
+                first_seen_batch_id=uuid.uuid4(),
+                latest_batch_id=uuid.uuid4(),
+            )
+            SalesOrderLine.objects.create(
+                order=order,
+                sku=sku,
+                quantity=quantity,
+                net_unit_price=Decimal("100000"),
+                retail_price_snapshot=Decimal("100000"),
+                total_gross_sales=Decimal(quantity * 100000),
+                total_net_sales=Decimal(quantity * 100000),
+            )
+
+        def potential_rows(_cutoff, selected_month, product_ids=None):
+            self.assertEqual(product_ids, [product.id])
+            if selected_month == date(2026, 9, 1):
+                return [{"product_id": product.id, "lost_qty": Decimal("10")}]
+            return []
+
+        with patch("sales.views._potential_sales_rows", side_effect=potential_rows):
+            response = self.client.get(
+                reverse("sales:forecast_recommendation"),
+                {"target_month": "2026-10"},
+            )
+
+        recommendation = response.context["recommendation"]
+        row = recommendation["rows"][0]
+        self.assertEqual(
+            [cell["demand_qty"] for cell in row["cells"]],
+            [Decimal("100"), Decimal("90"), Decimal("80")],
+        )
+        self.assertEqual(row["forecast_qty"], Decimal("72"))
+        self.assertEqual(row["trend_display"], "-10,56%")
+        self.assertEqual(recommendation["recommendation_total"], Decimal("72"))
+        self.assertContains(response, "Actual 70 + Lost 10")
+        self.assertContains(response, "72 pcs")
 
     def test_traffic_analysis_uses_gross_sales_and_unique_visitors(self):
         status = ProductStatus.objects.create(code="TRAFFIC-REGULAR", name="Regular")

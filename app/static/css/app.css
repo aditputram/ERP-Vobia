@@ -482,6 +482,14 @@ tbody tr:last-child td { border-bottom: 0; }
 .projection-table .po-locked-input:disabled { border-color: #ddd9c8; color: #777166; background: #f0eee5; cursor: not-allowed; opacity: 1; }
 .potential-sales-table th, .potential-sales-table td { padding: 8px 10px; }
 .potential-sales-table .table-subcopy { margin-top: 2px; white-space: nowrap; }
+.forecast-recommendation-wrap { max-height: 640px; overflow: auto; }
+.forecast-recommendation-table { min-width: 1180px; }
+.forecast-recommendation-table th, .forecast-recommendation-table td { padding: 8px 10px; text-align: center; white-space: nowrap; }
+.forecast-recommendation-table th:first-child, .forecast-recommendation-table td:first-child { text-align: left; }
+.forecast-recommendation-table thead th { position: sticky; top: 0; z-index: 2; background: var(--lime); color: #182006; }
+.forecast-recommendation-table tbody tr:nth-child(even) { background: #f6f6f1; }
+.forecast-recommendation-table tfoot th, .forecast-recommendation-table tfoot td { position: sticky; bottom: 0; background: #e8f3bf; font-weight: 850; }
+.forecast-recommendation-table .table-subcopy { margin-top: 2px; white-space: nowrap; }
 .scenario-row-actions { display: flex; align-items: center; gap: 7px; }
 .scenario-row-actions form { margin: 0; }
 .preview-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }

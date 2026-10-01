@@ -22,6 +22,29 @@ class TrafficPeriodState(models.Model):
         constraints = [models.UniqueConstraint(fields=["source", "month"], name="traffic_unique_source_month_state")]
 
 
+class StoreTrafficMetric(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source = models.CharField(max_length=20, choices=TrafficPeriodState.Source.choices)
+    traffic_date = models.DateField(db_index=True)
+    visitors = models.PositiveBigIntegerField(default=0)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="store_traffic_metrics",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-traffic_date", "source")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "traffic_date"],
+                name="traffic_unique_daily_store_source",
+            )
+        ]
+
+
 class TrafficImportBatch(models.Model):
     class Status(models.TextChoices):
         PARSING = "PARSING", "Parsing"

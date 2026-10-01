@@ -18,7 +18,7 @@ from inventory.models import FIFOOpeningSnapshot, InventoryException, InventoryM
 from imports.models import RawFile
 from master_data.models import Category, MarketplaceProductMapping, Product, ProductStatus, ProductVariant, SKU, Subcategory
 from merchandising.models import MerchandisingMonthlySnapshot, MerchandisingSnapshotBatch
-from traffic.models import TrafficImportBatch, TrafficProductMetric
+from traffic.models import StoreTrafficMetric, TrafficImportBatch, TrafficProductMetric
 
 from .models import SalesOrder, SalesOrderLine, SalesPlan, SalesPlanSKU, SalesPlanningScenario
 from .views import _sales_planning_totals, _save_sales_projection_preview
@@ -1348,6 +1348,50 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(response, 'name="date_from"')
         self.assertContains(response, 'name="date_to"')
         self.assertContains(response, 'data-max-visible-rows="25"')
+
+    def test_dashboard_saves_and_updates_daily_store_traffic(self):
+        url = reverse("sales:dashboard")
+
+        created = self.client.post(url, {
+            "action": "save_store_traffic",
+            "traffic_date": "2026-09-22",
+            "shopee_visitors": "1200",
+            "tiktok_visitors": "800",
+        })
+
+        self.assertRedirects(created, url)
+        self.assertEqual(StoreTrafficMetric.objects.count(), 2)
+        self.assertEqual(
+            StoreTrafficMetric.objects.get(
+                traffic_date=date(2026, 9, 22), source="Shopee"
+            ).visitors,
+            1200,
+        )
+
+        updated = self.client.post(url, {
+            "action": "save_store_traffic",
+            "traffic_date": "2026-09-22",
+            "shopee_visitors": "1500",
+            "tiktok_visitors": "900",
+        })
+
+        self.assertRedirects(updated, url)
+        self.assertEqual(StoreTrafficMetric.objects.count(), 2)
+        response = self.client.get(url, {
+            "period_type": "custom",
+            "date_from": "2026-09-22",
+            "date_to": "2026-09-22",
+        })
+        self.assertEqual(response.context["store_traffic_totals"], {
+            "Shopee": 1500,
+            "Tiktok": 900,
+            "total": 2400,
+        })
+        self.assertEqual(response.context["store_traffic_rows"][0]["date"], date(2026, 9, 22))
+        self.assertEqual(
+            AuditEvent.objects.filter(action="sales_store_traffic_saved").count(),
+            2,
+        )
 
     def test_dashboard_supports_month_quarter_semester_year_and_trend_grain(self):
         for order_day, order_number, gross in (

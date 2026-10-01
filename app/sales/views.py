@@ -34,7 +34,7 @@ from merchandising.services.planning_activity import (
 )
 from merchandising.services.builder import historical_sales_qty_for_skus, official_values_for_skus
 from merchandising.services.official_projection import _selling_contexts
-from traffic.models import TrafficProductMetric
+from traffic.models import StoreTrafficMetric, TrafficProductMetric
 
 from .forms import ManualSaleHeaderForm, ManualSaleLineFormSet
 from .models import SalesOrder, SalesOrderLine, SalesPlan, SalesPlanSKU, SalesPlanningScenario
@@ -2782,8 +2782,70 @@ def _forecast_recommendation_context(request):
     }
 
 
+def _save_store_traffic(request):
+    if not (
+        request.user.is_superuser
+        or module_level(request.user, "sales") in {"edit", "approve"}
+    ):
+        raise PermissionDenied("Input Traffic Toko memerlukan akses Edit Sales.")
+
+    try:
+        traffic_date = date.fromisoformat(request.POST.get("traffic_date", ""))
+    except (TypeError, ValueError):
+        raise ValidationError("Tanggal traffic wajib diisi.")
+    if traffic_date > timezone.localdate():
+        raise ValidationError("Tanggal traffic tidak boleh melebihi hari ini.")
+
+    values = {}
+    for source, field, label in (
+        ("Shopee", "shopee_visitors", "Traffic Shopee"),
+        ("Tiktok", "tiktok_visitors", "Traffic TikTok"),
+    ):
+        raw_value = request.POST.get(field, "").strip()
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            raise ValidationError(f"{label} wajib berupa angka bulat.")
+        if value < 0:
+            raise ValidationError(f"{label} tidak boleh negatif.")
+        values[source] = value
+
+    with transaction.atomic():
+        existing = {
+            metric.source: metric.visitors
+            for metric in StoreTrafficMetric.objects.select_for_update().filter(
+                traffic_date=traffic_date
+            )
+        }
+        for source, visitors in values.items():
+            StoreTrafficMetric.objects.update_or_create(
+                source=source,
+                traffic_date=traffic_date,
+                defaults={"visitors": visitors, "recorded_by": request.user},
+            )
+        record_audit(
+            actor=request.user,
+            action="sales_store_traffic_saved",
+            entity_type="traffic.storetrafficmetric",
+            entity_id=traffic_date.isoformat(),
+            before_values=existing,
+            after_values=values,
+        )
+
+
 @login_required
 def dashboard(request):
+    if request.method == "POST":
+        try:
+            if request.POST.get("action") != "save_store_traffic":
+                raise ValidationError("Aksi Dashboard Sales tidak valid.")
+            _save_store_traffic(request)
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0])
+        else:
+            messages.success(request, "Traffic toko harian berhasil disimpan.")
+        return redirect(request.get_full_path())
+
     all_lines = SalesOrderLine.objects.filter(is_counted=True)
     latest = all_lines.order_by("-order__order_date").values_list("order__order_date", flat=True).first() or date.today()
     earliest = all_lines.order_by("order__order_date").values_list("order__order_date", flat=True).first() or latest
@@ -2865,6 +2927,35 @@ def dashboard(request):
         _potential_sales_rows(potential_cutoff, selected_potential_month)
         if selected_potential_month else []
     )
+    store_traffic_by_date = {}
+    for metric in StoreTrafficMetric.objects.filter(
+        traffic_date__range=(start, end)
+    ).values("traffic_date", "source", "visitors"):
+        row = store_traffic_by_date.setdefault(metric["traffic_date"], {
+            "date": metric["traffic_date"],
+            "Shopee": 0,
+            "Tiktok": 0,
+        })
+        row[metric["source"]] = metric["visitors"]
+    store_traffic_rows = []
+    for traffic_date in sorted(store_traffic_by_date, reverse=True):
+        row = store_traffic_by_date[traffic_date]
+        row["total"] = row["Shopee"] + row["Tiktok"]
+        store_traffic_rows.append(row)
+    store_traffic_totals = {
+        "Shopee": sum(row["Shopee"] for row in store_traffic_rows),
+        "Tiktok": sum(row["Tiktok"] for row in store_traffic_rows),
+    }
+    store_traffic_totals["total"] = (
+        store_traffic_totals["Shopee"] + store_traffic_totals["Tiktok"]
+    )
+    store_traffic_entry_date = timezone.localdate()
+    store_traffic_entry = {
+        metric.source: metric.visitors
+        for metric in StoreTrafficMetric.objects.filter(
+            traffic_date=store_traffic_entry_date
+        )
+    }
     return render(request, "sales/dashboard.html", {
         "date_from": start,
         "date_to": end,
@@ -2906,6 +2997,11 @@ def dashboard(request):
         "selected_source_groups": source_groups,
         "legacy_exceptions": lines.filter(sku__isnull=True).count(),
         "includes_historical": start < date(2026, 8, 1),
+        "can_edit_store_traffic": request.user.is_superuser or module_level(request.user, "sales") in {"edit", "approve"},
+        "store_traffic_entry_date": store_traffic_entry_date,
+        "store_traffic_entry": store_traffic_entry,
+        "store_traffic_rows": store_traffic_rows,
+        "store_traffic_totals": store_traffic_totals,
     })
 
 

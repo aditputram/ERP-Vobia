@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Sales Forecast Recommendation · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">SALES · SALES PLANNING</p>
+    <h1>Forecast Recommendation</h1>
+    <p>Rekomendasi demand otomatis sebelum tim Sales menyusun target di Planning Builder.</p>
+  </div>
+</header>
+
+<section class="panel">
+  <div class="panel-header">
+    <div>
+      <p class="eyebrow">RECOMMENDATION FRAMEWORK</p>
+      <h2>Tiga skenario forecast</h2>
+      <p class="muted">Beginning Stock dari Operation hanya menjadi referensi dan tidak membatasi forecast atau target Sales.</p>
+    </div>
+  </div>
+  <div class="metric-grid three">
+    <article class="metric-card">
+      <span>CONSERVATIVE</span>
+      <strong>Batas bawah demand</strong>
+      <small>Asumsi pertumbuhan, traffic, dan campaign yang lebih hati-hati.</small>
+    </article>
+    <article class="metric-card">
+      <span>BASE</span>
+      <strong>Most likely</strong>
+      <small>Rekomendasi utama berdasarkan historikal, potential lost sales, tren, dan aktivitas terkonfirmasi.</small>
+    </article>
+    <article class="metric-card">
+      <span>AGGRESSIVE</span>
+      <strong>Potensi upside</strong>
+      <small>Asumsi traffic, conversion, dan campaign berjalan lebih kuat.</small>
+    </article>
+  </div>
+  <div class="notice">Mesin perhitungan rekomendasi akan diaktifkan setelah parameter tiap metode dikunci. Halaman ini belum membuat atau mengubah target Sales.</div>
+</section>
+{% endblock %}

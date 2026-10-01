@@ -20,7 +20,12 @@ MODULE_TABS = {
             "planning",
             "Sales Planning",
             "Sales",
-            ("sales:planning_builder", "sales:planning_filter_options", "sales:forecast"),
+            (
+                "sales:planning_builder",
+                "sales:planning_filter_options",
+                "sales:forecast",
+                "sales:forecast_recommendation",
+            ),
         ),
         (
             "product_performance",

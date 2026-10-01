@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="light">
     <title>Vobia Space - {% block title %}ERP{% endblock %}</title>
     <link rel="icon" type="image/png" href="{% static 'img/vobia-tiktok-app-icon.png' %}?v=20260831">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260928-06">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20261001-01">
     <script src="{% static 'js/app.js' %}?v=20260921-01" defer></script>
 </head>
 <body{% if request.GET.embed == "1" %} class="chat-embedded"{% endif %}>
@@ -139,10 +139,11 @@
                 </a>
                 {% endif %}
                 {% if tab_permissions.sales.planning %}
-                <button class="nav-item nav-group-toggle {% if request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'planning_builder' or request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'forecast' %}active{% endif %}" type="button" data-nav-group-toggle="sales-planning" data-nav-group-active="{% if request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'planning_builder' or request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'forecast' %}true{% else %}false{% endif %}" aria-expanded="{% if request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'planning_builder' or request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'forecast' %}true{% else %}false{% endif %}"><span>Sales Planning</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
-                <div class="nav-subitems" data-nav-group-panel="sales-planning"{% if request.resolver_match.namespace != 'sales' or request.resolver_match.url_name != 'planning_builder' and request.resolver_match.url_name != 'forecast' %} hidden{% endif %}>
+                <button class="nav-item nav-group-toggle {% if request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'planning_builder' or request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'forecast' or request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'forecast_recommendation' %}active{% endif %}" type="button" data-nav-group-toggle="sales-planning" data-nav-group-active="{% if request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'planning_builder' or request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'forecast' or request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'forecast_recommendation' %}true{% else %}false{% endif %}" aria-expanded="{% if request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'planning_builder' or request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'forecast' or request.resolver_match.namespace == 'sales' and request.resolver_match.url_name == 'forecast_recommendation' %}true{% else %}false{% endif %}"><span>Sales Planning</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+                <div class="nav-subitems" data-nav-group-panel="sales-planning"{% if request.resolver_match.namespace != 'sales' or request.resolver_match.url_name != 'planning_builder' and request.resolver_match.url_name != 'forecast' and request.resolver_match.url_name != 'forecast_recommendation' %} hidden{% endif %}>
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'planning_builder' %}active{% endif %}" href="{% url 'sales:planning_builder' %}">Planning Builder</a>
-                    <a class="nav-subitem {% if request.resolver_match.url_name == 'forecast' %}active{% endif %}" href="{% url 'sales:forecast' %}">Forecast</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'forecast' %}active{% endif %}" href="{% url 'sales:forecast' %}">Forecast Overview</a>
+                    <a class="nav-subitem {% if request.resolver_match.url_name == 'forecast_recommendation' %}active{% endif %}" href="{% url 'sales:forecast_recommendation' %}">Forecast Recommendation</a>
                 </div>
                 {% endif %}
                 {% if tab_permissions.sales.product_performance or tab_permissions.sales.pareto %}

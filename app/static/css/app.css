@@ -84,6 +84,7 @@ a { color: inherit; text-decoration: none; }
 .pill { padding: 6px 10px; }
 
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; margin-bottom: 13px; }
+.metric-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .metric-grid.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .metric-grid.six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .metric-card { min-height: 108px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.78); }

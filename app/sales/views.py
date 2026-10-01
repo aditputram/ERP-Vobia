@@ -1161,6 +1161,11 @@ def forecast(request):
 
 
 @login_required
+def forecast_recommendation(request):
+    return render(request, "sales/forecast_recommendation.html")
+
+
+@login_required
 def planning_builder(request):
     builder_preview = None
     forced_scenario = None

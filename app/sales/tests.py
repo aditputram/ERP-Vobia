@@ -37,7 +37,7 @@ class SalesReportRouteTests(TestCase):
         return product, sku
 
     def test_sales_report_routes_render(self):
-        for name in ("sales:planning_builder", "sales:forecast", "sales:product_performance", "sales:pivot_analysis", "sales:traffic_analysis", "sales:pareto", "sales:transactions", "sales:input_transaction"):
+        for name in ("sales:planning_builder", "sales:forecast", "sales:forecast_recommendation", "sales:product_performance", "sales:pivot_analysis", "sales:traffic_analysis", "sales:pareto", "sales:transactions", "sales:input_transaction"):
             with self.subTest(name=name):
                 response = self.client.get(reverse(name))
                 self.assertEqual(response.status_code, 200)
@@ -81,7 +81,21 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual([row["label"] for row in forecast["rows"]], [product.name, other.name])
         self.assertEqual([item["value"] for item in forecast["grand_total"]], [27, Decimal("2700000")])
         self.assertContains(response, "Planning Builder")
-        self.assertContains(response, "Forecast")
+        self.assertContains(response, "Forecast Overview")
+
+    def test_forecast_recommendation_is_last_sales_planning_subtab(self):
+        response = self.client.get(reverse("sales:forecast_recommendation"))
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        planning_index = content.index(">Planning Builder</a>")
+        overview_index = content.index(">Forecast Overview</a>")
+        recommendation_index = content.index(">Forecast Recommendation</a>")
+        self.assertLess(planning_index, overview_index)
+        self.assertLess(overview_index, recommendation_index)
+        self.assertContains(response, "CONSERVATIVE")
+        self.assertContains(response, "BASE")
+        self.assertContains(response, "AGGRESSIVE")
 
     def test_traffic_analysis_uses_gross_sales_and_unique_visitors(self):
         status = ProductStatus.objects.create(code="TRAFFIC-REGULAR", name="Regular")

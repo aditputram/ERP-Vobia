@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Sales Forecast · Vobia ERP{% endblock %}
+{% block title %}Sales Forecast Overview · Vobia ERP{% endblock %}
 {% block content %}
-<header class="page-header"><div><p class="eyebrow">SALES · SALES PLANNING</p><h1>Forecast</h1><p>Target penjualan yang sudah tersimpan di Planning Builder.</p></div></header>
+<header class="page-header"><div><p class="eyebrow">SALES · SALES PLANNING</p><h1>Forecast Overview</h1><p>Target penjualan yang sudah tersimpan di Planning Builder.</p></div></header>
 
 <form method="get" class="panel report-filter product-performance-filter" data-auto-submit data-preserve-scroll>
   <label>Mulai<input type="month" name="start_month" value="{{ forecast.start|date:'Y-m' }}"></label>

@@ -1393,6 +1393,71 @@ class SalesReportRouteTests(TestCase):
             2,
         )
 
+    def test_dashboard_traffic_and_conversion_follow_marketplace_filters(self):
+        for source, order_number, line_count in (
+            (SalesOrder.Source.SHOPEE, "TRAFFIC-SHOPEE", 1),
+            (SalesOrder.Source.TIKTOK, "TRAFFIC-TIKTOK", 2),
+        ):
+            order = SalesOrder.objects.create(
+                source=source,
+                source_label=source,
+                order_number=order_number,
+                order_datetime=timezone.make_aware(datetime(2026, 9, 22, 10, 0)),
+                order_date=date(2026, 9, 22),
+                current_status="Selesai",
+                source_status="Selesai",
+                is_final=True,
+                first_seen_batch_id=uuid.uuid4(),
+                latest_batch_id=uuid.uuid4(),
+            )
+            for index in range(line_count):
+                SalesOrderLine.objects.create(
+                    order=order,
+                    sku_code_snapshot=f"{order_number}-{index}",
+                    product_name_snapshot="Traffic Product",
+                    quantity=1,
+                    net_unit_price=Decimal("100000"),
+                    retail_price_snapshot=Decimal("100000"),
+                    sales_cogs_snapshot=Decimal("50000"),
+                    total_gross_sales=Decimal("100000"),
+                    total_net_sales=Decimal("100000"),
+                    total_cogs=Decimal("50000"),
+                    gpm=Decimal("50000"),
+                )
+
+        StoreTrafficMetric.objects.create(
+            traffic_date=date(2026, 9, 22), source="Shopee", visitors=1500,
+            recorded_by=self.user,
+        )
+        StoreTrafficMetric.objects.create(
+            traffic_date=date(2026, 9, 22), source="Tiktok", visitors=500,
+            recorded_by=self.user,
+        )
+        url = reverse("sales:dashboard")
+        period = {
+            "period_type": "custom",
+            "date_from": "2026-09-22",
+            "date_to": "2026-09-22",
+        }
+
+        response = self.client.get(url, period)
+        self.assertEqual(response.context["store_traffic_totals"]["total"], 2000)
+        self.assertEqual(response.context["conversion_orders"], 2)
+        self.assertEqual(response.context["conversion_rate_pct"], Decimal("0.1"))
+
+        shopee_response = self.client.get(url, {**period, "source": "Shopee"})
+        self.assertEqual(shopee_response.context["store_traffic_totals"]["total"], 1500)
+        self.assertEqual(shopee_response.context["conversion_orders"], 1)
+        self.assertAlmostEqual(
+            float(shopee_response.context["conversion_rate_pct"]),
+            1 / 15,
+        )
+
+        other_response = self.client.get(url, {**period, "source_group": "Other"})
+        self.assertEqual(other_response.context["store_traffic_totals"]["total"], 0)
+        self.assertEqual(other_response.context["conversion_orders"], 0)
+        self.assertIsNone(other_response.context["conversion_rate_pct"])
+
     def test_dashboard_supports_month_quarter_semester_year_and_trend_grain(self):
         for order_day, order_number, gross in (
             (date(2026, 1, 10), "DASH-JAN", "100000"),

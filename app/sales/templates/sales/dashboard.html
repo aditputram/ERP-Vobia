@@ -13,17 +13,19 @@
   {% include "sales/includes/cascading_source_filter.html" with label="Source" options=source_options selected=selected_sources all_label="All Sources" search_placeholder="Ketik source..." %}
   <a class="secondary-button" href="{% url 'sales:dashboard' %}">Reset</a>
 </form>
-<section class="metric-grid">
+<section class="metric-grid five">
   <article class="metric-card"><span>Total Gross Sales</span><strong class="metric-money">Rp {{ totals.gross|floatformat:"0g" }}</strong><small>{{ totals.qty|floatformat:"0g" }} pcs</small></article>
   <article class="metric-card"><span>Total Net Sales</span><strong class="metric-money">Rp {{ totals.net|floatformat:"0g" }}</strong><small>{{ totals.orders|floatformat:"0g" }} order unik</small></article>
   <article class="metric-card"><span>GPM</span><strong class="metric-money">Rp {{ totals.gpm|floatformat:"0g" }}</strong><small>Net Sales − COGS</small></article>
   <article class="metric-card"><span>GPM Rate</span><strong>{% if totals.gpm_rate_pct != None %}{{ totals.gpm_rate_pct|floatformat:"2g" }}%{% else %}—{% endif %}</strong><small>GPM ÷ Gross Sales</small></article>
+  <article class="metric-card"><span>Traffic Toko</span><strong>{{ store_traffic_totals.total|floatformat:"0g" }}</strong><small>Shopee {{ store_traffic_totals.Shopee|floatformat:"0g" }} · TikTok {{ store_traffic_totals.Tiktok|floatformat:"0g" }}</small></article>
 </section>
-<section class="metric-grid">
+<section class="metric-grid five">
   <article class="metric-card"><span>Total Discount</span><strong class="metric-money">Rp {{ totals.discount|floatformat:"0g" }}</strong><small>{% if totals.discount_rate_pct != None %}{{ totals.discount_rate_pct|floatformat:"2g" }}%{% else %}—{% endif %}</small></article>
   <article class="metric-card"><span>AOV</span><strong class="metric-money">Rp {{ totals.aov|floatformat:"0g" }}</strong><small>Net Sales ÷ order unik</small></article>
   <article class="metric-card"><span>Total COGS</span><strong class="metric-money">Rp {{ totals.cogs|floatformat:"0g" }}</strong><small>immutable snapshot</small></article>
   <article class="metric-card {% if legacy_exceptions %}danger-card{% endif %}"><span>Legacy Data Exception</span><strong>{{ legacy_exceptions|floatformat:"0g" }}</strong><small>SKU lama tanpa current master</small></article>
+  <article class="metric-card"><span>Tingkat Konversi</span><strong>{% if conversion_rate_pct != None %}{{ conversion_rate_pct|floatformat:"2g" }}%{% else %}—{% endif %}</strong><small>{{ conversion_orders|floatformat:"0g" }} order unik ÷ traffic</small></article>
 </section>
 <section class="dashboard-grid dashboard-sales-grid section-gap">
   <article class="panel trend-panel"><div class="panel-header"><div><p class="eyebrow">PERIOD TREND</p><h2>{{ period_trend_title }}</h2></div><a class="row-link" href="{% url 'sales:product_performance' %}">Product Performance →</a></div>

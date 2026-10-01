@@ -2927,9 +2927,21 @@ def dashboard(request):
         _potential_sales_rows(potential_cutoff, selected_potential_month)
         if selected_potential_month else []
     )
+    traffic_sources = {SalesOrder.Source.SHOPEE, SalesOrder.Source.TIKTOK}
+    if source_groups and "Marketplace" not in source_groups:
+        traffic_sources.clear()
+    if sources:
+        selected_traffic_sources = set(
+            all_lines.filter(order__source_label__in=sources)
+            .values_list("order__source", flat=True)
+            .distinct()
+        )
+        traffic_sources.intersection_update(selected_traffic_sources)
+
     store_traffic_by_date = {}
     for metric in StoreTrafficMetric.objects.filter(
-        traffic_date__range=(start, end)
+        traffic_date__range=(start, end),
+        source__in=traffic_sources,
     ).values("traffic_date", "source", "visitors"):
         row = store_traffic_by_date.setdefault(metric["traffic_date"], {
             "date": metric["traffic_date"],
@@ -2948,6 +2960,19 @@ def dashboard(request):
     }
     store_traffic_totals["total"] = (
         store_traffic_totals["Shopee"] + store_traffic_totals["Tiktok"]
+    )
+    conversion_orders = (
+        lines.filter(order__source__in=traffic_sources)
+        .values("order_id")
+        .distinct()
+        .count()
+    )
+    conversion_rate_pct = (
+        Decimal(conversion_orders)
+        * Decimal("100")
+        / Decimal(store_traffic_totals["total"])
+        if store_traffic_totals["total"]
+        else None
     )
     store_traffic_entry_date = timezone.localdate()
     store_traffic_entry = {
@@ -3002,6 +3027,8 @@ def dashboard(request):
         "store_traffic_entry": store_traffic_entry,
         "store_traffic_rows": store_traffic_rows,
         "store_traffic_totals": store_traffic_totals,
+        "conversion_orders": conversion_orders,
+        "conversion_rate_pct": conversion_rate_pct,
     })
 
 

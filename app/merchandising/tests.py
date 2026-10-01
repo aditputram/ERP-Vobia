@@ -1420,6 +1420,11 @@ class MerchandisingReportViewTests(TestCase):
         self.assertContains(response, "GPM Rate")
         self.assertContains(response, "Margin Ratio")
         self.assertContains(response, "Incoming Capital Turnover")
+        self.assertContains(
+            response,
+            '<button type="button" data-filter-select-visible>Select All</button>',
+            count=3,
+        )
         self.assertEqual(response.context["months"], [
             "January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November", "December",

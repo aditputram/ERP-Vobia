@@ -22,7 +22,7 @@ from merchandising.models import MerchandisingMonthlySnapshot, MerchandisingSnap
 from traffic.models import StoreTrafficMetric, TrafficImportBatch, TrafficProductMetric
 
 from .models import SalesOrder, SalesOrderLine, SalesPlan, SalesPlanSKU, SalesPlanningScenario
-from .views import _sales_planning_totals, _save_sales_projection_preview
+from .views import _potential_lost_sku_rows, _sales_planning_totals, _save_sales_projection_preview
 
 
 class SalesReportRouteTests(TestCase):
@@ -158,6 +158,31 @@ class SalesReportRouteTests(TestCase):
                 beginning_qty=Decimal(beginning),
             )
 
+        for index, order_date in enumerate((date(2026, 6, 1), date(2026, 6, 5)), start=1):
+            order = SalesOrder.objects.create(
+                source=SalesOrder.Source.SHOPEE,
+                source_label="Shopee",
+                order_number=f"POTENTIAL-JUN-{index}",
+                order_datetime=timezone.make_aware(datetime.combine(order_date, datetime.min.time())),
+                order_date=order_date,
+                current_status="Selesai",
+                source_status="Selesai",
+                is_final=True,
+                import_origin=SalesOrder.ImportOrigin.HISTORICAL,
+                affects_inventory=False,
+                first_seen_batch_id=uuid.uuid4(),
+                latest_batch_id=uuid.uuid4(),
+            )
+            SalesOrderLine.objects.create(
+                order=order,
+                sku=size_m,
+                quantity=5,
+                net_unit_price=Decimal("275000"),
+                retail_price_snapshot=Decimal("275000"),
+                total_gross_sales=Decimal("1375000"),
+                total_net_sales=Decimal("1375000"),
+            )
+
         for index, (order_date, quantity) in enumerate(
             ((date(2026, 7, 1), 3), (date(2026, 7, 5), 15)), start=1
         ):
@@ -230,15 +255,70 @@ class SalesReportRouteTests(TestCase):
         august_row = august.context["report"]["rows"][0]
         self.assertEqual(august_row["sku"], size_m)
         self.assertEqual(august_row["reference_month"], date(2026, 7, 1))
-        self.assertEqual(august_row["selling_days"], 5)
+        self.assertEqual(august_row["reference_label"], "Jun 2026–Jul 2026")
+        self.assertEqual(august_row["selling_days"], 10)
         self.assertEqual(august_row["lost_days"], 31)
-        self.assertEqual(august_row["lost_qty"], Decimal("112"))
+        self.assertEqual(august_row["lost_qty"], Decimal("87"))
         self.assertEqual(august.context["report"]["product_count"], 1)
         self.assertEqual(august.context["report"]["displayed_sku_count"], 3)
         self.assertContains(august, "POTENTIAL-OCEANIA-M")
         self.assertContains(august, "POTENTIAL-OCEANIA-L")
         self.assertContains(august, "POTENTIAL-OCEANIA-XL")
-        self.assertContains(august, "112 pcs")
+        self.assertContains(august, "87 pcs")
+        self.assertEqual(
+            [row["size"] for row in august.context["report"]["products"][0]["sizes"]],
+            ["M", "L", "XL"],
+        )
+
+    def test_potential_sales_ignores_reference_older_than_two_months(self):
+        status = ProductStatus.objects.create(code="POTENTIAL-OLD", name="Regular")
+        category = Category.objects.create(code="POTENTIAL-OLD-CAT", name="Socks")
+        product = Product.objects.create(
+            code="POTENTIAL-OLD-PRODUCT",
+            name="Old Demand Product",
+            status=status,
+            category=category,
+        )
+        sku = SKU.objects.create(
+            sku="POTENTIAL-OLD-SKU",
+            product_variant=ProductVariant.objects.create(product=product, name="Default"),
+            size="38-45",
+            current_retail_price=Decimal("39000"),
+        )
+        FIFOOpeningSnapshot.objects.create(
+            sku=sku,
+            cutover_date=date(2026, 7, 31),
+            opening_qty=Decimal("0"),
+            frozen_unit_cogs=Decimal("10000"),
+            recorded_by=self.user,
+        )
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="POTENTIAL-OLD-MARCH",
+            order_datetime=timezone.make_aware(datetime(2026, 3, 12, 10, 0)),
+            order_date=date(2026, 3, 12),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            import_origin=SalesOrder.ImportOrigin.HISTORICAL,
+            affects_inventory=False,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku=sku,
+            quantity=8,
+            net_unit_price=Decimal("39000"),
+            retail_price_snapshot=Decimal("39000"),
+            total_gross_sales=Decimal("312000"),
+            total_net_sales=Decimal("312000"),
+        )
+
+        rows = _potential_lost_sku_rows(date(2026, 9, 1), date(2026, 9, 30))
+
+        self.assertNotIn(sku.id, {row["sku"].id for row in rows})
 
     @patch("sales.views.timezone.localdate", return_value=date(2026, 10, 1))
     def test_forecast_recommendation_uses_percentage_trend_on_actual_plus_lost(self, _mock_today):

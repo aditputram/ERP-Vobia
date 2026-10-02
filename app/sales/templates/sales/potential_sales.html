@@ -61,7 +61,7 @@
             <td><strong>{{ row.lost_days }} hari</strong></td>
             <td><strong>{{ row.lost_qty|floatformat:"0g" }} pcs</strong><small class="table-subcopy">Rp {{ row.lost_gross|floatformat:"0g" }}</small></td>
             <td><strong>{{ row.potential_qty|floatformat:"0g" }} pcs</strong><small class="table-subcopy">Rp {{ row.potential_gross|floatformat:"0g" }}</small></td>
-            <td>{% if row.affected %}<strong>{{ row.reference_month|date:"M Y" }} · {{ row.selling_days }} hari</strong><small class="table-subcopy">{{ row.reference_start|date:"d M" }}–{{ row.reference_end|date:"d M Y" }}</small><small class="table-subcopy">{{ row.daily_rate|floatformat:"2g" }} pcs/hari{% if row.inventory_exception %} · <span class="metric-negative">cek stock ledger</span>{% endif %}</small>{% else %}<strong>Potential Lost 0</strong><small class="table-subcopy">Tidak ada hari lost sales</small>{% endif %}</td>
+            <td>{% if row.affected %}<strong>{{ row.reference_label }} · {{ row.selling_days }} hari</strong><small class="table-subcopy">{{ row.reference_start|date:"d M" }}–{{ row.reference_end|date:"d M Y" }}</small><small class="table-subcopy">{{ row.daily_rate|floatformat:"2g" }} pcs/hari{% if row.inventory_exception %} · <span class="metric-negative">cek stock ledger</span>{% endif %}</small>{% else %}<strong>Potential Lost 0</strong><small class="table-subcopy">Tidak ada hari lost sales</small>{% endif %}</td>
           </tr>{% endfor %}</tbody>
         </table>
       </div>

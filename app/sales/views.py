@@ -32,7 +32,7 @@ from merchandising.services.planning_activity import (
     filter_products_by_planning_activity,
     planning_activity_snapshot,
 )
-from merchandising.services.builder import historical_sales_qty_for_skus, official_values_for_skus
+from merchandising.services.builder import historical_sales_qty_for_skus, official_values_for_skus, sku_size_sort_key
 from merchandising.services.official_projection import _selling_contexts
 from traffic.models import StoreTrafficMetric, TrafficProductMetric
 
@@ -1910,6 +1910,7 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
 
     month_end = _shift_month(selected_month, 1) - timedelta(days=1)
     cutoff_date = min(cutoff_date, month_end)
+    reference_start_month = _shift_month(selected_month, -2)
     sku_queryset = SKU.objects.filter(
         is_active=True,
         product_variant__is_active=True,
@@ -1961,7 +1962,7 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         SalesOrderLine.objects.filter(
             is_counted=True,
             sku_id__in=sku_ids,
-            order__order_date__gte=date(2026, 1, 1),
+            order__order_date__gte=reference_start_month,
             order__order_date__lte=cutoff_date,
         )
         .annotate(sales_month=TruncMonth("order__order_date"))
@@ -2026,24 +2027,49 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         if not lost_days:
             continue
 
-        reference = selected_actual if actual_qty > 0 and available_days > 0 else None
-        if reference is None:
-            prior_candidates = [
-                item
-                for (item_sku_id, item_month), item in sales_by_sku_month.items()
-                if item_sku_id == sku.id and item_month < selected_month and item["actual_qty"] > 0
-            ]
-            reference = max(prior_candidates, key=lambda item: item["sales_month"], default=None)
-        if reference is None or lost_days <= 0:
+        references = []
+        if actual_qty > 0 and available_days > 0:
+            references = [(selected_actual, available_days)]
+        else:
+            prior_candidates = sorted(
+                [
+                    item
+                    for (item_sku_id, item_month), item in sales_by_sku_month.items()
+                    if item_sku_id == sku.id
+                    and item_month < selected_month
+                    and item["actual_qty"] > 0
+                ],
+                key=lambda item: item["sales_month"],
+            )
+            for item in prior_candidates:
+                item_month = item["sales_month"]
+                if item_month < POTENTIAL_SALES_START_MONTH:
+                    reference_days = (item["last_sale_date"] - item["first_sale_date"]).days + 1
+                else:
+                    reference_days = 0
+                    reference_end = _shift_month(item_month, 1) - timedelta(days=1)
+                    reference_balance = openings[sku.id]
+                    reference_cursor = CUTOVER_DATE + timedelta(days=1)
+                    while reference_cursor <= reference_end:
+                        totals = daily_movements[sku.id].get(
+                            reference_cursor, {"in": Decimal("0"), "out": Decimal("0")}
+                        )
+                        balance_before_out = reference_balance + totals["in"]
+                        if reference_cursor >= item_month and balance_before_out > 0:
+                            reference_days += 1
+                        reference_balance = balance_before_out - totals["out"]
+                        reference_cursor += timedelta(days=1)
+                if reference_days > 0:
+                    references.append((item, reference_days))
+        if not references or lost_days <= 0:
             continue
 
-        if reference is selected_actual:
-            selling_days = available_days
-        else:
-            selling_days = (
-                reference["last_sale_date"] - reference["first_sale_date"]
-            ).days + 1
-        reference_qty = Decimal(reference["actual_qty"] or 0)
+        reference_items = [item for item, _days in references]
+        selling_days = sum(days for _item, days in references)
+        reference_qty = sum(
+            (Decimal(item["actual_qty"] or 0) for item in reference_items),
+            Decimal("0"),
+        )
         if selling_days <= 0 or reference_qty <= 0:
             continue
         daily_rate = reference_qty / Decimal(selling_days)
@@ -2052,7 +2078,10 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         )
         if lost_qty <= 0:
             continue
-        reference_gross = Decimal(reference["actual_gross"] or 0)
+        reference_gross = sum(
+            (Decimal(item["actual_gross"] or 0) for item in reference_items),
+            Decimal("0"),
+        )
         unit_gross = (
             reference_gross / reference_qty
             if reference_gross > 0
@@ -2067,9 +2096,14 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
             "article": product.article or product.name,
             "sku": sku,
             "size": sku.size or "—",
-            "reference_month": reference["sales_month"],
-            "reference_start": reference["first_sale_date"],
-            "reference_end": reference["last_sale_date"],
+            "reference_month": reference_items[-1]["sales_month"],
+            "reference_label": (
+                date_format(reference_items[-1]["sales_month"], "M Y")
+                if len(reference_items) == 1
+                else f'{date_format(reference_items[0]["sales_month"], "M Y")}–{date_format(reference_items[-1]["sales_month"], "M Y")}'
+            ),
+            "reference_start": min(item["first_sale_date"] for item in reference_items),
+            "reference_end": max(item["last_sale_date"] for item in reference_items),
             "selling_days": selling_days,
             "daily_rate": daily_rate,
             "lost_days": lost_days,
@@ -2126,6 +2160,7 @@ def _potential_sales_context(request):
         )
         .order_by("product_variant__product__name", "size", "sku")
     )
+    skus.sort(key=sku_size_sort_key)
     sku_ids = [sku.id for sku in skus]
     sales_by_sku_month = {}
     if sku_ids:
@@ -2202,6 +2237,7 @@ def _potential_sales_context(request):
             "potential_qty": actual_qty + lost_qty,
             "potential_gross": actual_gross + lost_gross,
             "reference_month": affected["reference_month"] if affected else None,
+            "reference_label": affected["reference_label"] if affected else None,
             "reference_start": affected["reference_start"] if affected else None,
             "reference_end": affected["reference_end"] if affected else None,
             "selling_days": affected["selling_days"] if affected else None,

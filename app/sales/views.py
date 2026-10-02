@@ -46,7 +46,7 @@ MONTH_NAMES = [
     "July", "August", "September", "October", "November", "December",
 ]
 
-POTENTIAL_SALES_START_MONTH = date(2026, 7, 1)
+POTENTIAL_SALES_START_MONTH = date(2026, 8, 1)
 
 SALES_PROJECTION_METHODS = (
     ("INCREASE_PERCENT", "Increase by %"),
@@ -2001,43 +2001,30 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         lost_days = 0
         inventory_exception = opening_balance < 0
 
-        if selected_month == POTENTIAL_SALES_START_MONTH:
-            # The FIFO opening is the physical Ending 31 July. July has no daily
-            # movement ledger, so a zero ending plus the last historical sale is
-            # the auditable stock-out evidence available for that cutover month.
-            ending_balance = opening_balance
-            last_sale = selected_actual.get("last_sale_date")
-            first_sale = selected_actual.get("first_sale_date")
-            if ending_balance > 0 or actual_qty <= 0 or not first_sale or not last_sale:
-                continue
-            available_days = (last_sale - first_sale).days + 1
-            lost_days = max((cutoff_date - last_sale).days, 0)
-            inventory_exception = ending_balance < 0
-        else:
-            for movement_date, totals in daily_movements[sku.id].items():
-                if movement_date >= selected_month:
-                    break
-                opening_balance += totals["in"] - totals["out"]
-            balance = opening_balance
-            cursor = selected_month
-            while cursor <= cutoff_date:
-                totals = daily_movements[sku.id].get(
-                    cursor, {"in": Decimal("0"), "out": Decimal("0")}
-                )
-                balance_before_out = balance + totals["in"]
-                if balance_before_out > 0:
-                    available_days += 1
-                else:
-                    lost_days += 1
-                    if totals["out"] > 0:
-                        inventory_exception = True
-                balance = balance_before_out - totals["out"]
-                if balance < 0:
+        for movement_date, totals in daily_movements[sku.id].items():
+            if movement_date >= selected_month:
+                break
+            opening_balance += totals["in"] - totals["out"]
+        balance = opening_balance
+        cursor = selected_month
+        while cursor <= cutoff_date:
+            totals = daily_movements[sku.id].get(
+                cursor, {"in": Decimal("0"), "out": Decimal("0")}
+            )
+            balance_before_out = balance + totals["in"]
+            if balance_before_out > 0:
+                available_days += 1
+            else:
+                lost_days += 1
+                if totals["out"] > 0:
                     inventory_exception = True
-                cursor += timedelta(days=1)
-            ending_balance = balance
-            if not lost_days:
-                continue
+            balance = balance_before_out - totals["out"]
+            if balance < 0:
+                inventory_exception = True
+            cursor += timedelta(days=1)
+        ending_balance = balance
+        if not lost_days:
+            continue
 
         reference = selected_actual if actual_qty > 0 and available_days > 0 else None
         if reference is None:

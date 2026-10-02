@@ -100,7 +100,7 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(response, "CONSERVATIVE")
         self.assertContains(response, "Base dan Aggressive belum diaktifkan")
 
-    def test_potential_sales_starts_in_july_and_counts_stockout_per_sku(self):
+    def test_potential_sales_starts_in_august_and_counts_stockout_per_sku(self):
         status = ProductStatus.objects.create(code="POTENTIAL-REGULAR", name="Regular")
         category = Category.objects.create(code="POTENTIAL-SHIRT", name="Shirt")
         product = Product.objects.create(
@@ -221,10 +221,11 @@ class SalesReportRouteTests(TestCase):
         )
 
         august = self.client.get(reverse("sales:potential_sales"), {"month": "2026-08"})
-        july = self.client.get(reverse("sales:potential_sales"), {"month": "2026-07"})
+        invalid_july = self.client.get(reverse("sales:potential_sales"), {"month": "2026-07"})
 
         self.assertEqual(august.status_code, 200)
-        self.assertEqual(august.context["report"]["month_options"][0]["value"], "2026-07")
+        self.assertEqual(august.context["report"]["month_options"][0]["value"], "2026-08")
+        self.assertEqual(invalid_july.context["report"]["selected_value"], "2026-08")
         self.assertEqual(len(august.context["report"]["rows"]), 1)
         august_row = august.context["report"]["rows"][0]
         self.assertEqual(august_row["sku"], size_m)
@@ -238,24 +239,6 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(august, "POTENTIAL-OCEANIA-L")
         self.assertContains(august, "POTENTIAL-OCEANIA-XL")
         self.assertContains(august, "112 pcs")
-
-        july_row = july.context["report"]["rows"][0]
-        self.assertEqual(july_row["lost_days"], 26)
-        self.assertEqual(july_row["lost_qty"], Decimal("94"))
-        july_product = july.context["report"]["products"][0]
-        self.assertEqual(july_product["affected_sizes"], ["M"])
-        self.assertEqual(len(july_product["sizes"]), 3)
-        july_sizes = {row["size"]: row for row in july_product["sizes"]}
-        self.assertEqual(july_sizes["M"]["beginning_qty"], Decimal("100"))
-        self.assertEqual(july_sizes["M"]["str"], Decimal("18"))
-        self.assertEqual(july_sizes["L"]["lost_qty"], Decimal("0"))
-        self.assertEqual(july_sizes["XL"]["lost_qty"], Decimal("0"))
-        self.assertEqual(
-            [cell["month"] for cell in july_sizes["M"]["history_cells"]],
-            [date(2026, 4, 1), date(2026, 5, 1), date(2026, 6, 1)],
-        )
-        self.assertContains(july, "Sales Apr 2026")
-        self.assertContains(july, "Beginning Jul 2026")
 
     @patch("sales.views.timezone.localdate", return_value=date(2026, 10, 1))
     def test_forecast_recommendation_uses_percentage_trend_on_actual_plus_lost(self, _mock_today):

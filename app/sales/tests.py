@@ -320,6 +320,84 @@ class SalesReportRouteTests(TestCase):
 
         self.assertNotIn(sku.id, {row["sku"].id for row in rows})
 
+    def test_potential_sales_ignores_false_stockout_with_positive_monthly_ending(self):
+        status = ProductStatus.objects.create(code="POTENTIAL-GUARD", name="Regular")
+        category = Category.objects.create(code="POTENTIAL-GUARD-CAT", name="Shirt")
+        product = Product.objects.create(
+            code="POTENTIAL-GUARD-PRODUCT",
+            name="Monthly Stock Guard",
+            status=status,
+            category=category,
+        )
+        sku = SKU.objects.create(
+            sku="POTENTIAL-GUARD-L",
+            product_variant=ProductVariant.objects.create(product=product, name="Default"),
+            size="L",
+            current_retail_price=Decimal("199000"),
+        )
+        FIFOOpeningSnapshot.objects.create(
+            sku=sku,
+            cutover_date=date(2026, 7, 31),
+            opening_qty=Decimal("1"),
+            frozen_unit_cogs=Decimal("75000"),
+            recorded_by=self.user,
+        )
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="POTENTIAL-GUARD-ORDER",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 1, 10, 0)),
+            order_date=date(2026, 9, 1),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        line = SalesOrderLine.objects.create(
+            order=order,
+            sku=sku,
+            quantity=1,
+            net_unit_price=Decimal("199000"),
+            retail_price_snapshot=Decimal("199000"),
+            total_gross_sales=Decimal("199000"),
+            total_net_sales=Decimal("199000"),
+        )
+        InventoryMovement.objects.create(
+            movement_key="SALES|POTENTIAL-GUARD-ORDER",
+            movement_date=date(2026, 9, 1),
+            movement_type=InventoryMovement.MovementType.SALES_OUT,
+            direction=InventoryMovement.Direction.OUT,
+            sku=sku,
+            quantity=Decimal("1"),
+            source_reference=order.order_number,
+            sales_line=line,
+            posted_by=self.user,
+        )
+        batch = MerchandisingSnapshotBatch.objects.create(
+            source_workbook_id="potential-guard",
+            source_file_name="potential-guard.xlsx",
+            source_sha256="g" * 64,
+            imported_by=self.user,
+            is_active=True,
+        )
+        MerchandisingMonthlySnapshot.objects.create(
+            batch=batch,
+            sku=sku,
+            source_row=1,
+            month=date(2026, 9, 1),
+            status_snapshot=status.name,
+            product_snapshot=product.name,
+            category_snapshot=category.name,
+            beginning_qty=Decimal("96"),
+            sales_qty=Decimal("31"),
+            ending_qty=Decimal("65"),
+        )
+
+        rows = _potential_lost_sku_rows(date(2026, 9, 1), date(2026, 9, 30))
+
+        self.assertNotIn(sku.id, {row["sku"].id for row in rows})
+
     @patch("sales.views.timezone.localdate", return_value=date(2026, 10, 1))
     def test_forecast_recommendation_uses_percentage_trend_on_actual_plus_lost(self, _mock_today):
         status = ProductStatus.objects.create(code="RECOMMEND-REGULAR", name="Regular")

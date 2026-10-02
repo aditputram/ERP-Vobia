@@ -1928,6 +1928,22 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         return []
 
     sku_ids = [sku.id for sku in skus]
+    active_batch_id = (
+        MerchandisingMonthlySnapshot.objects.filter(batch__is_active=True)
+        .order_by("-batch__imported_at")
+        .values_list("batch_id", flat=True)
+        .first()
+    )
+    monthly_endings = {}
+    if active_batch_id:
+        monthly_endings = {
+            row["sku_id"]: Decimal(row["ending_qty"] or 0)
+            for row in MerchandisingMonthlySnapshot.objects.filter(
+                batch_id=active_batch_id,
+                sku_id__in=sku_ids,
+                month=selected_month,
+            ).values("sku_id", "ending_qty")
+        }
     openings = {
         row["sku_id"]: Decimal(row["opening_qty"] or 0)
         for row in FIFOOpeningSnapshot.objects.filter(sku_id__in=sku_ids).values(
@@ -2024,6 +2040,8 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
                 inventory_exception = True
             cursor += timedelta(days=1)
         ending_balance = balance
+        if monthly_endings.get(sku.id, Decimal("0")) > 0:
+            continue
         if not lost_days:
             continue
 

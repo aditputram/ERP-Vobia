@@ -623,10 +623,10 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(sheet["H1"].value, "Ending 31 Juli")
         self.assertEqual(sheet["C2"].value, "SKU-1")
         self.assertEqual(sheet["H2"].value, -3)
-        self.assertEqual(sheet["L1"].value, "Habis Sejak")
-        self.assertEqual(sheet["L2"].value, datetime(2026, 7, 31))
-        self.assertEqual(sheet["P2"].value, "NEGATIVE")
-        self.assertEqual(sheet["Q1"].value, "Warehouse Actual Qty")
+        self.assertEqual(sheet["O2"].value, "NEGATIVE")
+        self.assertEqual(sheet["P1"].value, "Warehouse Actual Qty")
+        self.assertEqual(sheet["S1"].value, "Out of Stock Since")
+        self.assertEqual(sheet["S2"].value, datetime(2026, 7, 31))
         workbook.close()
 
     def test_inventory_turnover_filters_product_and_size(self):

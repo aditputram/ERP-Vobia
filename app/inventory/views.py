@@ -59,8 +59,8 @@ def _export_inventory(balances, *, as_of_date, warehouse, sku_type, stock_status
     sheet.title = "Inventory Summary"
     common = (
         "As Of Date", "Warehouse", "Ending 31 Juli", "Movement In", "Movement Out",
-        "Ending Stock", "Habis Sejak", "FIFO Remaining", "FIFO Value", "Active Exceptions", "Stock Status",
-        "Warehouse Actual Qty", "Evidence Reference", "Warehouse Notes",
+        "Ending Stock", "FIFO Remaining", "FIFO Value", "Active Exceptions", "Stock Status",
+        "Warehouse Actual Qty", "Evidence Reference", "Warehouse Notes", "Out of Stock Since",
     )
     identity = (
         ("Parent SKU", "Product", "Category", "SKU Count")
@@ -91,16 +91,16 @@ def _export_inventory(balances, *, as_of_date, warehouse, sku_type, stock_status
             as_of_date, _excel_text(warehouse.name if warehouse else "All Warehouse"),
             *identity_values,
             row["opening_qty"], row["incoming_qty"], row["outgoing_qty"], row["balance"],
-            row["stockout_since"] or "", row["fifo_qty"], row["fifo_value"], row["exception_count"], row["stock_status"],
-            "", "", "",
+            row["fifo_qty"], row["fifo_value"], row["exception_count"], row["stock_status"],
+            "", "", "", row["stockout_since"] or "",
         ))
 
-    stockout_column = headers.index("Habis Sejak") + 1
+    stockout_column = headers.index("Out of Stock Since") + 1
     for row_number in range(2, sheet.max_row + 1):
         sheet.cell(row=row_number, column=stockout_column).number_format = "DD/MM/YYYY"
 
     sheet.auto_filter.ref = sheet.dimensions
-    for index, width in enumerate((14, 20, 20, 20, 30, 22, 20, 16, 16, 16, 16, 16, 18, 18, 18, 16, 22, 28, 28), start=1):
+    for index, width in enumerate((14, 20, 20, 20, 30, 22, 20, 16, 16, 16, 16, 18, 18, 18, 16, 22, 28, 28, 20), start=1):
         if index <= sheet.max_column:
             sheet.column_dimensions[get_column_letter(index)].width = width
     output = BytesIO()

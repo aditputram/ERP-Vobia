@@ -2782,33 +2782,35 @@ def _forecast_recommendation_context(request):
     }
 
 
-def _save_store_traffic(request):
+def _save_store_traffic(request, *, traffic_date=None, values=None):
     if not (
         request.user.is_superuser
         or module_level(request.user, "sales") in {"edit", "approve"}
     ):
         raise PermissionDenied("Input Traffic Toko memerlukan akses Edit Sales.")
 
-    try:
-        traffic_date = date.fromisoformat(request.POST.get("traffic_date", ""))
-    except (TypeError, ValueError):
-        raise ValidationError("Tanggal traffic wajib diisi.")
+    if traffic_date is None:
+        try:
+            traffic_date = date.fromisoformat(request.POST.get("traffic_date", ""))
+        except (TypeError, ValueError):
+            raise ValidationError("Tanggal traffic wajib diisi.")
     if traffic_date > timezone.localdate():
         raise ValidationError("Tanggal traffic tidak boleh melebihi hari ini.")
 
-    values = {}
-    for source, field, label in (
-        ("Shopee", "shopee_visitors", "Traffic Shopee"),
-        ("Tiktok", "tiktok_visitors", "Traffic TikTok"),
-    ):
-        raw_value = request.POST.get(field, "").strip()
-        try:
-            value = int(raw_value)
-        except (TypeError, ValueError):
-            raise ValidationError(f"{label} wajib berupa angka bulat.")
-        if value < 0:
-            raise ValidationError(f"{label} tidak boleh negatif.")
-        values[source] = value
+    if values is None:
+        values = {}
+        for source, field, label in (
+            ("Shopee", "shopee_visitors", "Traffic Shopee"),
+            ("Tiktok", "tiktok_visitors", "Traffic TikTok"),
+        ):
+            raw_value = request.POST.get(field, "").strip()
+            try:
+                value = int(raw_value)
+            except (TypeError, ValueError):
+                raise ValidationError(f"{label} wajib berupa angka bulat.")
+            if value < 0:
+                raise ValidationError(f"{label} tidak boleh negatif.")
+            values[source] = value
 
     with transaction.atomic():
         existing = {

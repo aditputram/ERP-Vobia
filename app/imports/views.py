@@ -1,11 +1,18 @@
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+from io import BytesIO
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.http import HttpResponseNotAllowed
+from django.db import transaction
+from django.http import HttpResponse, HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from openpyxl import Workbook, load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 
 from accounts.access import module_level
 from sales.views import _save_store_traffic
@@ -24,6 +31,10 @@ from .services.sales_parser import parse_sales_batch
 from .services.storage import DuplicateRawFile, create_master_import, create_sales_import
 from sales.services.requirements import import_requirements, summarize_import_requirements
 from inventory.models import FIFOOpeningImportBatch
+
+
+def _can_edit_store_traffic(user):
+    return user.is_superuser or module_level(user, "sales") in {"edit", "approve"}
 
 
 @login_required
@@ -139,25 +150,141 @@ def sales_import_list(request):
             "batches": batches,
             "requirements": requirements,
             "requirement_summary": summarize_import_requirements(requirements),
-            "can_edit_store_traffic": request.user.is_superuser
-            or module_level(request.user, "sales") in {"edit", "approve"},
+            "can_edit_store_traffic": _can_edit_store_traffic(request.user),
             "store_traffic_entry_date": store_traffic_entry_date,
             "store_traffic_entry": store_traffic_entry,
         },
     )
 
 
+def _parse_store_traffic_file(uploaded_file):
+    if not uploaded_file.name.lower().endswith(".xlsx"):
+        raise ValidationError("Import Traffic Toko harus memakai template .xlsx.")
+    if uploaded_file.size > 5 * 1024 * 1024:
+        raise ValidationError("File Traffic Toko maksimal 5 MB.")
+    try:
+        workbook = load_workbook(uploaded_file, read_only=True, data_only=True)
+    except (InvalidFileException, OSError, ValueError) as exc:
+        raise ValidationError("File Excel Traffic Toko tidak dapat dibaca.") from exc
+    try:
+        rows = workbook.active.iter_rows(values_only=True)
+        try:
+            header = next(rows)
+        except StopIteration as exc:
+            raise ValidationError("File Traffic Toko kosong.") from exc
+        columns = {
+            str(value or "").strip().casefold(): index
+            for index, value in enumerate(header)
+        }
+        required = {"tanggal", "shopee", "tiktok"}
+        if not required.issubset(columns):
+            raise ValidationError("Kolom template wajib: Tanggal, Shopee, TikTok.")
+
+        result = []
+        seen_dates = set()
+        for row_number, row in enumerate(rows, start=2):
+            if not any(value not in (None, "") for value in row):
+                continue
+            raw_date = row[columns["tanggal"]]
+            if isinstance(raw_date, datetime):
+                traffic_date = raw_date.date()
+            elif isinstance(raw_date, date):
+                traffic_date = raw_date
+            else:
+                traffic_date = None
+                for date_format in ("%Y-%m-%d", "%d/%m/%Y"):
+                    try:
+                        traffic_date = datetime.strptime(
+                            str(raw_date or "").strip(), date_format
+                        ).date()
+                        break
+                    except ValueError:
+                        continue
+            if traffic_date is None:
+                raise ValidationError(f"Baris {row_number}: tanggal tidak valid.")
+            if traffic_date in seen_dates:
+                raise ValidationError(f"Baris {row_number}: tanggal duplikat dalam file.")
+            seen_dates.add(traffic_date)
+
+            values = {}
+            for source, column in (("Shopee", "shopee"), ("Tiktok", "tiktok")):
+                raw_value = row[columns[column]]
+                try:
+                    number = Decimal(str(raw_value))
+                except (InvalidOperation, TypeError, ValueError):
+                    raise ValidationError(
+                        f"Baris {row_number}: traffic {source} wajib angka bulat."
+                    )
+                if (
+                    not number.is_finite()
+                    or number < 0
+                    or number != number.to_integral_value()
+                    or number > 9223372036854775807
+                ):
+                    raise ValidationError(
+                        f"Baris {row_number}: traffic {source} wajib angka bulat non-negatif."
+                    )
+                values[source] = int(number)
+            result.append((traffic_date, values))
+    finally:
+        workbook.close()
+    if not result:
+        raise ValidationError("Template belum berisi data Traffic Toko.")
+    return result
+
+
 @login_required
 def sales_store_traffic(request):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
+    if not _can_edit_store_traffic(request.user):
+        raise PermissionDenied("Input Traffic Toko memerlukan akses Edit Sales.")
     try:
-        _save_store_traffic(request)
+        if request.FILES.get("traffic_file"):
+            rows = _parse_store_traffic_file(request.FILES["traffic_file"])
+            with transaction.atomic():
+                for traffic_date, values in rows:
+                    _save_store_traffic(
+                        request, traffic_date=traffic_date, values=values
+                    )
+        else:
+            rows = None
+            _save_store_traffic(request)
     except ValidationError as exc:
         messages.error(request, exc.messages[0])
     else:
-        messages.success(request, "Traffic toko harian berhasil disimpan.")
+        message = (
+            f"Traffic toko berhasil di-import untuk {len(rows)} tanggal."
+            if rows is not None
+            else "Traffic toko harian berhasil disimpan."
+        )
+        messages.success(request, message)
     return redirect("imports:sales_list")
+
+
+@login_required
+def sales_store_traffic_template(request):
+    if not _can_edit_store_traffic(request.user):
+        raise PermissionDenied("Template Traffic Toko memerlukan akses Edit Sales.")
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Traffic Toko"
+    sheet.append(["Tanggal", "Shopee", "TikTok"])
+    sheet.freeze_panes = "A2"
+    sheet.column_dimensions["A"].width = 16
+    sheet.column_dimensions["B"].width = 16
+    sheet.column_dimensions["C"].width = 16
+    output = BytesIO()
+    workbook.save(output)
+    workbook.close()
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = (
+        'attachment; filename="template-traffic-toko.xlsx"'
+    )
+    return response
 
 
 @login_required

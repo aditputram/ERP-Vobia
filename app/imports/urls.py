@@ -13,6 +13,7 @@ urlpatterns = [
     path("master/<uuid:batch_id>/cancel/", views.master_import_cancel, name="master_cancel"),
     path("sales/", views.sales_import_list, name="sales_list"),
     path("sales/store-traffic/", views.sales_store_traffic, name="sales_store_traffic"),
+    path("sales/store-traffic/template/", views.sales_store_traffic_template, name="sales_store_traffic_template"),
     path("sales/upload/", views.sales_import_upload, name="sales_upload"),
     path("sales/<uuid:batch_id>/", views.sales_import_detail, name="sales_detail"),
     path("sales/<uuid:batch_id>/reparse/", views.sales_import_reparse, name="sales_reparse"),

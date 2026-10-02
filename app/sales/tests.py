@@ -5,12 +5,13 @@ import uuid
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, connection, transaction
 from django.test import RequestFactory, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from accounts.models import User
 from audit.models import AuditEvent
@@ -1394,7 +1395,44 @@ class SalesReportRouteTests(TestCase):
         import_response = self.client.get(list_url)
         self.assertContains(import_response, "Input Traffic Toko")
         self.assertContains(import_response, 'name="traffic_date"')
+        self.assertContains(import_response, ">Template</a>")
+        self.assertContains(import_response, ">Import</button>")
         self.assertNotContains(response, 'name="traffic_date"')
+
+        template_response = self.client.get(
+            reverse("imports:sales_store_traffic_template")
+        )
+        self.assertEqual(template_response.status_code, 200)
+        template = load_workbook(
+            BytesIO(template_response.content), read_only=True, data_only=True
+        )
+        self.assertEqual(
+            next(template.active.iter_rows(values_only=True)),
+            ("Tanggal", "Shopee", "TikTok"),
+        )
+        template.close()
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["Tanggal", "Shopee", "TikTok"])
+        sheet.append([date(2026, 9, 23), 1600, 950])
+        payload = BytesIO()
+        workbook.save(payload)
+        workbook.close()
+        imported = self.client.post(url, {
+            "traffic_file": SimpleUploadedFile(
+                "traffic-toko.xlsx",
+                payload.getvalue(),
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        })
+        self.assertRedirects(imported, list_url)
+        self.assertEqual(
+            StoreTrafficMetric.objects.get(
+                traffic_date=date(2026, 9, 23), source="Shopee"
+            ).visitors,
+            1600,
+        )
 
     def test_dashboard_traffic_and_conversion_follow_marketplace_filters(self):
         for source, order_number, line_count in (

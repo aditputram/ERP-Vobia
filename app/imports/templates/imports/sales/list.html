@@ -40,17 +40,22 @@
             <label>Shopee<input type="number" name="shopee_visitors" value="{{ store_traffic_entry.Shopee|default_if_none:'' }}" min="0" step="1" inputmode="numeric" placeholder="0" required></label>
             <label>TikTok<input type="number" name="tiktok_visitors" value="{{ store_traffic_entry.Tiktok|default_if_none:'' }}" min="0" step="1" inputmode="numeric" placeholder="0" required></label>
         </div>
-        <footer><p>Simpan lagi tanggal yang sama untuk memperbarui angka tanpa membuat duplikat.</p><div><button class="secondary-button" type="button" data-store-traffic-close>Batal</button><button class="primary-button" type="submit">Simpan Traffic</button></div></footer>
+        <footer><div><a class="secondary-button" href="{% url 'imports:sales_store_traffic_template' %}">Template</a><button class="secondary-button" type="button" data-store-traffic-import>Import</button></div><div><button class="secondary-button" type="button" data-store-traffic-close>Batal</button><button class="primary-button" type="submit">Simpan Traffic</button></div></footer>
     </form>
+    <form method="post" action="{% url 'imports:sales_store_traffic' %}" enctype="multipart/form-data" hidden data-store-traffic-import-form>{% csrf_token %}<input type="file" name="traffic_file" accept=".xlsx" required data-store-traffic-file></form>
 </dialog>
 <script>
 (() => {
     const dialog = document.querySelector('[data-store-traffic-dialog]');
     const open = document.querySelector('[data-store-traffic-open]');
+    const importButton = dialog?.querySelector('[data-store-traffic-import]');
+    const fileInput = dialog?.querySelector('[data-store-traffic-file]');
     if (!dialog || !open) return;
     open.addEventListener('click', () => dialog.showModal());
     dialog.querySelectorAll('[data-store-traffic-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
     dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+    importButton?.addEventListener('click', () => fileInput.click());
+    fileInput?.addEventListener('change', () => { if (fileInput.files.length) fileInput.form.requestSubmit(); });
 })();
 </script>
 {% endif %}

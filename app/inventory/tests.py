@@ -572,6 +572,44 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(parent["fifo_value"], Decimal("1400000"))
         self.assertContains(response, "2 SKU")
 
+    def test_inventory_summary_supports_multi_select_and_product_filters(self):
+        product = Product.objects.create(
+            code="P-2",
+            parent_sku="PARENT-2",
+            name="Second Product",
+            status=self.sku.product_variant.product.status,
+            category=self.sku.product_variant.product.category,
+        )
+        second_sku = SKU.objects.create(
+            sku="SKU-2",
+            product_variant=ProductVariant.objects.create(product=product, name="Navy"),
+            current_retail_price=Decimal("200000"),
+            current_master_cogs=Decimal("100000"),
+        )
+        post_opening(sku=self.sku, quantity=2, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
+        post_opening(sku=second_sku, quantity=-1, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("inventory:overview"), {
+            "warehouse": "",
+            "status": [str(product.status_id)],
+            "category": [str(product.category_id)],
+            "product": [str(self.sku.product_variant.product_id), str(product.id)],
+            "stock_status": ["OK", "NEGATIVE"],
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["balances"]), 2)
+        self.assertEqual(response.context["selected_stock_statuses"], ["OK", "NEGATIVE"])
+        self.assertContains(response, "data-multi-select data-all-label", count=4)
+        self.assertContains(response, "Second Product")
+
+        product_only = self.client.get(reverse("inventory:overview"), {
+            "warehouse": "",
+            "product": [str(product.id)],
+        })
+        self.assertEqual([row["sku"] for row in product_only.context["balances"]], [second_sku])
+
     def test_inventory_summary_tracks_current_stockout_since_last_restock(self):
         post_opening(sku=self.sku, quantity=10, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
         post_sales_out(self._sales_line(number="ORDER-ZERO-1", quantity=10, order_date=date(2026, 8, 10)), self.user)

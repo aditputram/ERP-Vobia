@@ -18,7 +18,7 @@ def _for_warehouse(queryset, warehouse):
     return queryset.filter(warehouse=warehouse)
 
 
-def filtered_skus(*, query="", status="", category="", product=(), size=()):
+def filtered_skus(*, query="", status=(), category=(), product=(), size=()):
     rows = SKU.objects.filter(is_active=True).select_related(
         "product_variant__product__status",
         "product_variant__product__category",
@@ -31,9 +31,9 @@ def filtered_skus(*, query="", status="", category="", product=(), size=()):
             | Q(product_variant__product__parent_sku__icontains=query)
         )
     if status:
-        rows = rows.filter(product_variant__product__status_id=status)
+        rows = rows.filter(product_variant__product__status_id__in=status)
     if category:
-        rows = rows.filter(product_variant__product__category_id=category)
+        rows = rows.filter(product_variant__product__category_id__in=category)
     if product:
         rows = rows.filter(product_variant__product_id__in=product)
     if size:

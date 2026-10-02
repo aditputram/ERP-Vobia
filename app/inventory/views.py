@@ -106,7 +106,7 @@ def _export_inventory(balances, *, as_of_date, warehouse, sku_type, stock_status
     output = BytesIO()
     workbook.save(output)
     workbook.close()
-    status_label = (stock_status or "all").lower()
+    status_label = "-".join(stock_status).lower() if stock_status else "all"
     response = HttpResponse(
         output.getvalue(),
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -377,9 +377,39 @@ def overview(request):
             messages.success(request, "PO Aging dan close/reopen condition diperbarui.")
             return redirect("inventory:overview")
     query = request.GET.get("q", "").strip()
-    status = request.GET.get("status", "")
-    category = request.GET.get("category", "")
-    stock_status = request.GET.get("stock_status", "")
+    product_statuses = list(ProductStatus.objects.filter(is_active=True).order_by("name"))
+    categories = list(Category.objects.filter(is_active=True).order_by("name"))
+    products = list(
+        Product.objects.filter(is_active=True, variants__skus__is_active=True)
+        .distinct()
+        .order_by("name")
+    )
+    valid_status_ids = {str(row.id) for row in product_statuses}
+    valid_category_ids = {str(row.id) for row in categories}
+    valid_product_ids = {str(row.id) for row in products}
+    selected_statuses = [
+        value for value in request.GET.getlist("status")
+        if value in valid_status_ids
+    ]
+    selected_categories = [
+        value for value in request.GET.getlist("category")
+        if value in valid_category_ids
+    ]
+    selected_products = [
+        value for value in request.GET.getlist("product")
+        if value in valid_product_ids
+    ]
+    stock_status_options = [
+        {"value": "OK", "label": "OK"},
+        {"value": "REJECTED", "label": "Rejected"},
+        {"value": "ZERO", "label": "Zero"},
+        {"value": "EXCEPTION", "label": "Exception"},
+        {"value": "NEGATIVE", "label": "Negative"},
+    ]
+    valid_stock_statuses = {row["value"] for row in stock_status_options}
+    selected_stock_statuses = [
+        value for value in request.GET.getlist("stock_status") if value in valid_stock_statuses
+    ]
     warehouses = list(Warehouse.objects.filter(is_active=True, code__in=("MAIN", "REJECT")).order_by("name"))
     warehouse_map = {str(row.id): row for row in warehouses}
     main_warehouse = next((row for row in warehouses if row.code == "MAIN"), None)
@@ -405,7 +435,12 @@ def overview(request):
     if as_of_date < CUTOVER_DATE:
         as_of_date = CUTOVER_DATE
         date_filter_error = "Riwayat Warehouse ERP tersedia mulai FIFO cutover 31 July 2026."
-    skus = filtered_skus(query=query, status=status, category=category)
+    skus = filtered_skus(
+        query=query,
+        status=selected_statuses,
+        category=selected_categories,
+        product=selected_products,
+    )
     balances = inventory_summary_rows(skus, as_of_date=as_of_date, warehouse=selected_warehouse)
     if selected_warehouse:
         balances = [
@@ -415,15 +450,15 @@ def overview(request):
         ]
     if sku_type == "parent":
         balances = inventory_parent_summary_rows(balances)
-    if stock_status:
-        balances = [row for row in balances if row["stock_status"] == stock_status]
+    if selected_stock_statuses:
+        balances = [row for row in balances if row["stock_status"] in selected_stock_statuses]
     if request.method == "GET" and request.GET.get("export") == "xlsx":
         return _export_inventory(
             balances,
             as_of_date=as_of_date,
             warehouse=selected_warehouse,
             sku_type=sku_type,
-            stock_status=stock_status,
+            stock_status=selected_stock_statuses,
         )
     total_balance = sum((row["balance"] for row in balances), 0)
     total_fifo_value = sum((row["fifo_value"] for row in balances), 0)
@@ -441,17 +476,20 @@ def overview(request):
             "pos": pos,
             "opening_batch": FIFOOpeningImportBatch.objects.first(),
             "query": query,
-            "selected_status": status,
-            "selected_category": category,
-            "selected_stock_status": stock_status,
+            "selected_statuses": selected_statuses,
+            "selected_categories": selected_categories,
+            "selected_products": selected_products,
+            "selected_stock_statuses": selected_stock_statuses,
             "warehouses": warehouses,
             "selected_warehouse": selected_warehouse,
             "sku_type": sku_type,
             "as_of_date": as_of_date,
             "cutover_date": CUTOVER_DATE,
             "date_filter_error": date_filter_error,
-            "product_statuses": ProductStatus.objects.filter(is_active=True),
-            "categories": Category.objects.filter(is_active=True),
+            "status_options": [{"value": str(row.id), "label": row.name} for row in product_statuses],
+            "category_options": [{"value": str(row.id), "label": row.name} for row in categories],
+            "product_options": [{"value": str(row.id), "label": row.name} for row in products],
+            "stock_status_options": stock_status_options,
             "total_balance": total_balance,
             "total_fifo_value": total_fifo_value,
             "total_exceptions": total_exceptions,

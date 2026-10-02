@@ -495,9 +495,13 @@ tbody tr:last-child td { border-bottom: 0; }
 .potential-product-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px !important; }
 .potential-product-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0 !important; text-transform: none !important; }
 .potential-size-wrap { border-top: 1px solid var(--line); }
-.potential-size-table { min-width: 1380px; }
-.potential-size-table th, .potential-size-table td { text-align: center; white-space: nowrap; }
-.potential-size-table th:first-child, .potential-size-table td:first-child, .potential-size-table th:last-child, .potential-size-table td:last-child { text-align: left; }
+.potential-size-table { width: 100%; min-width: 0; table-layout: fixed; }
+.potential-size-table th, .potential-size-table td { padding: 5px 4px; text-align: center; white-space: normal; vertical-align: top; font-size: 9px; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.potential-size-table th { font-size: 7px; line-height: 1.2; }
+.potential-size-table strong { font-size: 9px; }
+.potential-size-table .table-subcopy { margin-top: 1px; white-space: normal; font-size: 7px; line-height: 1.2; }
+.potential-size-table th:first-child, .potential-size-table td:first-child { width: 13%; text-align: left; overflow-wrap: anywhere; }
+.potential-size-table th:last-child, .potential-size-table td:last-child { width: 17%; text-align: left; overflow-wrap: anywhere; }
 .potential-size-table thead th { background: #eef7c9; color: #27300d; }
 .potential-size-table tbody tr:nth-child(even) { background: #f7f7f3; }
 .potential-size-table tbody .potential-size-affected { background: #fbfde8; }

@@ -381,6 +381,7 @@ def overview(request):
     categories = list(Category.objects.filter(is_active=True).order_by("name"))
     products = list(
         Product.objects.filter(is_active=True, variants__skus__is_active=True)
+        .select_related("status", "category")
         .distinct()
         .order_by("name")
     )
@@ -391,13 +392,24 @@ def overview(request):
         value for value in request.GET.getlist("status")
         if value in valid_status_ids
     ]
+    allowed_category_ids = {
+        str(row.category_id)
+        for row in products
+        if not selected_statuses or str(row.status_id) in selected_statuses
+    }
     selected_categories = [
         value for value in request.GET.getlist("category")
-        if value in valid_category_ids
+        if value in valid_category_ids and value in allowed_category_ids
     ]
+    allowed_product_ids = {
+        str(row.id)
+        for row in products
+        if (not selected_statuses or str(row.status_id) in selected_statuses)
+        and (not selected_categories or str(row.category_id) in selected_categories)
+    }
     selected_products = [
         value for value in request.GET.getlist("product")
-        if value in valid_product_ids
+        if value in valid_product_ids and value in allowed_product_ids
     ]
     stock_status_options = [
         {"value": "OK", "label": "OK"},
@@ -463,6 +475,9 @@ def overview(request):
     total_balance = sum((row["balance"] for row in balances), 0)
     total_fifo_value = sum((row["fifo_value"] for row in balances), 0)
     total_exceptions = sum((row["exception_count"] for row in balances), 0)
+    category_status_ids = {}
+    for product in products:
+        category_status_ids.setdefault(str(product.category_id), set()).add(str(product.status_id))
     pos = list(PurchaseOrder.objects.filter(status=PurchaseOrder.Status.RELEASED).prefetch_related("lines")[:100])
     for po in pos:
         po.aging_snapshot = po_aging_snapshot(po)
@@ -487,8 +502,23 @@ def overview(request):
             "cutover_date": CUTOVER_DATE,
             "date_filter_error": date_filter_error,
             "status_options": [{"value": str(row.id), "label": row.name} for row in product_statuses],
-            "category_options": [{"value": str(row.id), "label": row.name} for row in categories],
-            "product_options": [{"value": str(row.id), "label": row.name} for row in products],
+            "category_options": [
+                {
+                    "value": str(row.id),
+                    "label": row.name,
+                    "statuses": " ".join(sorted(category_status_ids.get(str(row.id), set()))),
+                }
+                for row in categories
+            ],
+            "product_options": [
+                {
+                    "value": str(row.id),
+                    "label": row.name,
+                    "statuses": str(row.status_id),
+                    "category": str(row.category_id),
+                }
+                for row in products
+            ],
             "stock_status_options": stock_status_options,
             "total_balance": total_balance,
             "total_fifo_value": total_fifo_value,

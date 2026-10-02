@@ -9,4 +9,57 @@
 <section class="dashboard-grid section-gap"><article class="panel span-two"><div class="panel-header"><div><p class="eyebrow">OPEN EXCEPTIONS</p><h2>Negative opening / FIFO short</h2></div></div>{% if exceptions %}<div class="issue-list">{% for row in exceptions %}<div class="issue-row error"><span>{{ row.code }}</span><div><strong>{{ row.sku.sku }} · {{ row.quantity|floatformat:"0g" }} pcs</strong><small>{{ row.message }}</small></div></div>{% endfor %}</div>{% else %}<div class="empty-state">Tidak ada exception terbuka.</div>{% endif %}</article><article class="panel"><div class="panel-header"><div><p class="eyebrow">SYSTEM CONTROL</p><h2>Cutover &amp; corrections</h2></div></div>{% if opening_batch %}<p class="muted">FIFO Opening batch: <strong>{{ opening_batch.get_status_display }}</strong>.</p><a class="secondary-button" href="{% url 'inventory:opening_detail' opening_batch.id %}">Lihat opening batch</a>{% endif %}<details class="section-gap"><summary>Traceable adjustment</summary><p class="muted">Tidak ada edit saldo langsung. Bukti dan alasan wajib.</p><form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="form_name" value="adjustment">{{ adjustment.as_p }}<button class="secondary-button" type="submit">Post adjustment</button></form></details><details class="section-gap"><summary>Tambah warehouse</summary><form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="form_name" value="warehouse">{{ warehouse.as_p }}<button class="secondary-button" type="submit">Simpan</button></form></details></article></section>
 <section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">PO AGING</p><h2>Outstanding inbound + remaining FIFO</h2></div><form method="post">{% csrf_token %}<input type="hidden" name="form_name" value="refresh_aging"><button class="secondary-button" type="submit">Refresh close/reopen</button></form></div>{% if pos %}<div class="table-wrap"><table><thead><tr><th>PO</th><th>Source</th><th>PO Qty</th><th>Received</th><th>Outstanding</th><th>Layer Remaining</th><th>Total Remaining</th><th>Aging</th><th>Status</th></tr></thead><tbody>{% for po in pos %}<tr><td><a class="row-link" href="{% url 'purchasing:po_detail' po.id %}">{{ po.po_number }}</a></td><td>{{ po.get_source_display }}</td><td>{{ po.aging_snapshot.total_po_qty|floatformat:"0g" }}</td><td>{{ po.aging_snapshot.received_qty|floatformat:"0g" }}</td><td>{{ po.aging_snapshot.outstanding_inbound|floatformat:"0g" }}</td><td>{{ po.aging_snapshot.remaining_layer_qty|floatformat:"0g" }}</td><td>{{ po.aging_snapshot.po_remaining_qty|floatformat:"0g" }}</td><td>{{ po.aging_snapshot.age_days|floatformat:"0g" }} hari</td><td><span class="status-badge {% if po.aging_snapshot.status == 'Exception' %}blocked{% elif 'Attention' in po.aging_snapshot.status or 'Over' in po.aging_snapshot.status %}parsing{% else %}ready{% endif %}">{{ po.aging_snapshot.status }}</span></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">Belum ada PO Released / PO WIP.</div>{% endif %}</section>
 {% include "includes/multi_select_script.html" %}
+<script>
+(() => {
+  const form = document.getElementById('inventory-filter');
+  const rootFor = name => form?.querySelector(`input[name="${name}"]`)?.closest('[data-multi-select]');
+  const statusRoot = rootFor('status');
+  const categoryRoot = rootFor('category');
+  const productRoot = rootFor('product');
+  if (!statusRoot || !categoryRoot || !productRoot) return;
+
+  const selectedValues = (root, name) => new Set(
+    [...root.querySelectorAll(`input[name="${name}"]:checked`)].map(input => input.value)
+  );
+  const refresh = (root, allowed) => {
+    const search = root.querySelector('[data-filter-search]');
+    const keyword = search.value.trim().toLocaleLowerCase('id');
+    const options = [...root.querySelectorAll('.multi-select-option')];
+    let visible = 0;
+    options.forEach(option => {
+      const isAllowed = allowed(option);
+      const checkbox = option.querySelector('input[type="checkbox"]');
+      if (!isAllowed) checkbox.checked = false;
+      option.dataset.cascadeHidden = isAllowed ? 'false' : 'true';
+      const matchesSearch = option.textContent.toLocaleLowerCase('id').includes(keyword);
+      option.hidden = !isAllowed || !matchesSearch;
+      if (!option.hidden) visible += 1;
+    });
+    const selected = options.filter(option => option.querySelector('input[type="checkbox"]').checked);
+    root.querySelector('[data-filter-summary]').textContent = selected.length === 0
+      ? root.dataset.allLabel
+      : (selected.length === 1 ? selected[0].querySelector('span').textContent.trim() : `${selected.length} selected`);
+    root.querySelector('[data-filter-result-count]').textContent = `${visible} pilihan`;
+  };
+  const sync = () => {
+    const statuses = selectedValues(statusRoot, 'status');
+    refresh(categoryRoot, option => {
+      const optionStatuses = new Set((option.dataset.statuses || '').split(' ').filter(Boolean));
+      return optionStatuses.size > 0
+        && (statuses.size === 0 || [...statuses].some(value => optionStatuses.has(value)));
+    });
+    const categories = selectedValues(categoryRoot, 'category');
+    refresh(productRoot, option => (
+      (statuses.size === 0 || statuses.has(option.dataset.statuses))
+      && (categories.size === 0 || categories.has(option.dataset.category))
+    ));
+  };
+
+  statusRoot.querySelectorAll('input[name="status"]').forEach(input => input.addEventListener('change', sync));
+  categoryRoot.querySelectorAll('input[name="category"]').forEach(input => input.addEventListener('change', sync));
+  statusRoot.querySelector('[data-filter-clear]').addEventListener('click', sync);
+  categoryRoot.querySelector('[data-filter-clear]').addEventListener('click', sync);
+  sync();
+})();
+</script>
 {% endblock %}

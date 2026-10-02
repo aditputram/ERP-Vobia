@@ -573,12 +573,14 @@ class InventoryWorkflowTests(TestCase):
         self.assertContains(response, "2 SKU")
 
     def test_inventory_summary_supports_multi_select_and_product_filters(self):
+        second_status = ProductStatus.objects.create(code="SEASONAL", name="Seasonal")
+        second_category = Category.objects.create(code="OUTER", name="Outer")
         product = Product.objects.create(
             code="P-2",
             parent_sku="PARENT-2",
             name="Second Product",
-            status=self.sku.product_variant.product.status,
-            category=self.sku.product_variant.product.category,
+            status=second_status,
+            category=second_category,
         )
         second_sku = SKU.objects.create(
             sku="SKU-2",
@@ -592,8 +594,8 @@ class InventoryWorkflowTests(TestCase):
 
         response = self.client.get(reverse("inventory:overview"), {
             "warehouse": "",
-            "status": [str(product.status_id)],
-            "category": [str(product.category_id)],
+            "status": [str(self.sku.product_variant.product.status_id), str(product.status_id)],
+            "category": [str(self.sku.product_variant.product.category_id), str(product.category_id)],
             "product": [str(self.sku.product_variant.product_id), str(product.id)],
             "stock_status": ["OK", "NEGATIVE"],
         })
@@ -603,12 +605,17 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(response.context["selected_stock_statuses"], ["OK", "NEGATIVE"])
         self.assertContains(response, "data-multi-select data-all-label", count=4)
         self.assertContains(response, "Second Product")
+        self.assertContains(response, f'data-statuses="{product.status_id}" data-category="{product.category_id}"')
 
-        product_only = self.client.get(reverse("inventory:overview"), {
+        cascaded = self.client.get(reverse("inventory:overview"), {
             "warehouse": "",
+            "status": [str(self.sku.product_variant.product.status_id)],
+            "category": [str(product.category_id)],
             "product": [str(product.id)],
         })
-        self.assertEqual([row["sku"] for row in product_only.context["balances"]], [second_sku])
+        self.assertEqual(cascaded.context["selected_categories"], [])
+        self.assertEqual(cascaded.context["selected_products"], [])
+        self.assertEqual([row["sku"] for row in cascaded.context["balances"]], [self.sku])
 
     def test_inventory_summary_tracks_current_stockout_since_last_restock(self):
         post_opening(sku=self.sku, quantity=10, unit_cost=100000, actor=self.user, warehouse=self.warehouse)

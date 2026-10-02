@@ -9,7 +9,7 @@
     <div class="multi-select-toolbar"><span data-filter-result-count>{{ options|length }} pilihan</span><button type="button" data-filter-clear>Clear All</button></div>
     <div class="multi-select-options">
       {% for item in options %}
-      <label class="multi-select-option"><input type="checkbox" name="{{ name }}" value="{{ item.value }}" {% if item.value in selected %}checked{% endif %}><span>{{ item.label }}</span></label>
+      <label class="multi-select-option"{% if item.statuses %} data-statuses="{{ item.statuses }}"{% endif %}{% if item.category %} data-category="{{ item.category }}"{% endif %}><input type="checkbox" name="{{ name }}" value="{{ item.value }}" {% if item.value in selected %}checked{% endif %}><span>{{ item.label }}</span></label>
       {% empty %}<div class="empty-state">Belum ada pilihan eligible.</div>{% endfor %}
     </div>
   </div>

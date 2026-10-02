@@ -5,7 +5,11 @@ from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.http import HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
+from accounts.access import module_level
+from sales.views import _save_store_traffic
+from traffic.models import StoreTrafficMetric
 from .forms import MasterImportUploadForm, SalesImportUploadForm
 from .models import (
     ImportValidationIssue,
@@ -121,6 +125,13 @@ def sales_import_list(request):
         status=SalesImportBatch.Status.VOIDED
     ).select_related("raw_file", "raw_file__uploaded_by")[:30]
     requirements = import_requirements()
+    store_traffic_entry_date = timezone.localdate()
+    store_traffic_entry = {
+        metric.source: metric.visitors
+        for metric in StoreTrafficMetric.objects.filter(
+            traffic_date=store_traffic_entry_date
+        )
+    }
     return render(
         request,
         "imports/sales/list.html",
@@ -128,8 +139,25 @@ def sales_import_list(request):
             "batches": batches,
             "requirements": requirements,
             "requirement_summary": summarize_import_requirements(requirements),
+            "can_edit_store_traffic": request.user.is_superuser
+            or module_level(request.user, "sales") in {"edit", "approve"},
+            "store_traffic_entry_date": store_traffic_entry_date,
+            "store_traffic_entry": store_traffic_entry,
         },
     )
+
+
+@login_required
+def sales_store_traffic(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        _save_store_traffic(request)
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0])
+    else:
+        messages.success(request, "Traffic toko harian berhasil disimpan.")
+    return redirect("imports:sales_list")
 
 
 @login_required

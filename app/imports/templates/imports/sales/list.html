@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-header">
     <div><p class="eyebrow">SALES · DATA IMPORT</p><h1>Transaction &amp; Traffic Import</h1><p>Upload file mentah transaksi dan traffic di area Sales ini. Semua import melewati staging, validation, review, dan approval.</p></div>
-    <div class="header-actions"><a class="secondary-button" href="{% url 'traffic:overview' %}">Upload Traffic</a><a class="primary-button" href="{% url 'imports:sales_upload' %}">Upload Transaction</a></div>
+    <div class="header-actions">{% if can_edit_store_traffic %}<button class="secondary-button" type="button" data-store-traffic-open>Input Traffic Toko</button>{% endif %}<a class="secondary-button" href="{% url 'traffic:overview' %}">Upload Traffic</a><a class="primary-button" href="{% url 'imports:sales_upload' %}">Upload Transaction</a></div>
 </header>
 <section class="dashboard-grid"><article class="panel"><p class="eyebrow">TRANSACTION</p><h2>Shopee &amp; TikTok</h2><p class="muted">Raw order export, status reconciliation, immutable financial snapshot.</p><a class="secondary-button" href="{% url 'imports:sales_upload' %}">Upload transaction</a></article><article class="panel"><p class="eyebrow">PRODUCT TRAFFIC</p><h2>Shopee &amp; TikTok Traffic</h2><p class="muted">Views, clicks, dan visitors di level product untuk Product Performance.</p><a class="secondary-button" href="{% url 'traffic:overview' %}">Upload traffic</a></article><article class="panel"><p class="eyebrow">MASTER</p><h2>Master Product</h2><p class="muted">Bank Data canonical untuk SKU dan marketplace product mapping.</p><a class="secondary-button" href="{% url 'imports:master_list' %}">Master import history</a></article></section>
 <section class="panel">
@@ -31,4 +31,27 @@
     </tbody></table></div>{% else %}<div class="empty-state">Belum ada file Sales yang diunggah.</div>{% endif %}
 </section>
 {% endcomment %}
+{% if can_edit_store_traffic %}
+<dialog class="finance-sales-journal-dialog" data-store-traffic-dialog>
+    <header><div><p class="eyebrow">SALES · STORE TRAFFIC</p><h2>Input Traffic Toko</h2></div><button type="button" aria-label="Tutup" data-store-traffic-close>×</button></header>
+    <form method="post" action="{% url 'imports:sales_store_traffic' %}">{% csrf_token %}
+        <div class="finance-journal-form-grid">
+            <label>Tanggal<input type="date" name="traffic_date" value="{{ store_traffic_entry_date|date:'Y-m-d' }}" max="{{ store_traffic_entry_date|date:'Y-m-d' }}" required></label>
+            <label>Shopee<input type="number" name="shopee_visitors" value="{{ store_traffic_entry.Shopee|default_if_none:'' }}" min="0" step="1" inputmode="numeric" placeholder="0" required></label>
+            <label>TikTok<input type="number" name="tiktok_visitors" value="{{ store_traffic_entry.Tiktok|default_if_none:'' }}" min="0" step="1" inputmode="numeric" placeholder="0" required></label>
+        </div>
+        <footer><p>Simpan lagi tanggal yang sama untuk memperbarui angka tanpa membuat duplikat.</p><div><button class="secondary-button" type="button" data-store-traffic-close>Batal</button><button class="primary-button" type="submit">Simpan Traffic</button></div></footer>
+    </form>
+</dialog>
+<script>
+(() => {
+    const dialog = document.querySelector('[data-store-traffic-dialog]');
+    const open = document.querySelector('[data-store-traffic-open]');
+    if (!dialog || !open) return;
+    open.addEventListener('click', () => dialog.showModal());
+    dialog.querySelectorAll('[data-store-traffic-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
+    dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+})();
+</script>
+{% endif %}
 {% endblock %}

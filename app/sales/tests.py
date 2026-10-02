@@ -1349,17 +1349,17 @@ class SalesReportRouteTests(TestCase):
         self.assertContains(response, 'name="date_to"')
         self.assertContains(response, 'data-max-visible-rows="25"')
 
-    def test_dashboard_saves_and_updates_daily_store_traffic(self):
-        url = reverse("sales:dashboard")
+    def test_data_import_saves_and_updates_daily_store_traffic(self):
+        url = reverse("imports:sales_store_traffic")
+        list_url = reverse("imports:sales_list")
 
         created = self.client.post(url, {
-            "action": "save_store_traffic",
             "traffic_date": "2026-09-22",
             "shopee_visitors": "1200",
             "tiktok_visitors": "800",
         })
 
-        self.assertRedirects(created, url)
+        self.assertRedirects(created, list_url)
         self.assertEqual(StoreTrafficMetric.objects.count(), 2)
         self.assertEqual(
             StoreTrafficMetric.objects.get(
@@ -1369,15 +1369,14 @@ class SalesReportRouteTests(TestCase):
         )
 
         updated = self.client.post(url, {
-            "action": "save_store_traffic",
             "traffic_date": "2026-09-22",
             "shopee_visitors": "1500",
             "tiktok_visitors": "900",
         })
 
-        self.assertRedirects(updated, url)
+        self.assertRedirects(updated, list_url)
         self.assertEqual(StoreTrafficMetric.objects.count(), 2)
-        response = self.client.get(url, {
+        response = self.client.get(reverse("sales:dashboard"), {
             "period_type": "custom",
             "date_from": "2026-09-22",
             "date_to": "2026-09-22",
@@ -1392,6 +1391,10 @@ class SalesReportRouteTests(TestCase):
             AuditEvent.objects.filter(action="sales_store_traffic_saved").count(),
             2,
         )
+        import_response = self.client.get(list_url)
+        self.assertContains(import_response, "Input Traffic Toko")
+        self.assertContains(import_response, 'name="traffic_date"')
+        self.assertNotContains(response, 'name="traffic_date"')
 
     def test_dashboard_traffic_and_conversion_follow_marketplace_filters(self):
         for source, order_number, line_count in (

@@ -1934,15 +1934,18 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         .values_list("batch_id", flat=True)
         .first()
     )
-    monthly_endings = {}
+    monthly_snapshots = {}
     if active_batch_id:
-        monthly_endings = {
-            row["sku_id"]: Decimal(row["ending_qty"] or 0)
+        monthly_snapshots = {
+            (row["sku_id"], row["month"]): {
+                "beginning": Decimal(row["beginning_qty"] or 0),
+                "ending": Decimal(row["ending_qty"] or 0),
+            }
             for row in MerchandisingMonthlySnapshot.objects.filter(
                 batch_id=active_batch_id,
                 sku_id__in=sku_ids,
-                month=selected_month,
-            ).values("sku_id", "ending_qty")
+                month__range=(reference_start_month, selected_month),
+            ).values("sku_id", "month", "beginning_qty", "ending_qty")
         }
     openings = {
         row["sku_id"]: Decimal(row["opening_qty"] or 0)
@@ -1957,12 +1960,12 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         )
         .exclude(movement_type=InventoryMovement.MovementType.OPENING)
         .exclude(sales_line__order__affects_inventory=False)
-        .values("sku_id", "movement_date", "direction")
+        .values("sku_id", "movement_date", "direction", "movement_type")
         .annotate(total=Sum("quantity"))
         .order_by("movement_date")
     )
     daily_movements = defaultdict(
-        lambda: defaultdict(lambda: {"in": Decimal("0"), "out": Decimal("0")})
+        lambda: defaultdict(lambda: defaultdict(Decimal))
     )
     for movement in movement_rows:
         direction = (
@@ -1973,6 +1976,14 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         daily_movements[movement["sku_id"]][movement["movement_date"]][direction] += Decimal(
             movement["total"] or 0
         )
+        if movement["movement_type"] == InventoryMovement.MovementType.RETURN_IN:
+            daily_movements[movement["sku_id"]][movement["movement_date"]]["return_in"] += Decimal(
+                movement["total"] or 0
+            )
+        if movement["movement_type"] == InventoryMovement.MovementType.SALES_OUT:
+            daily_movements[movement["sku_id"]][movement["movement_date"]]["sales_out"] += Decimal(
+                movement["total"] or 0
+            )
 
     sales_rows = list(
         SalesOrderLine.objects.filter(
@@ -2004,6 +2015,66 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
             "actual_gross": Decimal(item["actual_gross"] or 0),
         }
 
+    def stock_context(sku_id, month, end_date):
+        snapshot = monthly_snapshots.get((sku_id, month))
+        physical_balance = normal_balance = (
+            snapshot["beginning"] if snapshot else openings[sku_id]
+        )
+        if snapshot is None:
+            cursor = CUTOVER_DATE + timedelta(days=1)
+            while cursor < month:
+                totals = daily_movements[sku_id].get(cursor, {})
+                physical_balance += totals.get("in", 0) - totals.get("out", 0)
+                normal_balance = max(
+                    normal_balance
+                    + totals.get("in", 0)
+                    - totals.get("return_in", 0)
+                    - totals.get("out", 0),
+                    Decimal("0"),
+                )
+                cursor += timedelta(days=1)
+
+        opening_balance = physical_balance
+        available_days = 0
+        lost_days = 0
+        eligible_sales_qty = Decimal("0")
+        inventory_exception = physical_balance < 0
+        cursor = month
+        while cursor <= end_date:
+            totals = daily_movements[sku_id].get(cursor, {})
+            physical_before_out = physical_balance + totals.get("in", 0)
+            normal_before_out = (
+                normal_balance
+                + totals.get("in", 0)
+                - totals.get("return_in", 0)
+            )
+            if normal_before_out > 0:
+                available_days += 1
+                eligible_sales_qty += min(
+                    totals.get("sales_out", 0), normal_before_out
+                )
+            else:
+                lost_days += 1
+            physical_balance = physical_before_out - totals.get("out", 0)
+            normal_balance = max(
+                normal_before_out - totals.get("out", 0), Decimal("0")
+            )
+            if physical_balance < 0:
+                inventory_exception = True
+            cursor += timedelta(days=1)
+
+        month_end = _shift_month(month, 1) - timedelta(days=1)
+        if snapshot and end_date == month_end and physical_balance != snapshot["ending"]:
+            inventory_exception = True
+        return {
+            "opening": opening_balance,
+            "ending": physical_balance,
+            "available_days": available_days,
+            "lost_days": lost_days,
+            "eligible_sales_qty": eligible_sales_qty,
+            "inventory_exception": inventory_exception,
+        }
+
     rows = []
     for sku in skus:
         if sku.id not in openings:
@@ -2012,42 +2083,28 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         selected_actual = sales_by_sku_month.get((sku.id, selected_month), {})
         actual_qty = Decimal(selected_actual.get("actual_qty") or 0)
         actual_gross = Decimal(selected_actual.get("actual_gross") or 0)
-        opening_balance = openings[sku.id]
-        ending_balance = opening_balance
-        available_days = 0
-        lost_days = 0
-        inventory_exception = opening_balance < 0
-
-        for movement_date, totals in daily_movements[sku.id].items():
-            if movement_date >= selected_month:
-                break
-            opening_balance += totals["in"] - totals["out"]
-        balance = opening_balance
-        cursor = selected_month
-        while cursor <= cutoff_date:
-            totals = daily_movements[sku.id].get(
-                cursor, {"in": Decimal("0"), "out": Decimal("0")}
-            )
-            balance_before_out = balance + totals["in"]
-            if balance_before_out > 0:
-                available_days += 1
-            else:
-                lost_days += 1
-                if totals["out"] > 0:
-                    inventory_exception = True
-            balance = balance_before_out - totals["out"]
-            if balance < 0:
-                inventory_exception = True
-            cursor += timedelta(days=1)
-        ending_balance = balance
-        if monthly_endings.get(sku.id, Decimal("0")) > 0:
-            continue
+        selected_stock = stock_context(sku.id, selected_month, cutoff_date)
+        opening_balance = selected_stock["opening"]
+        ending_balance = selected_stock["ending"]
+        available_days = selected_stock["available_days"]
+        lost_days = selected_stock["lost_days"]
+        inventory_exception = selected_stock["inventory_exception"]
         if not lost_days:
             continue
 
         references = []
-        if actual_qty > 0 and available_days > 0:
-            references = [(selected_actual, available_days)]
+        eligible_actual_qty = selected_stock["eligible_sales_qty"]
+        if eligible_actual_qty > 0 and available_days > 0:
+            eligible_actual = {
+                **selected_actual,
+                "actual_qty": eligible_actual_qty,
+                "actual_gross": (
+                    actual_gross * eligible_actual_qty / actual_qty
+                    if actual_qty > 0
+                    else Decimal("0")
+                ),
+            }
+            references = [(eligible_actual, available_days)]
         else:
             prior_candidates = sorted(
                 [
@@ -2063,22 +2120,26 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
                 item_month = item["sales_month"]
                 if item_month < POTENTIAL_SALES_START_MONTH:
                     reference_days = (item["last_sale_date"] - item["first_sale_date"]).days + 1
+                    eligible_reference = item
                 else:
-                    reference_days = 0
-                    reference_end = _shift_month(item_month, 1) - timedelta(days=1)
-                    reference_balance = openings[sku.id]
-                    reference_cursor = CUTOVER_DATE + timedelta(days=1)
-                    while reference_cursor <= reference_end:
-                        totals = daily_movements[sku.id].get(
-                            reference_cursor, {"in": Decimal("0"), "out": Decimal("0")}
-                        )
-                        balance_before_out = reference_balance + totals["in"]
-                        if reference_cursor >= item_month and balance_before_out > 0:
-                            reference_days += 1
-                        reference_balance = balance_before_out - totals["out"]
-                        reference_cursor += timedelta(days=1)
-                if reference_days > 0:
-                    references.append((item, reference_days))
+                    reference_stock = stock_context(
+                        sku.id,
+                        item_month,
+                        _shift_month(item_month, 1) - timedelta(days=1),
+                    )
+                    reference_days = reference_stock["available_days"]
+                    eligible_qty = reference_stock["eligible_sales_qty"]
+                    eligible_reference = {
+                        **item,
+                        "actual_qty": eligible_qty,
+                        "actual_gross": (
+                            item["actual_gross"] * eligible_qty / item["actual_qty"]
+                            if item["actual_qty"] > 0
+                            else Decimal("0")
+                        ),
+                    }
+                if reference_days > 0 and eligible_reference["actual_qty"] > 0:
+                    references.append((eligible_reference, reference_days))
         if not references or lost_days <= 0:
             continue
 

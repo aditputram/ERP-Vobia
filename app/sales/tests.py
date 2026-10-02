@@ -320,7 +320,7 @@ class SalesReportRouteTests(TestCase):
 
         self.assertNotIn(sku.id, {row["sku"].id for row in rows})
 
-    def test_potential_sales_ignores_false_stockout_with_positive_monthly_ending(self):
+    def test_potential_sales_uses_monthly_beginning_instead_of_stale_ledger(self):
         status = ProductStatus.objects.create(code="POTENTIAL-GUARD", name="Regular")
         category = Category.objects.create(code="POTENTIAL-GUARD-CAT", name="Shirt")
         product = Product.objects.create(
@@ -397,6 +397,202 @@ class SalesReportRouteTests(TestCase):
         rows = _potential_lost_sku_rows(date(2026, 9, 1), date(2026, 9, 30))
 
         self.assertNotIn(sku.id, {row["sku"].id for row in rows})
+
+    def test_potential_sales_keeps_midmonth_stockout_after_restock(self):
+        status = ProductStatus.objects.create(code="POTENTIAL-RESTOCK", name="Regular")
+        category = Category.objects.create(code="POTENTIAL-RESTOCK-CAT", name="Shirt")
+        product = Product.objects.create(
+            code="POTENTIAL-RESTOCK-PRODUCT",
+            name="Midmonth Restock",
+            status=status,
+            category=category,
+        )
+        sku = SKU.objects.create(
+            sku="POTENTIAL-RESTOCK-M",
+            product_variant=ProductVariant.objects.create(product=product, name="Default"),
+            size="M",
+            current_retail_price=Decimal("100000"),
+        )
+        FIFOOpeningSnapshot.objects.create(
+            sku=sku,
+            cutover_date=date(2026, 7, 31),
+            opening_qty=Decimal("0"),
+            frozen_unit_cogs=Decimal("40000"),
+            recorded_by=self.user,
+        )
+        batch = MerchandisingSnapshotBatch.objects.create(
+            source_workbook_id="potential-restock",
+            source_file_name="potential-restock.xlsx",
+            source_sha256="r" * 64,
+            imported_by=self.user,
+            is_active=True,
+        )
+        MerchandisingMonthlySnapshot.objects.create(
+            batch=batch,
+            sku=sku,
+            source_row=1,
+            month=date(2026, 9, 1),
+            status_snapshot=status.name,
+            product_snapshot=product.name,
+            category_snapshot=category.name,
+            beginning_qty=Decimal("5"),
+            sales_qty=Decimal("10"),
+            ending_qty=Decimal("5"),
+        )
+        InventoryMovement.objects.create(
+            movement_key="INCOMING|POTENTIAL-RESTOCK",
+            movement_date=date(2026, 9, 16),
+            movement_type=InventoryMovement.MovementType.INCOMING,
+            direction=InventoryMovement.Direction.IN,
+            sku=sku,
+            quantity=Decimal("10"),
+            source_reference="POTENTIAL-RESTOCK",
+            posted_by=self.user,
+        )
+        for index, (order_date, quantity) in enumerate(
+            ((date(2026, 9, 5), 5), (date(2026, 9, 20), 5)), start=1
+        ):
+            order = SalesOrder.objects.create(
+                source=SalesOrder.Source.SHOPEE,
+                source_label="Shopee",
+                order_number=f"POTENTIAL-RESTOCK-{index}",
+                order_datetime=timezone.make_aware(datetime.combine(order_date, datetime.min.time())),
+                order_date=order_date,
+                current_status="Selesai",
+                source_status="Selesai",
+                is_final=True,
+                first_seen_batch_id=uuid.uuid4(),
+                latest_batch_id=uuid.uuid4(),
+            )
+            line = SalesOrderLine.objects.create(
+                order=order,
+                sku=sku,
+                quantity=quantity,
+                net_unit_price=Decimal("100000"),
+                retail_price_snapshot=Decimal("100000"),
+                total_gross_sales=Decimal(quantity * 100000),
+                total_net_sales=Decimal(quantity * 100000),
+            )
+            InventoryMovement.objects.create(
+                movement_key=f"SALES|POTENTIAL-RESTOCK-{index}",
+                movement_date=order_date,
+                movement_type=InventoryMovement.MovementType.SALES_OUT,
+                direction=InventoryMovement.Direction.OUT,
+                sku=sku,
+                quantity=Decimal(quantity),
+                source_reference=order.order_number,
+                sales_line=line,
+                posted_by=self.user,
+            )
+
+        rows = _potential_lost_sku_rows(date(2026, 9, 1), date(2026, 9, 30))
+
+        row = next(row for row in rows if row["sku"].id == sku.id)
+        self.assertEqual(row["selling_days"], 20)
+        self.assertEqual(row["lost_days"], 10)
+        self.assertEqual(row["lost_qty"], Decimal("5"))
+        self.assertEqual(row["ending_balance"], Decimal("5"))
+
+    def test_potential_sales_excludes_return_only_sale_from_demand_rate(self):
+        status = ProductStatus.objects.create(code="POTENTIAL-RETURN", name="Regular")
+        category = Category.objects.create(code="POTENTIAL-RETURN-CAT", name="Shirt")
+        product = Product.objects.create(
+            code="POTENTIAL-RETURN-PRODUCT",
+            name="Return Only Stock",
+            status=status,
+            category=category,
+        )
+        sku = SKU.objects.create(
+            sku="POTENTIAL-RETURN-L",
+            product_variant=ProductVariant.objects.create(product=product, name="Default"),
+            size="L",
+            current_retail_price=Decimal("100000"),
+        )
+        FIFOOpeningSnapshot.objects.create(
+            sku=sku,
+            cutover_date=date(2026, 7, 31),
+            opening_qty=Decimal("0"),
+            frozen_unit_cogs=Decimal("40000"),
+            recorded_by=self.user,
+        )
+        batch = MerchandisingSnapshotBatch.objects.create(
+            source_workbook_id="potential-return",
+            source_file_name="potential-return.xlsx",
+            source_sha256="t" * 64,
+            imported_by=self.user,
+            is_active=True,
+        )
+        for source_row, month, beginning, sales, ending in (
+            (1, date(2026, 8, 1), 10, 10, 0),
+            (2, date(2026, 9, 1), 0, 1, 0),
+        ):
+            MerchandisingMonthlySnapshot.objects.create(
+                batch=batch,
+                sku=sku,
+                source_row=source_row,
+                month=month,
+                status_snapshot=status.name,
+                product_snapshot=product.name,
+                category_snapshot=category.name,
+                beginning_qty=Decimal(beginning),
+                sales_qty=Decimal(sales),
+                ending_qty=Decimal(ending),
+            )
+        for order_date, quantity, suffix in (
+            (date(2026, 8, 10), 10, "AUG"),
+            (date(2026, 9, 10), 1, "SEP"),
+        ):
+            order = SalesOrder.objects.create(
+                source=SalesOrder.Source.SHOPEE,
+                source_label="Shopee",
+                order_number=f"POTENTIAL-RETURN-{suffix}",
+                order_datetime=timezone.make_aware(datetime.combine(order_date, datetime.min.time())),
+                order_date=order_date,
+                current_status="Selesai",
+                source_status="Selesai",
+                is_final=True,
+                first_seen_batch_id=uuid.uuid4(),
+                latest_batch_id=uuid.uuid4(),
+            )
+            line = SalesOrderLine.objects.create(
+                order=order,
+                sku=sku,
+                quantity=quantity,
+                net_unit_price=Decimal("100000"),
+                retail_price_snapshot=Decimal("100000"),
+                total_gross_sales=Decimal(quantity * 100000),
+                total_net_sales=Decimal(quantity * 100000),
+            )
+            InventoryMovement.objects.create(
+                movement_key=f"SALES|POTENTIAL-RETURN-{suffix}",
+                movement_date=order_date,
+                movement_type=InventoryMovement.MovementType.SALES_OUT,
+                direction=InventoryMovement.Direction.OUT,
+                sku=sku,
+                quantity=Decimal(quantity),
+                source_reference=order.order_number,
+                sales_line=line,
+                posted_by=self.user,
+            )
+        InventoryMovement.objects.create(
+            movement_key="RETURN|POTENTIAL-RETURN-SEP",
+            movement_date=date(2026, 9, 10),
+            movement_type=InventoryMovement.MovementType.RETURN_IN,
+            direction=InventoryMovement.Direction.IN,
+            sku=sku,
+            quantity=Decimal("1"),
+            source_reference="POTENTIAL-RETURN-SEP",
+            posted_by=self.user,
+        )
+
+        rows = _potential_lost_sku_rows(date(2026, 9, 1), date(2026, 9, 30))
+
+        row = next(row for row in rows if row["sku"].id == sku.id)
+        self.assertEqual(row["reference_month"], date(2026, 8, 1))
+        self.assertEqual(row["selling_days"], 10)
+        self.assertEqual(row["lost_days"], 30)
+        self.assertEqual(row["lost_qty"], Decimal("30"))
+        self.assertEqual(row["actual_qty"], Decimal("1"))
 
     @patch("sales.views.timezone.localdate", return_value=date(2026, 10, 1))
     def test_forecast_recommendation_uses_percentage_trend_on_actual_plus_lost(self, _mock_today):

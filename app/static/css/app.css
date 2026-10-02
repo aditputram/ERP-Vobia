@@ -492,6 +492,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .potential-product-row > summary > span { display: grid; gap: 3px; min-width: 0; }
 .potential-product-row > summary small { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .potential-product-row > summary strong { font-size: 11px; }
+.potential-product-row > summary .potential-product-gross { letter-spacing: 0; text-transform: none; }
 .potential-product-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px !important; }
 .potential-product-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0 !important; text-transform: none !important; }
 .potential-size-wrap { border-top: 1px solid var(--line); }

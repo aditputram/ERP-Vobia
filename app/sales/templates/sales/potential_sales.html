@@ -46,8 +46,8 @@
         <span class="potential-product-name"><strong>{{ product.article }}</strong>{% if product.product.name != product.article %}<small>{{ product.product.name }}</small>{% endif %}<small>{{ product.product.status.name }} · {{ product.product.category.name }}</small></span>
         <span><small>SIZE TERDAMPAK</small><strong>{{ product.affected_sizes|join:", " }}</strong></span>
         <span><small>ACTUAL</small><strong>{{ product.actual_qty|floatformat:"0g" }} pcs</strong></span>
-        <span><small>POTENTIAL LOST</small><strong>{{ product.lost_qty|floatformat:"0g" }} pcs</strong></span>
-        <span><small>POTENTIAL SALES</small><strong>{{ product.potential_qty|floatformat:"0g" }} pcs</strong></span>
+        <span><small>POTENTIAL LOST</small><strong>{{ product.lost_qty|floatformat:"0g" }} pcs</strong><small class="potential-product-gross">Gross Rp {{ product.lost_gross|floatformat:"0g" }}</small></span>
+        <span><small>POTENTIAL SALES</small><strong>{{ product.potential_qty|floatformat:"0g" }} pcs</strong><small class="potential-product-gross">Gross Rp {{ product.potential_gross|floatformat:"0g" }}</small></span>
       </summary>
       <div class="table-wrap potential-size-wrap">
         <table class="potential-sales-table potential-size-table">

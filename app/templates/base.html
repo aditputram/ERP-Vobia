@@ -55,7 +55,7 @@
                 <button class="nav-item nav-group-toggle {% if request.resolver_match.namespace == 'merchandising' %}active{% endif %}" type="button" data-nav-group-toggle="merchandising" data-nav-group-active="{% if request.resolver_match.namespace == 'merchandising' %}true{% else %}false{% endif %}" aria-expanded="{% if request.resolver_match.namespace == 'merchandising' %}true{% else %}false{% endif %}"><span>Merchandising</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
                 <div class="nav-subitems" data-nav-group-panel="merchandising"{% if request.resolver_match.namespace != 'merchandising' %} hidden{% endif %}>
                     {% if tab_permissions.operation.merchandising_dashboard %}
-                    <a class="nav-subitem {% if request.resolver_match.url_name == 'overview' or request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'merchandising:dashboard' %}">Dashboard</a>
+                    <a class="nav-subitem {% if request.resolver_match.namespace == 'merchandising' and request.resolver_match.url_name == 'overview' or request.resolver_match.namespace == 'merchandising' and request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'merchandising:dashboard' %}">Dashboard</a>
                     {% endif %}
                     {% if tab_permissions.operation.merchandising_projection %}
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'projection' %}active{% endif %}" href="{% url 'merchandising:projection' %}">Projection</a>
@@ -72,7 +72,7 @@
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'requirements' %}active{% endif %}" href="{% url 'purchasing:requirements' %}">Requirement</a>
                     {% endif %}
                     {% if tab_permissions.operation.ppic_generator %}
-                    <a class="nav-subitem {% if request.resolver_match.url_name == 'overview' or request.resolver_match.url_name == 'generator' or request.resolver_match.url_name == 'po_print' %}active{% endif %}" href="{% url 'purchasing:generator' %}">PO Generator</a>
+                    <a class="nav-subitem {% if request.resolver_match.namespace == 'purchasing' and request.resolver_match.url_name == 'overview' or request.resolver_match.namespace == 'purchasing' and request.resolver_match.url_name == 'generator' or request.resolver_match.namespace == 'purchasing' and request.resolver_match.url_name == 'po_print' %}active{% endif %}" href="{% url 'purchasing:generator' %}">PO Generator</a>
                     {% endif %}
                     {% if tab_permissions.operation.purchase_order %}
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'purchase_orders' or request.resolver_match.url_name == 'tracking' or request.resolver_match.url_name == 'po_detail' or request.resolver_match.url_name == 'po_release' or request.resolver_match.url_name == 'po_cancel' or request.resolver_match.url_name == 'po_wip_list' or request.resolver_match.url_name == 'po_wip_upload' or request.resolver_match.url_name == 'po_wip_detail' %}active{% endif %}" href="{% url 'purchasing:purchase_orders' %}">Purchase Order</a>
@@ -106,7 +106,7 @@
                 <button class="nav-item nav-group-toggle {% if request.resolver_match.namespace == 'inventory' and request.resolver_match.url_name != 'production' %}active{% endif %}" type="button" data-nav-group-toggle="inventory" data-nav-group-active="{% if request.resolver_match.namespace == 'inventory' and request.resolver_match.url_name != 'production' %}true{% else %}false{% endif %}" aria-expanded="{% if request.resolver_match.namespace == 'inventory' and request.resolver_match.url_name != 'production' %}true{% else %}false{% endif %}"><span>Warehouse</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
                 <div class="nav-subitems" data-nav-group-panel="inventory"{% if request.resolver_match.namespace != 'inventory' or request.resolver_match.url_name == 'production' %} hidden{% endif %}>
                     {% if tab_permissions.operation.inventory_summary %}
-                    <a class="nav-subitem {% if request.resolver_match.url_name == 'overview' %}active{% endif %}" href="{% url 'inventory:overview' %}">Inventory Summary</a>
+                    <a class="nav-subitem {% if request.resolver_match.namespace == 'inventory' and request.resolver_match.url_name == 'overview' %}active{% endif %}" href="{% url 'inventory:overview' %}">Inventory Summary</a>
                     {% endif %}
                     {% if tab_permissions.operation.inventory_turnover %}
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'turnover' %}active{% endif %}" href="{% url 'inventory:turnover' %}">Inventory Turnover</a>

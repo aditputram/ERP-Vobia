@@ -126,6 +126,27 @@ class InventoryWorkflowTests(TestCase):
                 workbook = load_workbook(io.BytesIO(response.content), read_only=True)
                 self.assertEqual(workbook.sheetnames, sheets)
 
+    def test_inventory_summary_is_the_only_active_overview_navigation(self):
+        self.client.force_login(self.user)
+        session = self.client.session
+        session["active_module"] = "operation"
+        session.save()
+
+        response = self.client.get(reverse("inventory:overview"))
+
+        self.assertContains(
+            response,
+            f'class="nav-subitem active" href="{reverse("inventory:overview")}">Inventory Summary',
+        )
+        self.assertNotContains(
+            response,
+            f'class="nav-subitem active" href="{reverse("merchandising:dashboard")}">Dashboard',
+        )
+        self.assertNotContains(
+            response,
+            f'class="nav-subitem active" href="{reverse("purchasing:generator")}">PO Generator',
+        )
+
     def test_completed_delivery_and_turnover_show_product_name(self):
         self.client.force_login(self.user)
         record_qc(

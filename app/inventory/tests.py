@@ -572,6 +572,33 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(parent["fifo_value"], Decimal("1400000"))
         self.assertContains(response, "2 SKU")
 
+    def test_inventory_summary_tracks_current_stockout_since_last_restock(self):
+        post_opening(sku=self.sku, quantity=10, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
+        post_sales_out(self._sales_line(number="ORDER-ZERO-1", quantity=10, order_date=date(2026, 8, 10)), self.user)
+        self.client.force_login(self.user)
+
+        depleted = self.client.get(reverse("inventory:overview"), {"as_of_date": "2026-08-12"})
+        self.assertEqual(depleted.context["balances"][0]["stockout_since"], date(2026, 8, 10))
+        self.assertContains(depleted, "10 Agu 2026")
+
+        post_adjustment(
+            sku=self.sku,
+            movement_date=date(2026, 8, 15),
+            direction=InventoryMovement.Direction.IN,
+            quantity=3,
+            actor=self.user,
+            warehouse=self.warehouse,
+            reason="Restock untuk menguji reset tanggal habis",
+            evidence_reference="TEST-RESTOCK-001",
+            unit_cost=Decimal("100000"),
+        )
+        restocked = self.client.get(reverse("inventory:overview"), {"as_of_date": "2026-08-16"})
+        self.assertIsNone(restocked.context["balances"][0]["stockout_since"])
+
+        post_sales_out(self._sales_line(number="ORDER-ZERO-2", quantity=3, order_date=date(2026, 8, 20)), self.user)
+        depleted_again = self.client.get(reverse("inventory:overview"), {"as_of_date": "2026-08-21"})
+        self.assertEqual(depleted_again.context["balances"][0]["stockout_since"], date(2026, 8, 20))
+
     def test_inventory_summary_exports_current_negative_filter_to_excel(self):
         post_opening(sku=self.sku, quantity=-3, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
         self.client.force_login(self.user)
@@ -596,8 +623,10 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(sheet["H1"].value, "Ending 31 Juli")
         self.assertEqual(sheet["C2"].value, "SKU-1")
         self.assertEqual(sheet["H2"].value, -3)
-        self.assertEqual(sheet["O2"].value, "NEGATIVE")
-        self.assertEqual(sheet["P1"].value, "Warehouse Actual Qty")
+        self.assertEqual(sheet["L1"].value, "Habis Sejak")
+        self.assertEqual(sheet["L2"].value, datetime(2026, 7, 31))
+        self.assertEqual(sheet["P2"].value, "NEGATIVE")
+        self.assertEqual(sheet["Q1"].value, "Warehouse Actual Qty")
         workbook.close()
 
     def test_inventory_turnover_filters_product_and_size(self):

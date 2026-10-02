@@ -69,6 +69,25 @@ def inventory_summary_rows(skus, *, as_of_date=None, warehouse=None):
             outgoing_cost=Sum("allocated_cost", filter=Q(direction=InventoryMovement.Direction.OUT)),
         )
     }
+    stockout_state = {}
+    for sku_id in sku_ids:
+        opening = openings.get(sku_id)
+        opening_qty = (opening or {}).get("opening_qty", ZERO) or ZERO
+        stockout_state[sku_id] = {
+            "balance": opening_qty,
+            "since": opening["cutover_date"] if opening and opening_qty <= ZERO else None,
+        }
+    for daily in movements.values("sku_id", "movement_date").annotate(
+        incoming_qty=Sum("quantity", filter=Q(direction=InventoryMovement.Direction.IN)),
+        outgoing_qty=Sum("quantity", filter=Q(direction=InventoryMovement.Direction.OUT)),
+    ).order_by("sku_id", "movement_date"):
+        state = stockout_state[daily["sku_id"]]
+        previous_balance = state["balance"]
+        state["balance"] += (daily["incoming_qty"] or ZERO) - (daily["outgoing_qty"] or ZERO)
+        if state["balance"] > ZERO:
+            state["since"] = None
+        elif previous_balance > ZERO:
+            state["since"] = daily["movement_date"]
     if warehouse is not None and warehouse.code == "REJECT":
         fifo = {sku_id: {"fifo_qty": ZERO, "fifo_value": ZERO} for sku_id in sku_ids}
     elif as_of_date:
@@ -147,6 +166,7 @@ def inventory_summary_rows(skus, *, as_of_date=None, warehouse=None):
                 "fifo_value": fifo_row.get("fifo_value", ZERO) or ZERO,
                 "exception_count": exception_count,
                 "stock_status": stock_status,
+                "stockout_since": stockout_state[sku.id]["since"] if balance <= ZERO else None,
             }
         )
     return rows
@@ -172,6 +192,8 @@ def inventory_parent_summary_rows(rows):
                 "fifo_value": ZERO,
                 "exception_count": 0,
                 "child_statuses": [],
+                "child_balances": [],
+                "stockout_dates": [],
             },
         )
         group["sku_count"] += 1
@@ -179,10 +201,20 @@ def inventory_parent_summary_rows(rows):
             group[field] += row[field]
         group["exception_count"] += row["exception_count"]
         group["child_statuses"].append(row["stock_status"])
+        group["child_balances"].append(row["balance"])
+        if row["stockout_since"]:
+            group["stockout_dates"].append(row["stockout_since"])
 
     result = []
     for group in grouped.values():
         child_statuses = group.pop("child_statuses")
+        child_balances = group.pop("child_balances")
+        stockout_dates = group.pop("stockout_dates")
+        group["stockout_since"] = (
+            max(stockout_dates)
+            if stockout_dates and all(balance <= ZERO for balance in child_balances)
+            else None
+        )
         if "NEGATIVE" in child_statuses:
             group["stock_status"] = "NEGATIVE"
         elif "EXCEPTION" in child_statuses:

@@ -11,6 +11,8 @@
 
 <form method="get" class="panel report-filter" data-auto-submit data-preserve-scroll>
   <label>Bulan<select name="month">{% for item in report.month_options %}<option value="{{ item.value }}" {% if report.selected_value == item.value %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select></label>
+  <label>Status Produk<select name="product_status"><option value="">Semua Status Produk</option>{% for item in report.status_options %}<option value="{{ item }}" {% if report.selected_status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+  <label>Kategori<select name="category"><option value="">Semua Kategori</option>{% for item in report.category_options %}<option value="{{ item.id }}" {% if report.selected_category == item.id|stringformat:'s' %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
   <a class="secondary-button" href="{% url 'sales:potential_sales' %}">Reset</a>
 </form>
 

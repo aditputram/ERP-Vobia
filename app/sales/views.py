@@ -2276,7 +2276,39 @@ def _potential_sales_context(request):
         selected_value = month_options[-1]["value"]
     selected_month = datetime.strptime(selected_value, "%Y-%m").date()
     cutoff = min(latest, _shift_month(selected_month, 1) - timedelta(days=1))
-    affected_rows = _potential_lost_sku_rows(selected_month, cutoff)
+
+    eligible_products = Product.objects.filter(
+        is_active=True,
+        variants__is_active=True,
+        variants__skus__is_active=True,
+    ).exclude(status__code__iexact="DISCONTINUE").distinct()
+    status_options = list(
+        eligible_products.order_by("status__name")
+        .values_list("status__name", flat=True).distinct()
+    )
+    selected_status = request.GET.get("product_status", "")
+    if selected_status not in status_options:
+        selected_status = ""
+    if selected_status:
+        eligible_products = eligible_products.filter(status__name=selected_status)
+
+    category_options = list(
+        Category.objects.filter(is_active=True, products__in=eligible_products)
+        .distinct().order_by("name")
+    )
+    selected_category = request.GET.get("category", "")
+    if selected_category and not any(
+        str(category.id) == selected_category for category in category_options
+    ):
+        selected_category = ""
+    if selected_category:
+        eligible_products = eligible_products.filter(category_id=selected_category)
+
+    affected_rows = _potential_lost_sku_rows(
+        selected_month,
+        cutoff,
+        product_ids=eligible_products.values_list("id", flat=True),
+    )
     affected_by_sku = {row["sku"].id: row for row in affected_rows}
     affected_product_ids = {row["product_id"] for row in affected_rows}
     history_months = [_shift_month(selected_month, offset) for offset in (-3, -2, -1)]
@@ -2409,6 +2441,10 @@ def _potential_sales_context(request):
         "selected_value": selected_value,
         "selected_month": selected_month,
         "cutoff": cutoff,
+        "status_options": status_options,
+        "selected_status": selected_status,
+        "category_options": category_options,
+        "selected_category": selected_category,
         "history_months": history_months,
         "rows": affected_rows,
         "products": product_rows,

@@ -277,8 +277,12 @@ class SalesReportRouteTests(TestCase):
 
     @patch("sales.views._potential_lost_sku_rows")
     def test_potential_sales_orders_products_by_lost_gross_descending(self, lost_rows):
-        status = ProductStatus.objects.create(code="POTENTIAL-SORT", name="Regular")
-        category = Category.objects.create(code="POTENTIAL-SORT-CAT", name="Shirt")
+        regular = ProductStatus.objects.create(code="POTENTIAL-SORT", name="Regular")
+        essential = ProductStatus.objects.create(
+            code="POTENTIAL-SORT-ESSENTIAL", name="Essential+"
+        )
+        shirt = Category.objects.create(code="POTENTIAL-SORT-SHIRT", name="Shirt")
+        pants = Category.objects.create(code="POTENTIAL-SORT-PANTS", name="Pants")
         products = [
             Product.objects.create(
                 code=f"POTENTIAL-SORT-{index}",
@@ -286,7 +290,11 @@ class SalesReportRouteTests(TestCase):
                 status=status,
                 category=category,
             )
-            for index, name in enumerate(("Lower Lost Gross", "Higher Lost Gross"), start=1)
+            for index, (name, status, category) in enumerate((
+                ("Lower Lost Gross", regular, shirt),
+                ("Higher Lost Gross", essential, pants),
+                ("Middle Lost Gross", regular, pants),
+            ), start=1)
         ]
         skus = [
             SKU.objects.create(
@@ -316,9 +324,13 @@ class SalesReportRouteTests(TestCase):
                 "inventory_exception": False,
             }
 
-        lost_rows.return_value = [
+        rows = [
             row(products[0], skus[0], "100000"),
             row(products[1], skus[1], "500000"),
+            row(products[2], skus[2], "300000"),
+        ]
+        lost_rows.side_effect = lambda _month, _cutoff, product_ids=None: [
+            item for item in rows if item["product_id"] in set(product_ids or [])
         ]
 
         response = self.client.get(reverse("sales:potential_sales"), {"month": "2026-08"})
@@ -326,7 +338,41 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             [item["product"].name for item in response.context["report"]["products"]],
-            ["Higher Lost Gross", "Lower Lost Gross"],
+            ["Higher Lost Gross", "Middle Lost Gross", "Lower Lost Gross"],
+        )
+
+        regular_response = self.client.get(reverse("sales:potential_sales"), {
+            "month": "2026-08",
+            "product_status": "Regular",
+        })
+        self.assertEqual(
+            [item.name for item in regular_response.context["report"]["category_options"]],
+            ["Pants", "Shirt"],
+        )
+        self.assertEqual(
+            [item["product"].name for item in regular_response.context["report"]["products"]],
+            ["Middle Lost Gross", "Lower Lost Gross"],
+        )
+
+        shirt_response = self.client.get(reverse("sales:potential_sales"), {
+            "month": "2026-08",
+            "product_status": "Regular",
+            "category": str(shirt.id),
+        })
+        self.assertEqual(
+            [item["product"].name for item in shirt_response.context["report"]["products"]],
+            ["Lower Lost Gross"],
+        )
+
+        stale_category_response = self.client.get(reverse("sales:potential_sales"), {
+            "month": "2026-08",
+            "product_status": "Essential+",
+            "category": str(shirt.id),
+        })
+        self.assertEqual(stale_category_response.context["report"]["selected_category"], "")
+        self.assertEqual(
+            [item.name for item in stale_category_response.context["report"]["category_options"]],
+            ["Pants"],
         )
 
     def test_potential_sales_ignores_reference_older_than_two_months(self):

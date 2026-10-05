@@ -2212,6 +2212,27 @@ def _operational_beginning_by_sku(sku_ids, month):
     return beginnings
 
 
+def _potential_available_beginning_by_sku(sku_ids, month):
+    beginnings = _operational_beginning_by_sku(sku_ids, month)
+    for row in (
+        InventoryMovement.objects.filter(
+            sku_id__in=beginnings,
+            movement_date__gte=month,
+            movement_date__lt=_shift_month(month, 1),
+            direction=InventoryMovement.Direction.IN,
+            movement_type__in=(
+                InventoryMovement.MovementType.INCOMING,
+                InventoryMovement.MovementType.RETURN_IN,
+            ),
+        )
+        .exclude(sales_line__order__affects_inventory=False)
+        .values("sku_id")
+        .annotate(total=Sum("quantity"))
+    ):
+        beginnings[row["sku_id"]] += Decimal(row["total"] or 0)
+    return beginnings
+
+
 def _potential_sales_context(request):
     latest = SalesOrderLine.objects.filter(
         is_counted=True,
@@ -2272,7 +2293,7 @@ def _potential_sales_context(request):
                 sales_month = sales_month.date()
             sales_by_sku_month[(item["sku_id"], sales_month.replace(day=1))] = item
 
-    beginning_by_sku = _operational_beginning_by_sku(sku_ids, selected_month)
+    beginning_by_sku = _potential_available_beginning_by_sku(sku_ids, selected_month)
 
     products = {}
     for sku in skus:

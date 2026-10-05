@@ -494,6 +494,16 @@ class SalesReportRouteTests(TestCase):
             source_reference="POTENTIAL-RESTOCK",
             posted_by=self.user,
         )
+        InventoryMovement.objects.create(
+            movement_key="RETURN|POTENTIAL-RESTOCK",
+            movement_date=date(2026, 9, 16),
+            movement_type=InventoryMovement.MovementType.RETURN_IN,
+            direction=InventoryMovement.Direction.IN,
+            sku=sku,
+            quantity=Decimal("2"),
+            source_reference="POTENTIAL-RESTOCK",
+            posted_by=self.user,
+        )
         for index, (order_date, quantity) in enumerate(
             ((date(2026, 9, 5), 5), (date(2026, 9, 20), 5)), start=1
         ):
@@ -536,7 +546,17 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(row["selling_days"], 20)
         self.assertEqual(row["lost_days"], 10)
         self.assertEqual(row["lost_qty"], Decimal("5"))
-        self.assertEqual(row["ending_balance"], Decimal("5"))
+        self.assertEqual(row["ending_balance"], Decimal("7"))
+
+        response = self.client.get(reverse("sales:potential_sales"), {"month": "2026-09"})
+        group = next(
+            group
+            for group in response.context["report"]["products"]
+            if group["product_id"] == product.id
+        )
+        size_row = group["sizes"][0]
+        self.assertEqual(size_row["beginning_qty"], Decimal("17"))
+        self.assertEqual(size_row["str"], Decimal("10") / Decimal("17") * 100)
 
     def test_potential_sales_excludes_return_only_sale_from_demand_rate(self):
         status = ProductStatus.objects.create(code="POTENTIAL-RETURN", name="Regular")

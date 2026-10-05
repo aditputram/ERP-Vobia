@@ -320,7 +320,7 @@ class SalesReportRouteTests(TestCase):
 
         self.assertNotIn(sku.id, {row["sku"].id for row in rows})
 
-    def test_potential_sales_uses_monthly_beginning_instead_of_stale_ledger(self):
+    def test_potential_sales_uses_dynamic_operational_beginning_not_monthly_snapshot(self):
         status = ProductStatus.objects.create(code="POTENTIAL-GUARD", name="Regular")
         category = Category.objects.create(code="POTENTIAL-GUARD-CAT", name="Shirt")
         product = Product.objects.create(
@@ -338,9 +338,19 @@ class SalesReportRouteTests(TestCase):
         FIFOOpeningSnapshot.objects.create(
             sku=sku,
             cutover_date=date(2026, 7, 31),
-            opening_qty=Decimal("1"),
+            opening_qty=Decimal("46"),
             frozen_unit_cogs=Decimal("75000"),
             recorded_by=self.user,
+        )
+        InventoryMovement.objects.create(
+            movement_key="ADJUSTMENT|POTENTIAL-GUARD-AUG",
+            movement_date=date(2026, 8, 31),
+            movement_type=InventoryMovement.MovementType.ADJUSTMENT_OUT,
+            direction=InventoryMovement.Direction.OUT,
+            sku=sku,
+            quantity=Decimal("4"),
+            source_reference="POTENTIAL-GUARD-AUG",
+            posted_by=self.user,
         )
         order = SalesOrder.objects.create(
             source=SalesOrder.Source.SHOPEE,
@@ -357,11 +367,11 @@ class SalesReportRouteTests(TestCase):
         line = SalesOrderLine.objects.create(
             order=order,
             sku=sku,
-            quantity=1,
+            quantity=42,
             net_unit_price=Decimal("199000"),
             retail_price_snapshot=Decimal("199000"),
-            total_gross_sales=Decimal("199000"),
-            total_net_sales=Decimal("199000"),
+            total_gross_sales=Decimal("8358000"),
+            total_net_sales=Decimal("8358000"),
         )
         InventoryMovement.objects.create(
             movement_key="SALES|POTENTIAL-GUARD-ORDER",
@@ -369,10 +379,33 @@ class SalesReportRouteTests(TestCase):
             movement_type=InventoryMovement.MovementType.SALES_OUT,
             direction=InventoryMovement.Direction.OUT,
             sku=sku,
-            quantity=Decimal("1"),
+            quantity=Decimal("42"),
             source_reference=order.order_number,
             sales_line=line,
             posted_by=self.user,
+        )
+        cutoff_product, cutoff_sku = self._planning_product("POTENTIAL-CUTOFF")
+        cutoff_order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="POTENTIAL-CUTOFF-ORDER",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 30, 10, 0)),
+            order_date=date(2026, 9, 30),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            affects_inventory=False,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=cutoff_order,
+            sku=cutoff_sku,
+            quantity=1,
+            net_unit_price=Decimal("100000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("100000"),
+            total_net_sales=Decimal("100000"),
         )
         batch = MerchandisingSnapshotBatch.objects.create(
             source_workbook_id="potential-guard",
@@ -396,7 +429,19 @@ class SalesReportRouteTests(TestCase):
 
         rows = _potential_lost_sku_rows(date(2026, 9, 1), date(2026, 9, 30))
 
-        self.assertNotIn(sku.id, {row["sku"].id for row in rows})
+        row = next(row for row in rows if row["sku"].id == sku.id)
+        self.assertEqual(row["opening_balance"], Decimal("42"))
+        self.assertEqual(row["lost_days"], 29)
+
+        response = self.client.get(reverse("sales:potential_sales"), {"month": "2026-09"})
+        group = next(
+            group
+            for group in response.context["report"]["products"]
+            if group["product_id"] == product.id
+        )
+        size_row = group["sizes"][0]
+        self.assertEqual(size_row["beginning_qty"], Decimal("42"))
+        self.assertEqual(size_row["str"], Decimal("100"))
 
     def test_potential_sales_keeps_midmonth_stockout_after_restock(self):
         status = ProductStatus.objects.create(code="POTENTIAL-RESTOCK", name="Regular")
@@ -416,7 +461,7 @@ class SalesReportRouteTests(TestCase):
         FIFOOpeningSnapshot.objects.create(
             sku=sku,
             cutover_date=date(2026, 7, 31),
-            opening_qty=Decimal("0"),
+            opening_qty=Decimal("5"),
             frozen_unit_cogs=Decimal("40000"),
             recorded_by=self.user,
         )
@@ -511,7 +556,7 @@ class SalesReportRouteTests(TestCase):
         FIFOOpeningSnapshot.objects.create(
             sku=sku,
             cutover_date=date(2026, 7, 31),
-            opening_qty=Decimal("0"),
+            opening_qty=Decimal("10"),
             frozen_unit_cogs=Decimal("40000"),
             recorded_by=self.user,
         )

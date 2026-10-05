@@ -1928,25 +1928,6 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         return []
 
     sku_ids = [sku.id for sku in skus]
-    active_batch_id = (
-        MerchandisingMonthlySnapshot.objects.filter(batch__is_active=True)
-        .order_by("-batch__imported_at")
-        .values_list("batch_id", flat=True)
-        .first()
-    )
-    monthly_snapshots = {}
-    if active_batch_id:
-        monthly_snapshots = {
-            (row["sku_id"], row["month"]): {
-                "beginning": Decimal(row["beginning_qty"] or 0),
-                "ending": Decimal(row["ending_qty"] or 0),
-            }
-            for row in MerchandisingMonthlySnapshot.objects.filter(
-                batch_id=active_batch_id,
-                sku_id__in=sku_ids,
-                month__range=(reference_start_month, selected_month),
-            ).values("sku_id", "month", "beginning_qty", "ending_qty")
-        }
     openings = {
         row["sku_id"]: Decimal(row["opening_qty"] or 0)
         for row in FIFOOpeningSnapshot.objects.filter(sku_id__in=sku_ids).values(
@@ -2016,23 +1997,19 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         }
 
     def stock_context(sku_id, month, end_date):
-        snapshot = monthly_snapshots.get((sku_id, month))
-        physical_balance = normal_balance = (
-            snapshot["beginning"] if snapshot else openings[sku_id]
-        )
-        if snapshot is None:
-            cursor = CUTOVER_DATE + timedelta(days=1)
-            while cursor < month:
-                totals = daily_movements[sku_id].get(cursor, {})
-                physical_balance += totals.get("in", 0) - totals.get("out", 0)
-                normal_balance = max(
-                    normal_balance
-                    + totals.get("in", 0)
-                    - totals.get("return_in", 0)
-                    - totals.get("out", 0),
-                    Decimal("0"),
-                )
-                cursor += timedelta(days=1)
+        physical_balance = normal_balance = openings.get(sku_id, Decimal("0"))
+        cursor = CUTOVER_DATE + timedelta(days=1)
+        while cursor < month:
+            totals = daily_movements[sku_id].get(cursor, {})
+            physical_balance += totals.get("in", 0) - totals.get("out", 0)
+            normal_balance = max(
+                normal_balance
+                + totals.get("in", 0)
+                - totals.get("return_in", 0)
+                - totals.get("out", 0),
+                Decimal("0"),
+            )
+            cursor += timedelta(days=1)
 
         opening_balance = physical_balance
         available_days = 0
@@ -2063,9 +2040,6 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
                 inventory_exception = True
             cursor += timedelta(days=1)
 
-        month_end = _shift_month(month, 1) - timedelta(days=1)
-        if snapshot and end_date == month_end and physical_balance != snapshot["ending"]:
-            inventory_exception = True
         return {
             "opening": opening_balance,
             "ending": physical_balance,
@@ -2077,8 +2051,6 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
 
     rows = []
     for sku in skus:
-        if sku.id not in openings:
-            continue
         product = sku.product_variant.product
         selected_actual = sales_by_sku_month.get((sku.id, selected_month), {})
         actual_qty = Decimal(selected_actual.get("actual_qty") or 0)
@@ -2202,6 +2174,44 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
     )
 
 
+def _operational_beginning_by_sku(sku_ids, month):
+    sku_ids = list(sku_ids)
+    if not sku_ids:
+        return {}
+    beginnings = {
+        row["sku_id"]: Decimal(row["opening_qty"] or 0)
+        for row in FIFOOpeningSnapshot.objects.filter(
+            sku_id__in=sku_ids,
+            cutover_date__lt=month,
+        ).values("sku_id", "opening_qty")
+    }
+    for sku_id in sku_ids:
+        beginnings.setdefault(sku_id, Decimal("0"))
+    for row in (
+        InventoryMovement.objects.filter(
+            sku_id__in=sku_ids,
+            movement_date__lt=month,
+        )
+        .exclude(movement_type=InventoryMovement.MovementType.OPENING)
+        .exclude(sales_line__order__affects_inventory=False)
+        .values("sku_id")
+        .annotate(
+            incoming=Sum(
+                "quantity",
+                filter=Q(direction=InventoryMovement.Direction.IN),
+            ),
+            outgoing=Sum(
+                "quantity",
+                filter=Q(direction=InventoryMovement.Direction.OUT),
+            ),
+        )
+    ):
+        beginnings[row["sku_id"]] += Decimal(row["incoming"] or 0) - Decimal(
+            row["outgoing"] or 0
+        )
+    return beginnings
+
+
 def _potential_sales_context(request):
     latest = SalesOrderLine.objects.filter(
         is_counted=True,
@@ -2262,22 +2272,7 @@ def _potential_sales_context(request):
                 sales_month = sales_month.date()
             sales_by_sku_month[(item["sku_id"], sales_month.replace(day=1))] = item
 
-    active_batch_id = (
-        MerchandisingMonthlySnapshot.objects.filter(batch__is_active=True)
-        .order_by("-batch__imported_at")
-        .values_list("batch_id", flat=True)
-        .first()
-    )
-    beginning_by_sku = {}
-    if active_batch_id and sku_ids:
-        beginning_by_sku = {
-            row["sku_id"]: row["beginning_qty"]
-            for row in MerchandisingMonthlySnapshot.objects.filter(
-                batch_id=active_batch_id,
-                sku_id__in=sku_ids,
-                month=selected_month,
-            ).values("sku_id", "beginning_qty")
-        }
+    beginning_by_sku = _operational_beginning_by_sku(sku_ids, selected_month)
 
     products = {}
     for sku in skus:

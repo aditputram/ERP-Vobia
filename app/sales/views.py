@@ -1996,6 +1996,22 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
             "actual_gross": Decimal(item["actual_gross"] or 0),
         }
 
+    def date_ranges_label(dates):
+        ranges = []
+        start = previous = dates[0]
+        for current in dates[1:]:
+            if current != previous + timedelta(days=1):
+                ranges.append((start, previous))
+                start = current
+            previous = current
+        ranges.append((start, previous))
+        return ", ".join(
+            date_format(start, "d M Y")
+            if start == end
+            else f'{date_format(start, "d")}–{date_format(end, "d M Y")}'
+            for start, end in ranges
+        )
+
     def stock_context(sku_id, month, end_date):
         physical_balance = normal_balance = openings.get(sku_id, Decimal("0"))
         cursor = CUTOVER_DATE + timedelta(days=1)
@@ -2014,6 +2030,7 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         opening_balance = physical_balance
         available_days = 0
         lost_days = 0
+        lost_dates = []
         eligible_sales_qty = Decimal("0")
         inventory_exception = physical_balance < 0
         cursor = month
@@ -2032,6 +2049,7 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
                 )
             else:
                 lost_days += 1
+                lost_dates.append(cursor)
             physical_balance = physical_before_out - totals.get("out", 0)
             normal_balance = max(
                 normal_before_out - totals.get("out", 0), Decimal("0")
@@ -2045,6 +2063,7 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
             "ending": physical_balance,
             "available_days": available_days,
             "lost_days": lost_days,
+            "lost_dates": lost_dates,
             "eligible_sales_qty": eligible_sales_qty,
             "inventory_exception": inventory_exception,
         }
@@ -2060,6 +2079,7 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
         ending_balance = selected_stock["ending"]
         available_days = selected_stock["available_days"]
         lost_days = selected_stock["lost_days"]
+        lost_dates = selected_stock["lost_dates"]
         inventory_exception = selected_stock["inventory_exception"]
         if not lost_days:
             continue
@@ -2158,6 +2178,8 @@ def _potential_lost_sku_rows(selected_month, cutoff_date, product_ids=None):
             "selling_days": selling_days,
             "daily_rate": daily_rate,
             "lost_days": lost_days,
+            "lost_dates": lost_dates,
+            "lost_date_label": date_ranges_label(lost_dates),
             "actual_qty": actual_qty,
             "actual_gross": actual_gross,
             "lost_qty": lost_qty,
@@ -2327,6 +2349,7 @@ def _potential_sales_context(request):
             "actual_qty": actual_qty,
             "actual_gross": actual_gross,
             "lost_days": affected["lost_days"] if affected else 0,
+            "lost_date_label": affected["lost_date_label"] if affected else "",
             "lost_qty": lost_qty,
             "lost_gross": lost_gross,
             "potential_qty": actual_qty + lost_qty,

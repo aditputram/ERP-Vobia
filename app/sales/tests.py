@@ -545,6 +545,7 @@ class SalesReportRouteTests(TestCase):
         row = next(row for row in rows if row["sku"].id == sku.id)
         self.assertEqual(row["selling_days"], 20)
         self.assertEqual(row["lost_days"], 10)
+        self.assertEqual(row["lost_date_label"], "06–15 Sep 2026")
         self.assertEqual(row["lost_qty"], Decimal("5"))
         self.assertEqual(row["ending_balance"], Decimal("7"))
 
@@ -557,6 +558,7 @@ class SalesReportRouteTests(TestCase):
         size_row = group["sizes"][0]
         self.assertEqual(size_row["beginning_qty"], Decimal("17"))
         self.assertEqual(size_row["str"], Decimal("10") / Decimal("17") * 100)
+        self.assertContains(response, "06–15 Sep 2026")
 
     def test_potential_sales_excludes_return_only_sale_from_demand_rate(self):
         status = ProductStatus.objects.create(code="POTENTIAL-RETURN", name="Regular")

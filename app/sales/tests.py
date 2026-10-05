@@ -269,6 +269,11 @@ class SalesReportRouteTests(TestCase):
             [row["size"] for row in august.context["report"]["products"][0]["sizes"]],
             ["M", "L", "XL"],
         )
+        product_total = august.context["report"]["products"][0]
+        self.assertEqual(product_total["history_totals"], [Decimal("0"), Decimal("10"), Decimal("18")])
+        self.assertEqual(product_total["beginning_qty"], Decimal("25"))
+        self.assertEqual(product_total["str"], Decimal("4"))
+        self.assertContains(august, '<tfoot><tr class="potential-size-total">', html=False)
 
     def test_potential_sales_ignores_reference_older_than_two_months(self):
         status = ProductStatus.objects.create(code="POTENTIAL-OLD", name="Regular")

@@ -2368,6 +2368,9 @@ def _potential_sales_context(request):
             "article": product.article or product.name,
             "sizes": [],
             "affected_sizes": [],
+            "history_totals": [Decimal("0") for _ in history_months],
+            "beginning_qty": Decimal("0"),
+            "beginning_complete": True,
             "actual_qty": Decimal("0"),
             "actual_gross": Decimal("0"),
             "lost_qty": Decimal("0"),
@@ -2378,12 +2381,26 @@ def _potential_sales_context(request):
         group["sizes"].append(size_row)
         if size_row["affected"]:
             group["affected_sizes"].append(size_row["size"])
+        for index, cell in enumerate(size_row["history_cells"]):
+            group["history_totals"][index] += cell["qty"]
+        if size_row["beginning_qty"] is None:
+            group["beginning_complete"] = False
+        else:
+            group["beginning_qty"] += size_row["beginning_qty"]
         for field in (
             "actual_qty", "actual_gross", "lost_qty", "lost_gross",
             "potential_qty", "potential_gross",
         ):
             group[field] += size_row[field]
     product_rows = sorted(products.values(), key=lambda row: row["product"].name.casefold())
+    for group in product_rows:
+        if not group.pop("beginning_complete"):
+            group["beginning_qty"] = None
+        group["str"] = (
+            group["actual_qty"] / group["beginning_qty"] * 100
+            if group["beginning_qty"] is not None and group["beginning_qty"] > 0
+            else None
+        )
     return {
         "month_options": month_options,
         "selected_value": selected_value,

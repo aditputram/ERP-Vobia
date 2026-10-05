@@ -63,6 +63,17 @@
             <td><strong>{{ row.potential_qty|floatformat:"0g" }} pcs</strong><small class="table-subcopy">Rp {{ row.potential_gross|floatformat:"0g" }}</small></td>
             <td>{% if row.affected %}<strong>{{ row.reference_label }} · {{ row.selling_days }} hari</strong><small class="table-subcopy">{{ row.reference_start|date:"d M" }}–{{ row.reference_end|date:"d M Y" }}</small><small class="table-subcopy">{{ row.daily_rate|floatformat:"2g" }} pcs/hari{% if row.inventory_exception %} · <span class="metric-negative">cek stock ledger</span>{% endif %}</small>{% else %}<strong>Potential Lost 0</strong><small class="table-subcopy">Tidak ada hari lost sales</small>{% endif %}</td>
           </tr>{% endfor %}</tbody>
+          <tfoot><tr class="potential-size-total">
+            <th>Total</th>
+            {% for qty in product.history_totals %}<td><strong>{{ qty|floatformat:"0g" }} pcs</strong></td>{% endfor %}
+            <td>{% if product.beginning_qty == None %}—{% else %}<strong>{{ product.beginning_qty|floatformat:"0g" }} pcs</strong>{% endif %}</td>
+            <td>{% if product.str == None %}—{% else %}<strong>{{ product.str|floatformat:"2g" }}%</strong>{% endif %}</td>
+            <td><strong>{{ product.actual_qty|floatformat:"0g" }} pcs</strong><small class="table-subcopy">Rp {{ product.actual_gross|floatformat:"0g" }}</small></td>
+            <td>—</td>
+            <td><strong>{{ product.lost_qty|floatformat:"0g" }} pcs</strong><small class="table-subcopy">Rp {{ product.lost_gross|floatformat:"0g" }}</small></td>
+            <td><strong>{{ product.potential_qty|floatformat:"0g" }} pcs</strong><small class="table-subcopy">Rp {{ product.potential_gross|floatformat:"0g" }}</small></td>
+            <td>—</td>
+          </tr></tfoot>
         </table>
       </div>
     </details>

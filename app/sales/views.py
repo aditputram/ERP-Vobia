@@ -2392,7 +2392,10 @@ def _potential_sales_context(request):
             "potential_qty", "potential_gross",
         ):
             group[field] += size_row[field]
-    product_rows = sorted(products.values(), key=lambda row: row["product"].name.casefold())
+    product_rows = sorted(
+        products.values(),
+        key=lambda row: (-row["lost_gross"], row["product"].name.casefold()),
+    )
     for group in product_rows:
         if not group.pop("beginning_complete"):
             group["beginning_qty"] = None

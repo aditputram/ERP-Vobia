@@ -275,6 +275,60 @@ class SalesReportRouteTests(TestCase):
         self.assertEqual(product_total["str"], Decimal("4"))
         self.assertContains(august, '<tfoot><tr class="potential-size-total">', html=False)
 
+    @patch("sales.views._potential_lost_sku_rows")
+    def test_potential_sales_orders_products_by_lost_gross_descending(self, lost_rows):
+        status = ProductStatus.objects.create(code="POTENTIAL-SORT", name="Regular")
+        category = Category.objects.create(code="POTENTIAL-SORT-CAT", name="Shirt")
+        products = [
+            Product.objects.create(
+                code=f"POTENTIAL-SORT-{index}",
+                name=name,
+                status=status,
+                category=category,
+            )
+            for index, name in enumerate(("Lower Lost Gross", "Higher Lost Gross"), start=1)
+        ]
+        skus = [
+            SKU.objects.create(
+                sku=f"POTENTIAL-SORT-{index}-M",
+                product_variant=ProductVariant.objects.create(product=product, name="Default"),
+                size="M",
+                current_retail_price=Decimal("100000"),
+            )
+            for index, product in enumerate(products, start=1)
+        ]
+
+        def row(product, sku, lost_gross):
+            return {
+                "product_id": product.id,
+                "product": product,
+                "sku": sku,
+                "lost_qty": Decimal("1"),
+                "lost_gross": Decimal(lost_gross),
+                "lost_days": 1,
+                "lost_date_label": "01 Aug 2026",
+                "reference_month": date(2026, 7, 1),
+                "reference_label": "Jul 2026",
+                "reference_start": date(2026, 7, 1),
+                "reference_end": date(2026, 7, 31),
+                "selling_days": 31,
+                "daily_rate": Decimal("1"),
+                "inventory_exception": False,
+            }
+
+        lost_rows.return_value = [
+            row(products[0], skus[0], "100000"),
+            row(products[1], skus[1], "500000"),
+        ]
+
+        response = self.client.get(reverse("sales:potential_sales"), {"month": "2026-08"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["product"].name for item in response.context["report"]["products"]],
+            ["Higher Lost Gross", "Lower Lost Gross"],
+        )
+
     def test_potential_sales_ignores_reference_older_than_two_months(self):
         status = ProductStatus.objects.create(code="POTENTIAL-OLD", name="Regular")
         category = Category.objects.create(code="POTENTIAL-OLD-CAT", name="Socks")

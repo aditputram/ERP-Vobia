@@ -10,12 +10,21 @@
 </header>
 
 <form method="get" class="panel report-filter" data-auto-submit data-preserve-scroll>
-  <label>Bulan<select name="month">{% for item in report.month_options %}<option value="{{ item.value }}" {% if report.selected_value == item.value %}selected{% endif %}>{{ item.label }}</option>{% endfor %}</select></label>
-  <label>Status Produk<select name="product_status"><option value="">Semua Status Produk</option>{% for item in report.status_options %}<option value="{{ item }}" {% if report.selected_status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
-  <label>Kategori<select name="category"><option value="">Semua Kategori</option>{% for item in report.category_options %}<option value="{{ item.id }}" {% if report.selected_category == item.id|stringformat:'s' %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+  <div class="filter-field multi-select-field" data-multi-select data-all-label="Pilih Bulan">
+    <span class="filter-label">Bulan</span>
+    <button class="multi-select-trigger" type="button" aria-expanded="false"><span data-filter-summary>{% if report.selected_values|length == 1 %}{{ report.selected_month|date:"F Y" }}{% else %}{{ report.selected_values|length }} selected{% endif %}</span><span aria-hidden="true">⌄</span></button>
+    <div class="multi-select-menu" data-filter-menu hidden>
+      <label class="multi-select-search">Search Bulan<input type="search" placeholder="Ketik bulan..." autocomplete="off" data-filter-search></label>
+      <div class="multi-select-toolbar"><button type="button" data-filter-select-visible>Select All</button><span data-filter-result-count>{{ report.month_options|length }} pilihan</span><button type="button" data-filter-clear>Clear All</button></div>
+      <div class="multi-select-options">{% for item in report.month_options %}<label class="multi-select-option"><input type="checkbox" name="month" value="{{ item.value }}" {% if item.value in report.selected_values %}checked{% endif %}><span>{{ item.label }}</span></label>{% endfor %}</div>
+    </div>
+  </div>
+  {% include "sales/includes/multi_select_filter.html" with label="Status Produk" name="product_status" options=report.status_options selected=report.selected_statuses all_label="Semua Status Produk" search_placeholder="Ketik status produk..." enable_select_all=1 %}
+  {% include "sales/includes/multi_select_filter.html" with label="Kategori" name="category" options=report.category_options selected=report.selected_categories all_label="Semua Kategori" search_placeholder="Ketik kategori..." enable_select_all=1 %}
   <a class="secondary-button" href="{% url 'sales:potential_sales' %}">Reset</a>
 </form>
 
+{% for month_report in report.month_reports %}{% with report=month_report %}
 <section class="panel section-gap">
   <div class="panel-header">
     <div>
@@ -82,4 +91,6 @@
     {% empty %}<div class="empty-state">Tidak ada SKU yang terdeteksi kehilangan penjualan pada bulan ini.</div>{% endfor %}
   </div>
 </section>
+{% endwith %}{% endfor %}
+{% include "includes/multi_select_script.html" %}
 {% endblock %}

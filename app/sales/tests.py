@@ -305,6 +305,27 @@ class SalesReportRouteTests(TestCase):
             )
             for index, product in enumerate(products, start=1)
         ]
+        september_order = SalesOrder.objects.create(
+            source=SalesOrder.Source.SHOPEE,
+            source_label="Shopee",
+            order_number="POTENTIAL-SORT-SEP",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 1, 10, 0)),
+            order_date=date(2026, 9, 1),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            first_seen_batch_id=uuid.uuid4(),
+            latest_batch_id=uuid.uuid4(),
+        )
+        SalesOrderLine.objects.create(
+            order=september_order,
+            sku=skus[0],
+            quantity=1,
+            net_unit_price=Decimal("100000"),
+            retail_price_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("100000"),
+            total_net_sales=Decimal("100000"),
+        )
 
         def row(product, sku, lost_gross):
             return {
@@ -346,7 +367,7 @@ class SalesReportRouteTests(TestCase):
             "product_status": "Regular",
         })
         self.assertEqual(
-            [item.name for item in regular_response.context["report"]["category_options"]],
+            regular_response.context["report"]["category_options"],
             ["Pants", "Shirt"],
         )
         self.assertEqual(
@@ -357,7 +378,7 @@ class SalesReportRouteTests(TestCase):
         shirt_response = self.client.get(reverse("sales:potential_sales"), {
             "month": "2026-08",
             "product_status": "Regular",
-            "category": str(shirt.id),
+            "category": "Shirt",
         })
         self.assertEqual(
             [item["product"].name for item in shirt_response.context["report"]["products"]],
@@ -367,13 +388,29 @@ class SalesReportRouteTests(TestCase):
         stale_category_response = self.client.get(reverse("sales:potential_sales"), {
             "month": "2026-08",
             "product_status": "Essential+",
-            "category": str(shirt.id),
+            "category": "Shirt",
         })
-        self.assertEqual(stale_category_response.context["report"]["selected_category"], "")
+        self.assertEqual(stale_category_response.context["report"]["selected_categories"], [])
         self.assertEqual(
-            [item.name for item in stale_category_response.context["report"]["category_options"]],
+            stale_category_response.context["report"]["category_options"],
             ["Pants"],
         )
+
+        multi_response = self.client.get(reverse("sales:potential_sales"), {
+            "month": ["2026-08", "2026-09"],
+            "product_status": ["Regular", "Essential+"],
+            "category": ["Pants"],
+        })
+        multi_report = multi_response.context["report"]
+        self.assertEqual(multi_report["selected_values"], ["2026-08", "2026-09"])
+        self.assertEqual(multi_report["selected_statuses"], ["Regular", "Essential+"])
+        self.assertEqual(multi_report["selected_categories"], ["Pants"])
+        self.assertEqual(len(multi_report["month_reports"]), 2)
+        for month_report in multi_report["month_reports"]:
+            self.assertEqual(
+                [item["product"].name for item in month_report["products"]],
+                ["Higher Lost Gross", "Middle Lost Gross"],
+            )
 
     def test_potential_sales_ignores_reference_older_than_two_months(self):
         status = ProductStatus.objects.create(code="POTENTIAL-OLD", name="Regular")

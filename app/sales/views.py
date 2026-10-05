@@ -4,6 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
 from statistics import median
 from string import capwords
+from types import SimpleNamespace
 from urllib.parse import urlencode
 
 from django.contrib import messages
@@ -2270,10 +2271,26 @@ def _potential_sales_context(request):
             "label": date_format(month, "F Y"),
         })
         month = _shift_month(month, 1)
-    selected_value = request.GET.get("month", latest_month.strftime("%Y-%m"))
     allowed_values = {item["value"] for item in month_options}
-    if selected_value not in allowed_values:
-        selected_value = month_options[-1]["value"]
+    requested_months = set(request.GET.getlist("month"))
+    selected_values = [
+        item["value"] for item in month_options if item["value"] in requested_months
+    ] or [month_options[-1]["value"]]
+    if len(selected_values) > 1:
+        month_reports = []
+        for month_value in selected_values:
+            month_query = request.GET.copy()
+            month_query.setlist("month", [month_value])
+            month_reports.append(
+                _potential_sales_context(SimpleNamespace(GET=month_query))
+            )
+        return {
+            **month_reports[0],
+            "selected_values": selected_values,
+            "month_reports": month_reports,
+        }
+
+    selected_value = selected_values[0]
     selected_month = datetime.strptime(selected_value, "%Y-%m").date()
     cutoff = min(latest, _shift_month(selected_month, 1) - timedelta(days=1))
 
@@ -2286,23 +2303,17 @@ def _potential_sales_context(request):
         eligible_products.order_by("status__name")
         .values_list("status__name", flat=True).distinct()
     )
-    selected_status = request.GET.get("product_status", "")
-    if selected_status not in status_options:
-        selected_status = ""
-    if selected_status:
-        eligible_products = eligible_products.filter(status__name=selected_status)
+    selected_statuses = _valid_multi_values(request, "product_status", status_options)
+    if selected_statuses:
+        eligible_products = eligible_products.filter(status__name__in=selected_statuses)
 
     category_options = list(
         Category.objects.filter(is_active=True, products__in=eligible_products)
-        .distinct().order_by("name")
+        .order_by("name").values_list("name", flat=True).distinct()
     )
-    selected_category = request.GET.get("category", "")
-    if selected_category and not any(
-        str(category.id) == selected_category for category in category_options
-    ):
-        selected_category = ""
-    if selected_category:
-        eligible_products = eligible_products.filter(category_id=selected_category)
+    selected_categories = _valid_multi_values(request, "category", category_options)
+    if selected_categories:
+        eligible_products = eligible_products.filter(category__name__in=selected_categories)
 
     affected_rows = _potential_lost_sku_rows(
         selected_month,
@@ -2436,15 +2447,17 @@ def _potential_sales_context(request):
             if group["beginning_qty"] is not None and group["beginning_qty"] > 0
             else None
         )
-    return {
+    result = {
         "month_options": month_options,
         "selected_value": selected_value,
+        "selected_values": selected_values,
+        "month_reports": [],
         "selected_month": selected_month,
         "cutoff": cutoff,
         "status_options": status_options,
-        "selected_status": selected_status,
+        "selected_statuses": selected_statuses,
         "category_options": category_options,
-        "selected_category": selected_category,
+        "selected_categories": selected_categories,
         "history_months": history_months,
         "rows": affected_rows,
         "products": product_rows,
@@ -2459,6 +2472,8 @@ def _potential_sales_context(request):
         "potential_gross": sum((row["potential_gross"] for row in product_rows), Decimal("0")),
         "exception_count": sum(1 for row in affected_rows if row["inventory_exception"]),
     }
+    result["month_reports"] = [result.copy()]
+    return result
 
 
 def _potential_sales_rows(cutoff_date, selected_month, product_ids=None):

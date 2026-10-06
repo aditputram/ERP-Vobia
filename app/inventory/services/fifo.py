@@ -334,6 +334,7 @@ def rebuild_fifo_for_sku(*, sku, actor, reason, resolution_movement=None):
     allocations = []
     allocations_by_movement = defaultdict(list)
     shortages = {}
+    unallocated_return_qty = Decimal("0")
     changed_movements = []
     sales_movement_by_line = {
         movement.sales_line_id: movement
@@ -405,8 +406,11 @@ def rebuild_fifo_for_sku(*, sku, actor, reason, resolution_movement=None):
             layers_by_id[allocation.layer_id].remaining_qty += restored_qty
             needed -= restored_qty
             restored_cost += restored_qty * allocation.unit_cost
-        if needed > 0:
-            raise ValidationError(f"FIFO allocation asal return {movement.movement_key} tidak cukup.")
+        # A physical return remains valid even when its original sale is still
+        # FIFO-short.  Keep the unmatched portion at zero cost until a
+        # backdated inbound supplies the source sale; the next replay will then
+        # allocate the sale and restore the return cost automatically.
+        unallocated_return_qty += needed
         movement.allocated_cost = restored_cost
         changed_movements.append(movement)
 
@@ -480,6 +484,7 @@ def rebuild_fifo_for_sku(*, sku, actor, reason, resolution_movement=None):
         after_values={
             "allocation_count": len(allocations),
             "fifo_short_qty": str(after_short_qty),
+            "unallocated_return_qty": str(unallocated_return_qty),
         },
     )
     return {
@@ -961,14 +966,6 @@ def record_physical_return(*, sales_line, received_date, quantity, warehouse, co
             reason=f"Replay FIFO sebelum menerima return {sales_line.order.order_number}.",
         )
         sales_movement.refresh_from_db()
-        restorable_qty = sales_movement.fifo_allocations.aggregate(
-            allocated=Sum("allocated_qty"),
-            returned=Sum("returned_qty"),
-        )
-        if (restorable_qty["allocated"] or Decimal("0")) - (
-            restorable_qty["returned"] or Decimal("0")
-        ) < quantity:
-            raise ValidationError("FIFO allocation asal tidak cukup untuk memulihkan return.")
     po_ids = set(
         sales_movement.fifo_allocations.exclude(layer__source_po_line=None).values_list(
             "layer__source_po_line__po_id",

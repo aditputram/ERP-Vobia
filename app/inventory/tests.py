@@ -981,6 +981,62 @@ class InventoryWorkflowTests(TestCase):
             ).exists()
         )
 
+    def test_fifo_short_return_gets_cogs_after_backdated_inbound(self):
+        post_opening(sku=self.sku, quantity=0, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
+        sale = self._sales_line(number="ORDER-SHORT-RETURN", quantity=1, order_date=date(2026, 9, 3))
+        sales_movement = post_sales_out(sale, self.user)
+
+        _, return_movement = record_physical_return(
+            sales_line=sale,
+            received_date=date(2026, 9, 10),
+            quantity=1,
+            warehouse=self.warehouse,
+            condition=PhysicalReturnReceipt.Condition.SELLABLE,
+            actor=self.user,
+        )
+
+        return_movement.refresh_from_db()
+        self.assertEqual(return_movement.allocated_cost, Decimal("0"))
+        self.assertTrue(
+            InventoryException.objects.filter(
+                movement=sales_movement,
+                code=InventoryException.Code.FIFO_SHORT,
+                status=InventoryException.Status.OPEN,
+            ).exists()
+        )
+
+        record_qc(
+            po_line=self.po_line,
+            inspected_at=timezone.make_aware(datetime(2026, 9, 2, 10, 0)),
+            qty_inspected=10,
+            qty_passed=10,
+            qty_failed=0,
+            actor=self.user,
+        )
+        record_inbound(
+            po_line=self.po_line,
+            inbound_date=date(2026, 9, 3),
+            received_qty=10,
+            warehouse=self.warehouse,
+            reference="GRN-SHORT-RETURN-BACKDATE",
+            actor=self.user,
+        )
+
+        sales_movement.refresh_from_db()
+        return_movement.refresh_from_db()
+        allocation = FIFOAllocation.objects.get(outbound_movement=sales_movement)
+        self.assertEqual(allocation.allocated_qty, Decimal("1"))
+        self.assertEqual(allocation.returned_qty, Decimal("1"))
+        self.assertEqual(sales_movement.allocated_cost, Decimal("120000"))
+        self.assertEqual(return_movement.allocated_cost, Decimal("120000"))
+        self.assertFalse(
+            InventoryException.objects.filter(
+                movement=sales_movement,
+                code=InventoryException.Code.FIFO_SHORT,
+                status=InventoryException.Status.OPEN,
+            ).exists()
+        )
+
     def test_sellable_return_restores_original_fifo_layer_and_non_sellable_does_not(self):
         post_opening(sku=self.sku, quantity=10, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
         sales_line = self._sales_line(quantity=8)

@@ -288,7 +288,7 @@ def rebuild_fifo_for_sku(*, sku, actor, reason, resolution_movement=None):
         .filter(sku=sku)
     )
     movements = list(
-        InventoryMovement.objects.select_for_update()
+        InventoryMovement.objects.select_for_update(of=("self",))
         .select_related("sales_line__order", "return_receipt__sales_line")
         .filter(sku=sku)
         .exclude(movement_type=InventoryMovement.MovementType.OPENING)

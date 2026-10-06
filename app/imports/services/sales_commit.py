@@ -7,7 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from audit.services import record_audit
-from inventory.services.fifo import create_expected_return, post_sales_out
+from inventory.services.fifo import create_expected_return, post_sales_out, rebuild_fifo_for_sku
 from inventory.models import FIFOOpeningImportBatch
 from sales.models import SalesOrder, SalesOrderLine, SalesStatusHistory
 
@@ -89,6 +89,7 @@ def approve_sales_import(batch_id, actor):
         "historical_backfill_orders": 0,
         "historical_backfill_lines": 0,
     }
+    fifo_replay_skus = {}
 
     for order_number, rows in order_groups.items():
         representative = rows[0]
@@ -379,9 +380,21 @@ def approve_sales_import(batch_id, actor):
         for line in order.lines.filter(is_counted=True).select_related("order", "sku"):
             if not (order.shipped_datetime or line.is_final):
                 continue
-            post_sales_out(line, actor)
+            was_posted = line.inventory_movements.filter(
+                movement_type="SALES_OUT",
+            ).exists()
+            post_sales_out(line, actor, replay_backdated=False)
+            if order.affects_inventory and not was_posted:
+                fifo_replay_skus[line.sku_id] = line.sku
             if order.affects_inventory and line.current_status == "Retur":
                 create_expected_return(line)
+
+    for sku in fifo_replay_skus.values():
+        rebuild_fifo_for_sku(
+            sku=sku,
+            actor=actor,
+            reason=f"Sales import {batch.id} menghitung ulang FIFO kronologis.",
+        )
 
     now = timezone.now()
     batch.status = SalesImportBatch.Status.COMMITTED

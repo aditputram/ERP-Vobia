@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
@@ -262,8 +263,225 @@ def _consume_fifo(movement):
     return total_cost, required
 
 
+def _fifo_event_order(movement):
+    priority = {
+        InventoryMovement.MovementType.INCOMING: 10,
+        InventoryMovement.MovementType.ADJUSTMENT_IN: 10,
+        InventoryMovement.MovementType.SALES_OUT: 20,
+        InventoryMovement.MovementType.ADJUSTMENT_OUT: 20,
+        InventoryMovement.MovementType.RETURN_IN: 30,
+    }
+    return (
+        movement.movement_date,
+        priority.get(movement.movement_type, 40),
+        movement.posted_at,
+        movement.movement_key,
+    )
+
+
 @transaction.atomic
-def post_sales_out(sales_line, actor):
+def rebuild_fifo_for_sku(*, sku, actor, reason, resolution_movement=None):
+    """Replay one SKU chronologically after a backdated stock movement."""
+    layers = list(
+        FIFOLayer.objects.select_for_update()
+        .filter(sku=sku)
+    )
+    movements = list(
+        InventoryMovement.objects.select_for_update()
+        .filter(sku=sku)
+        .exclude(movement_type=InventoryMovement.MovementType.OPENING)
+    )
+    movements = [
+        movement
+        for movement in movements
+        if not (
+            movement.movement_type == InventoryMovement.MovementType.SALES_OUT
+            and movement.sales_line_id
+            and not movement.sales_line.order.affects_inventory
+        )
+    ]
+    movements.sort(key=_fifo_event_order)
+    event_order = {movement.id: _fifo_event_order(movement) for movement in movements}
+    layers.sort(
+        key=lambda layer: (
+            layer.receipt_date,
+            0 if layer.source_type == FIFOLayer.SourceType.OPENING else event_order.get(
+                layer.opening_movement_id,
+                (layer.receipt_date, 15, layer.created_at, layer.layer_key),
+            )[1],
+            layer.created_at,
+            layer.layer_key,
+        )
+    )
+
+    outbound_ids = [movement.id for movement in movements if movement.direction == InventoryMovement.Direction.OUT]
+    before_allocation_count = FIFOAllocation.objects.filter(outbound_movement_id__in=outbound_ids).count()
+    before_short_qty = (
+        InventoryException.objects.filter(
+            sku=sku,
+            code=InventoryException.Code.FIFO_SHORT,
+            status=InventoryException.Status.OPEN,
+        ).aggregate(total=Sum("quantity"))["total"]
+        or Decimal("0")
+    )
+    FIFOAllocation.objects.filter(outbound_movement_id__in=outbound_ids).delete()
+    for layer in layers:
+        layer.remaining_qty = layer.original_qty
+
+    layers_by_id = {layer.id: layer for layer in layers}
+    allocations = []
+    allocations_by_movement = defaultdict(list)
+    shortages = {}
+    changed_movements = []
+    sales_movement_by_line = {
+        movement.sales_line_id: movement
+        for movement in movements
+        if movement.movement_type == InventoryMovement.MovementType.SALES_OUT and movement.sales_line_id
+    }
+
+    for movement in movements:
+        movement_order = event_order[movement.id]
+        if movement.direction == InventoryMovement.Direction.OUT:
+            needed = Decimal(movement.quantity)
+            total_cost = Decimal("0")
+            for layer in layers:
+                if layer.sku_id != sku.id or needed <= 0:
+                    continue
+                source_order = event_order.get(layer.opening_movement_id)
+                available = layer.receipt_date < movement.movement_date or (
+                    layer.receipt_date == movement.movement_date
+                    and (
+                        layer.source_type == FIFOLayer.SourceType.OPENING
+                        or source_order is None
+                        or source_order <= movement_order
+                    )
+                )
+                if not available or layer.remaining_qty <= 0:
+                    continue
+                allocated_qty = min(needed, layer.remaining_qty)
+                allocation = FIFOAllocation(
+                    outbound_movement=movement,
+                    layer=layer,
+                    allocated_qty=allocated_qty,
+                    unit_cost=layer.unit_cost,
+                    allocated_cost=allocated_qty * layer.unit_cost,
+                )
+                allocations.append(allocation)
+                allocations_by_movement[movement.id].append(allocation)
+                layer.remaining_qty -= allocated_qty
+                needed -= allocated_qty
+                total_cost += allocation.allocated_cost
+            movement.allocated_cost = total_cost
+            changed_movements.append(movement)
+            if needed > 0:
+                shortages[movement.id] = (movement, needed)
+            continue
+
+        if movement.movement_type != InventoryMovement.MovementType.RETURN_IN:
+            continue
+        return_layer = next(
+            (layer for layer in layers if layer.opening_movement_id == movement.id),
+            None,
+        )
+        if return_layer is not None:
+            movement.allocated_cost = return_layer.original_qty * return_layer.unit_cost
+            changed_movements.append(movement)
+            continue
+        source = sales_movement_by_line.get(movement.return_receipt.sales_line_id)
+        if source is None:
+            raise ValidationError(f"Return {movement.movement_key} tidak memiliki Sales Out asal.")
+        needed = Decimal(movement.quantity)
+        restored_cost = Decimal("0")
+        for allocation in allocations_by_movement[source.id]:
+            if needed <= 0:
+                break
+            restorable = allocation.allocated_qty - allocation.returned_qty
+            restored_qty = min(needed, restorable)
+            if restored_qty <= 0:
+                continue
+            allocation.returned_qty += restored_qty
+            layers_by_id[allocation.layer_id].remaining_qty += restored_qty
+            needed -= restored_qty
+            restored_cost += restored_qty * allocation.unit_cost
+        if needed > 0:
+            raise ValidationError(f"FIFO allocation asal return {movement.movement_key} tidak cukup.")
+        movement.allocated_cost = restored_cost
+        changed_movements.append(movement)
+
+    FIFOAllocation.objects.bulk_create(allocations)
+    FIFOLayer.objects.bulk_update(layers, ["remaining_qty"])
+    if changed_movements:
+        InventoryMovement.objects.bulk_update(changed_movements, ["allocated_cost"])
+
+    existing = list(
+        InventoryException.objects.select_for_update()
+        .filter(
+            sku=sku,
+            code=InventoryException.Code.FIFO_SHORT,
+            status=InventoryException.Status.OPEN,
+        )
+        .order_by("created_at", "id")
+    )
+    existing_by_movement = {}
+    now = timezone.now()
+    for exception in existing:
+        if exception.movement_id in shortages and exception.movement_id not in existing_by_movement:
+            existing_by_movement[exception.movement_id] = exception
+            continue
+        exception.status = InventoryException.Status.RESOLVED
+        exception.resolved_at = now
+        exception.resolved_by = actor
+        exception.resolution_movement = resolution_movement
+        exception.resolution_reason = reason
+        exception.save(
+            update_fields=[
+                "status",
+                "resolved_at",
+                "resolved_by",
+                "resolution_movement",
+                "resolution_reason",
+            ]
+        )
+    for movement_id, (movement, quantity) in shortages.items():
+        message = f"Sales Out melebihi FIFO layer tersedia sebanyak {quantity} unit."
+        exception = existing_by_movement.get(movement_id)
+        if exception is None:
+            InventoryException.objects.create(
+                code=InventoryException.Code.FIFO_SHORT,
+                sku=sku,
+                movement=movement,
+                quantity=quantity,
+                message=message,
+            )
+        elif exception.quantity != quantity or exception.message != message:
+            exception.quantity = quantity
+            exception.message = message
+            exception.save(update_fields=["quantity", "message"])
+
+    after_short_qty = sum((quantity for _, quantity in shortages.values()), Decimal("0"))
+    record_audit(
+        actor=actor,
+        action="fifo_replayed_after_backdated_movement",
+        entity_type="master_data.sku",
+        entity_id=sku.id,
+        reason=reason,
+        before_values={
+            "allocation_count": before_allocation_count,
+            "fifo_short_qty": str(before_short_qty),
+        },
+        after_values={
+            "allocation_count": len(allocations),
+            "fifo_short_qty": str(after_short_qty),
+        },
+    )
+    return {
+        "allocation_count": len(allocations),
+        "fifo_short_qty": after_short_qty,
+    }
+
+
+@transaction.atomic
+def post_sales_out(sales_line, actor, *, replay_backdated=True):
     key = f"SALES|{sales_line.order.display_source}|{sales_line.order.order_number}|{sales_line.sku.sku}"
     existing = InventoryMovement.objects.filter(movement_key=key).first()
     if existing:
@@ -306,6 +524,25 @@ def post_sales_out(sales_line, actor):
         posted_by=actor,
     )
     _, short_qty = _consume_fifo(movement)
+    if replay_backdated and InventoryMovement.objects.filter(
+        sku=movement.sku,
+        movement_date__gt=movement.movement_date,
+    ).exclude(
+        movement_type=InventoryMovement.MovementType.OPENING
+    ).exists():
+        rebuild_fifo_for_sku(
+            sku=movement.sku,
+            actor=actor,
+            reason=f"Sales Out backdate {movement.movement_key} mengubah urutan FIFO.",
+        )
+        short_qty = (
+            InventoryException.objects.filter(
+                code=InventoryException.Code.FIFO_SHORT,
+                movement=movement,
+                status=InventoryException.Status.OPEN,
+            ).aggregate(total=Sum("quantity"))["total"]
+            or Decimal("0")
+        )
     record_audit(
         actor=actor,
         action="sales_out_posted",
@@ -464,6 +701,17 @@ def record_inbound(
         unit_cost=po_line.cogs_snapshot,
         opening_movement=movement,
     )
+    if InventoryMovement.objects.filter(
+        sku=po_line.sku,
+        direction=InventoryMovement.Direction.OUT,
+        movement_date__gte=inbound_date,
+    ).exists():
+        rebuild_fifo_for_sku(
+            sku=po_line.sku,
+            actor=actor,
+            reason=f"Incoming backdate {movement_key} menghitung ulang FIFO kronologis.",
+            resolution_movement=movement,
+        )
     record_audit(
         actor=actor,
         action="inbound_posted",
@@ -683,30 +931,35 @@ def record_physical_return(*, sales_line, received_date, quantity, warehouse, co
             message="Sales Out asal belum memiliki FIFO allocation; Return In tidak diposting.",
         )
         return receipt, None
-    restore_needed = quantity
-    restored_cost = Decimal("0")
-    allocations = list(
-        sales_movement.fifo_allocations.select_for_update(of=("self", "layer")).select_related("layer__source_po_line__po").order_by(
-            "layer__receipt_date", "layer__created_at"
+    restorable_qty = (
+        sales_movement.fifo_allocations.aggregate(
+            allocated=Sum("allocated_qty"),
+            returned=Sum("returned_qty"),
         )
     )
-    restoration_parts = []
-    for allocation in allocations:
-        if restore_needed <= 0:
-            break
-        restorable = allocation.allocated_qty - allocation.returned_qty
-        restored = min(restore_needed, restorable)
-        if restored <= 0:
-            continue
-        allocation.returned_qty += restored
-        allocation.save(update_fields=["returned_qty"])
-        allocation.layer.remaining_qty += restored
-        allocation.layer.save(update_fields=["remaining_qty"])
-        restored_cost += restored * allocation.unit_cost
-        restore_needed -= restored
-        restoration_parts.append({"layer": allocation.layer.layer_key, "qty": str(restored)})
-    if restore_needed > 0:
-        raise ValidationError("FIFO allocation asal tidak cukup untuk memulihkan return.")
+    if (restorable_qty["allocated"] or Decimal("0")) - (
+        restorable_qty["returned"] or Decimal("0")
+    ) < quantity:
+        rebuild_fifo_for_sku(
+            sku=sales_line.sku,
+            actor=actor,
+            reason=f"Replay FIFO sebelum menerima return {sales_line.order.order_number}.",
+        )
+        sales_movement.refresh_from_db()
+        restorable_qty = sales_movement.fifo_allocations.aggregate(
+            allocated=Sum("allocated_qty"),
+            returned=Sum("returned_qty"),
+        )
+        if (restorable_qty["allocated"] or Decimal("0")) - (
+            restorable_qty["returned"] or Decimal("0")
+        ) < quantity:
+            raise ValidationError("FIFO allocation asal tidak cukup untuk memulihkan return.")
+    po_ids = set(
+        sales_movement.fifo_allocations.exclude(layer__source_po_line=None).values_list(
+            "layer__source_po_line__po_id",
+            flat=True,
+        )
+    )
     key = f"RETURN|{sales_line.order.display_source}|{sales_line.order.order_number}|{sales_line.sku.sku}|{receipt.id}"
     movement = InventoryMovement.objects.create(
         movement_key=key,
@@ -716,16 +969,18 @@ def record_physical_return(*, sales_line, received_date, quantity, warehouse, co
         sku=sales_line.sku,
         warehouse=warehouse,
         quantity=quantity,
-        allocated_cost=restored_cost,
+        allocated_cost=Decimal("0"),
         source_reference=f"{sales_line.order.display_source}|{sales_line.order.order_number}",
         return_receipt=receipt,
         posted_by=actor,
     )
-    po_ids = {
-        allocation.layer.source_po_line.po_id
-        for allocation in allocations
-        if allocation.layer.source_po_line_id
-    }
+    rebuild_fifo_for_sku(
+        sku=sales_line.sku,
+        actor=actor,
+        reason=f"Return In {key} menghitung ulang FIFO kronologis.",
+        resolution_movement=movement,
+    )
+    movement.refresh_from_db()
     for po_id in po_ids:
         po = PurchaseOrder.objects.select_for_update().get(pk=po_id)
         if po.close_date:
@@ -737,7 +992,7 @@ def record_physical_return(*, sales_line, received_date, quantity, warehouse, co
         action="sellable_return_posted",
         entity_type="inventory.inventorymovement",
         entity_id=movement.id,
-        after_values={"quantity": str(quantity), "restored_cost": str(restored_cost), "layers": restoration_parts},
+        after_values={"quantity": str(quantity), "restored_cost": str(movement.allocated_cost)},
     )
     return receipt, movement
 
@@ -804,8 +1059,17 @@ def post_adjustment(*, sku, movement_date, direction, quantity, actor, reason, e
             opening_movement=movement,
         )
     else:
-        _, short = _consume_fifo(movement)
-        if short:
+        rebuild_fifo_for_sku(
+            sku=sku,
+            actor=actor,
+            reason=f"Adjustment Out {key} menghitung ulang FIFO kronologis.",
+            resolution_movement=movement,
+        )
+        if InventoryException.objects.filter(
+            code=InventoryException.Code.FIFO_SHORT,
+            movement=movement,
+            status=InventoryException.Status.OPEN,
+        ).exists():
             raise ValidationError("Adjustment Out melebihi FIFO layer tersedia; koreksi sumber sebelum posting.")
     if exception:
         if not is_in:
@@ -813,19 +1077,13 @@ def post_adjustment(*, sku, movement_date, direction, quantity, actor, reason, e
         if exception.code == InventoryException.Code.FIFO_SHORT:
             if not exception.movement_id or movement_date > exception.movement.movement_date:
                 raise ValidationError("Evidence date adjustment harus pada/sebelum tanggal Sales Out yang mengalami FIFO Short.")
-            resolved_qty = min(exception.quantity, layer.remaining_qty)
-            FIFOAllocation.objects.create(
-                outbound_movement=exception.movement,
-                layer=layer,
-                allocated_qty=resolved_qty,
-                unit_cost=layer.unit_cost,
-                allocated_cost=resolved_qty * layer.unit_cost,
+            rebuild_fifo_for_sku(
+                sku=sku,
+                actor=actor,
+                reason=reason,
+                resolution_movement=movement,
             )
-            layer.remaining_qty -= resolved_qty
-            layer.save(update_fields=["remaining_qty"])
-            exception.movement.allocated_cost += resolved_qty * layer.unit_cost
-            exception.movement.save(update_fields=["allocated_cost"])
-            exception.quantity -= resolved_qty
+            exception.refresh_from_db()
         elif exception.code == InventoryException.Code.NEGATIVE_OPENING:
             exception.quantity = max(exception.quantity - quantity, Decimal("0"))
         else:
@@ -841,6 +1099,17 @@ def post_adjustment(*, sku, movement_date, direction, quantity, actor, reason, e
             exception.resolution_movement = movement
             exception.resolution_reason = reason
             exception.save(update_fields=["quantity", "resolution_movement", "resolution_reason"])
+    elif is_in and InventoryMovement.objects.filter(
+        sku=sku,
+        direction=InventoryMovement.Direction.OUT,
+        movement_date__gte=movement_date,
+    ).exists():
+        rebuild_fifo_for_sku(
+            sku=sku,
+            actor=actor,
+            reason=f"Adjustment In {key} menghitung ulang FIFO kronologis.",
+            resolution_movement=movement,
+        )
     record_audit(
         actor=actor,
         action="inventory_adjustment_posted",

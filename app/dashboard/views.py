@@ -1,16 +1,18 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
-from django.shortcuts import redirect, render
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_POST
 
 from audit.services import record_audit
 from accounts.access import first_allowed_route, module_level
 from chat.context_processors import unread_chat
 from chat.models import ChatMessage, ChatThread, accessible_threads
 from rnd.context_processors import rnd_notifications
+from rnd.models import RndNotification
 
 
 MODULES = (
@@ -84,6 +86,27 @@ MODULES = (
 
 
 @login_required
+def notification_open(request, notification_id):
+    notification = get_object_or_404(RndNotification, id=notification_id, recipient=request.user)
+    if notification.read_at is None:
+        notification.read_at = timezone.now()
+        notification.save(update_fields=("read_at", "updated_at"))
+    target_url = notification.target_url
+    if not target_url.startswith("/") or target_url.startswith("//"):
+        target_url = reverse("dashboard:index")
+    return redirect(target_url)
+
+
+@login_required
+@require_POST
+def notifications_mark_all_read(request):
+    RndNotification.objects.filter(recipient=request.user, read_at__isnull=True).update(read_at=timezone.now())
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return HttpResponse(status=204)
+    return redirect("dashboard:index")
+
+
+@login_required
 @never_cache
 def live_status(request):
     chat_count = unread_chat(request)["chat_unread_count"]
@@ -115,12 +138,13 @@ def live_status(request):
     notifications = [
         {
             "id": str(notification.id),
-            "open_url": reverse("rnd:notification_open", args=[notification.id]),
+            "open_url": reverse("dashboard:notification_open", args=[notification.id]),
             "title": notification.title,
             "message": notification.message,
             "created_at": timezone.localtime(notification.created_at).strftime("%d %b %Y · %H:%M"),
             "unread": notification.read_at is None,
             "category": notification.category,
+            "module": notification.module,
             "thumbnail_url": notification.thumbnail_url,
         }
         for notification in notification_context["rnd_notification_items"]

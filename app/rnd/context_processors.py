@@ -1,10 +1,9 @@
 from urllib.parse import urlsplit
 
-from accounts.access import module_level
 from django.urls import Resolver404, resolve, reverse
 
 from .models import Collection, DesignAsset, DevelopmentProduct, RndNotification
-from .notifications import notification_category
+from .notifications import notification_category, notification_module
 from .services import can_approve_module
 
 
@@ -92,7 +91,6 @@ def rnd_notifications(request):
         not getattr(user, "is_authenticated", False)
         or not getattr(user, "pk", None)
         or request.GET.get("embed") == "1"
-        or (not user.is_superuser and module_level(user, "rnd") == "none")
     ):
         return {
             "show_rnd_notifications": False,
@@ -108,6 +106,7 @@ def rnd_notifications(request):
     notifications = list(notification_query[:30])
     for notification in notifications:
         notification.category = notification_category(notification)
+        notification.module = notification_module(notification)
     _attach_notification_thumbnails(notifications)
     approval_items = _approval_items(user)
     approval_count = len(approval_items) + sum(

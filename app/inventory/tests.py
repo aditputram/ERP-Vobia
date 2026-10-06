@@ -4,6 +4,7 @@ import tempfile
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -20,6 +21,7 @@ from purchasing.models import PurchaseOrder, PurchaseOrderLine
 from production.models import ProductionActivity, ProductionDeliveryOrder, ProductionStage
 from production.services import ensure_production_order
 from sales.models import SalesOrder, SalesOrderLine
+from rnd.models import RndNotification
 
 from .models import ExpectedReturn, FIFOAllocation, FIFOLayer, FIFOOpeningImportBatch, FIFOOpeningSnapshot, InboundReceipt, InventoryException, InventoryMovement, PhysicalReturnReceipt, QCFollowUp
 from .services.aging import po_aging_snapshot, refresh_po_close
@@ -30,6 +32,7 @@ from .services.fifo import (
     post_adjustment,
     post_opening,
     post_sales_out,
+    rebuild_fifo_for_sku,
     record_inbound,
     record_physical_return,
     record_qc,
@@ -766,6 +769,61 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(exception.quantity, Decimal("2"))
         self.assertEqual(inventory_balance(self.sku), Decimal("-2"))
 
+    @patch("inventory.notifications.send_web_push")
+    def test_fifo_short_notifies_warehouse_once_and_opens_from_space_notifications(self, send_push_mock):
+        no_operation_user = User.objects.create_user(
+            username="finance-only",
+            password="test-password",
+            module_access={"operation": "none", "finance": "view"},
+        )
+        post_opening(sku=self.sku, quantity=0, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
+        with self.captureOnCommitCallbacks(execute=True):
+            movement = post_sales_out(
+                self._sales_line(number="ORDER-NOTIFY-SHORT", quantity=2),
+                self.user,
+            )
+        exception = InventoryException.objects.get(
+            movement=movement,
+            code=InventoryException.Code.FIFO_SHORT,
+            status=InventoryException.Status.OPEN,
+        )
+        notification = RndNotification.objects.get(
+            recipient=self.user,
+            source_key=f"inventory-exception:{exception.id}",
+        )
+        self.assertEqual(notification.title, "Stok warehouse belum tercatat")
+        self.assertIn("ORDER-NOTIFY-SHORT", notification.message)
+        self.assertIn("FIFO kurang 2 pcs", notification.message)
+        self.assertTrue(notification.target_url.startswith(reverse("inventory:overview")))
+        self.assertFalse(RndNotification.objects.filter(recipient=no_operation_user).exists())
+        send_push_mock.assert_called_once()
+        self.assertEqual(send_push_mock.call_args.kwargs["title"], "Stok Warehouse perlu diaudit")
+
+        rebuild_fifo_for_sku(sku=self.sku, actor=self.user, reason="Verifikasi replay idempotent.")
+        self.assertEqual(
+            RndNotification.objects.filter(
+                recipient=self.user,
+                source_key=f"inventory-exception:{exception.id}",
+            ).count(),
+            1,
+        )
+
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("inventory:overview"))
+        self.assertContains(page, "VOBIA SPACE")
+        self.assertContains(page, notification.title)
+        live_status = self.client.get(reverse("dashboard:live_status")).json()
+        self.assertEqual(live_status["rnd_notifications"][0]["module"], "operation")
+        self.assertEqual(
+            live_status["rnd_notifications"][0]["open_url"],
+            reverse("dashboard:notification_open", args=[notification.id]),
+        )
+
+        opened = self.client.get(reverse("dashboard:notification_open", args=[notification.id]))
+        self.assertRedirects(opened, notification.target_url, fetch_redirect_response=False)
+        notification.refresh_from_db()
+        self.assertIsNotNone(notification.read_at)
+
     def test_backdated_inbound_replays_fifo_and_unlocks_sellable_return(self):
         post_opening(sku=self.sku, quantity=0, unit_cost=100000, actor=self.user, warehouse=self.warehouse)
         sale = self._sales_line(number="ORDER-BACKDATE", quantity=1, order_date=date(2026, 9, 3))
@@ -809,6 +867,11 @@ class InventoryWorkflowTests(TestCase):
                 status=InventoryException.Status.OPEN,
             ).exists()
         )
+        notification = RndNotification.objects.get(
+            recipient=self.user,
+            source_key=f"inventory-exception:{InventoryException.objects.get(movement=sales_movement).id}",
+        )
+        self.assertIsNotNone(notification.read_at)
 
         _, return_movement = record_physical_return(
             sales_line=sale,

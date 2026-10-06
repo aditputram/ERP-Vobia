@@ -136,7 +136,9 @@
             toast.href = notification.open_url;
         }
         const source = document.createElement('small');
-        source.textContent = notification.kind === 'chat' ? 'PESAN BARU' : 'NOTIFIKASI R&D';
+        source.textContent = notification.kind === 'chat'
+            ? 'PESAN BARU'
+            : notification.module === 'operation' ? 'NOTIFIKASI OPERATION' : 'NOTIFIKASI R&D';
         const title = document.createElement('strong');
         title.textContent = notification.title;
         const message = document.createElement('span');

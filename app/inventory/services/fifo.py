@@ -21,6 +21,7 @@ from inventory.models import (
     QCFollowUpEvent,
     QCInspection,
 )
+from inventory.notifications import resolve_fifo_short_notification, sync_fifo_short_notification
 from purchasing.models import PurchaseOrder
 
 
@@ -442,11 +443,13 @@ def rebuild_fifo_for_sku(*, sku, actor, reason, resolution_movement=None):
                 "resolution_reason",
             ]
         )
+        resolve_fifo_short_notification(exception)
+    shortage_exceptions = []
     for movement_id, (movement, quantity) in shortages.items():
         message = f"Sales Out melebihi FIFO layer tersedia sebanyak {quantity} unit."
         exception = existing_by_movement.get(movement_id)
         if exception is None:
-            InventoryException.objects.create(
+            exception = InventoryException.objects.create(
                 code=InventoryException.Code.FIFO_SHORT,
                 sku=sku,
                 movement=movement,
@@ -457,6 +460,10 @@ def rebuild_fifo_for_sku(*, sku, actor, reason, resolution_movement=None):
             exception.quantity = quantity
             exception.message = message
             exception.save(update_fields=["quantity", "message"])
+        shortage_exceptions.append(exception)
+
+    for exception in shortage_exceptions:
+        sync_fifo_short_notification(exception, actor=actor)
 
     after_short_qty = sum((quantity for _, quantity in shortages.values()), Decimal("0"))
     record_audit(
@@ -550,6 +557,13 @@ def post_sales_out(sales_line, actor, *, replay_backdated=True):
         entity_id=movement.id,
         after_values={"quantity": str(movement.quantity), "fifo_short_qty": str(short_qty)},
     )
+    exception = InventoryException.objects.filter(
+        code=InventoryException.Code.FIFO_SHORT,
+        movement=movement,
+        status=InventoryException.Status.OPEN,
+    ).first()
+    if exception is not None:
+        sync_fifo_short_notification(exception, actor=actor)
     return movement
 
 

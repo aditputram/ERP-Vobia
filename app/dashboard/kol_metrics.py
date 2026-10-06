@@ -1,4 +1,3 @@
-import json
 import re
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -59,5 +58,10 @@ def read_public_metrics(url, platform):
                     multiplier = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}.get(raw[-1:].upper(), 1)
                     values[field] = round(float(raw[:-1] if multiplier > 1 else raw) * multiplier)
     if not values:
+        if platform == "TIKTOK":
+            raise ValueError(
+                "Post TikTok KOL eksternal tidak dapat dibaca otomatis tanpa izin akun kreator. "
+                "Isi metrik TikTok Analytics KOL secara manual; data terakhir tetap tersimpan."
+            )
         raise ValueError("Metrik publik belum dapat dibaca; isi manual.")
     return {field: values.get(field) for field in FIELDS}

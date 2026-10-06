@@ -443,8 +443,9 @@ class CampaignTests(TestCase):
         self.assertRedirects(self.client.post(campaign_delete_url), reverse("dashboard:campaign_list"))
         self.assertFalse(Campaign.objects.filter(id=self.campaign.id).exists())
 
+    @patch("dashboard.partnerships.tiktok.query_videos", return_value={})
     @patch("dashboard.partnerships.read_public_metrics", return_value={"views": 48300, "likes": 3449, "comments": 26, "saves": 547, "shares": 100})
-    def test_refresh_kol_metrics_keeps_last_public_snapshot(self, reader):
+    def test_refresh_kol_metrics_keeps_last_public_snapshot(self, reader, query_videos):
         item = KolPartnership.objects.create(
             campaign=self.campaign, kol_name="Kevin", platform="TIKTOK", budget=2000000,
             post_url="https://www.tiktok.com/@kevin/video/123", created_by=self.user,
@@ -455,3 +456,48 @@ class CampaignTests(TestCase):
         self.assertEqual(item.views, 48300)
         self.assertEqual(item.total_engagement, 4122)
         self.assertIsNotNone(item.metrics_updated_at)
+
+    @patch("dashboard.partnerships.tiktok.query_business_videos", return_value=({"123": {"favorites": 547}}, ""))
+    @patch("dashboard.partnerships.tiktok.query_videos", return_value={
+        "123": {"views": 48300, "likes": 3449, "comments": 26, "shares": 100},
+    })
+    def test_refresh_kol_metrics_prefers_connected_tiktok_api(self, query_videos, query_business):
+        item = KolPartnership.objects.create(
+            campaign=self.campaign, kol_name="Kevin", platform="TIKTOK", budget=2000000,
+            post_url="https://www.tiktok.com/@vobia.id/photo/123", created_by=self.user,
+        )
+        response = self.client.post(reverse("dashboard:partnership_detail", args=[item.id]), {"action": "refresh"})
+        self.assertRedirects(response, reverse("dashboard:partnership_detail", args=[item.id]))
+        item.refresh_from_db()
+        self.assertEqual(item.views, 48300)
+        self.assertEqual(item.saves, 547)
+        self.assertEqual(item.total_engagement, 4122)
+        query_videos.assert_called_once_with(["123"], force=True)
+        query_business.assert_called_once_with(["123"], force=True)
+
+    @patch("dashboard.partnerships.tiktok.query_videos", return_value={})
+    @patch(
+        "dashboard.partnerships.read_public_metrics",
+        side_effect=ValueError(
+            "Post TikTok KOL eksternal tidak dapat dibaca otomatis tanpa izin akun kreator. "
+            "Isi metrik TikTok Analytics KOL secara manual; data terakhir tetap tersimpan."
+        ),
+    )
+    def test_external_tiktok_failure_keeps_snapshot_and_opens_manual_form(self, reader, query_videos):
+        item = KolPartnership.objects.create(
+            campaign=self.campaign, kol_name="Riyan", platform="TIKTOK", budget=2000000,
+            post_url="https://www.tiktok.com/@riyan/photo/123", views=99, likes=10,
+            created_by=self.user,
+        )
+        self.client.post(reverse("dashboard:partnership_detail", args=[item.id]), {"action": "refresh"})
+        item.refresh_from_db()
+        self.assertEqual(item.views, 99)
+        self.assertEqual(item.likes, 10)
+        self.assertIn("tanpa izin akun kreator", item.metrics_error)
+        response = self.client.get(reverse("dashboard:partnership_detail", args=[item.id]))
+        self.assertContains(response, "Masukkan angka dari TikTok Analytics KOL")
+        self.assertContains(
+            response,
+            '<form id="kol-metric-form" method="post" class="stack-form kol-metric-form" data-dirty-submit>',
+            html=False,
+        )

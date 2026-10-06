@@ -9,6 +9,27 @@ from django.views.decorators.http import require_POST
 from .forms_partnership import KolMetricForm, KolPartnershipForm, KolPostUrlForm, KolProductFormSet
 from .kol_metrics import read_public_metrics
 from .models import Campaign, KolPartnership
+from . import tiktok
+
+
+def _read_partnership_metrics(item):
+    if item.platform == KolPartnership.Platform.TIKTOK:
+        video_id = tiktok.video_id_from_url(item.post_url)
+        if video_id:
+            try:
+                media = tiktok.query_videos([video_id], force=True).get(video_id)
+            except tiktok.TikTokConnectionError:
+                media = None
+            if media:
+                business, _error = tiktok.query_business_videos([video_id], force=True)
+                return {
+                    "views": media.get("views"),
+                    "likes": media.get("likes"),
+                    "comments": media.get("comments"),
+                    "saves": business.get(video_id, {}).get("favorites"),
+                    "shares": media.get("shares"),
+                }
+    return read_public_metrics(item.post_url, item.platform)
 
 
 @login_required
@@ -98,7 +119,7 @@ def partnership_detail(request, partnership_id):
             messages.error(request, "Isi Link Konten lebih dulu.")
         else:
             try:
-                values = read_public_metrics(item.post_url, item.platform)
+                values = _read_partnership_metrics(item)
                 for field, value in values.items():
                     if value is not None:
                         setattr(item, field, value)

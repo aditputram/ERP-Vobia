@@ -699,6 +699,12 @@ class MerchandisingWorkflowTests(TestCase):
         self.assertEqual(approved.approval_status, IncomingPlan.ApprovalStatus.APPROVED)
 
     def test_scenario_draft_allows_moq_adjustment_then_approves_everything_atomically(self):
+        post_opening(
+            sku=self.sku,
+            quantity=30,
+            unit_cost=100000,
+            actor=self.user,
+        )
         projection = self._projection()
         projection.beginning_qty = Decimal("30")
         projection.save(update_fields=["beginning_qty"])
@@ -729,6 +735,12 @@ class MerchandisingWorkflowTests(TestCase):
         self.assertEqual(requirement.approved_qty, Decimal("130"))
 
     def test_scenario_draft_allows_incoming_below_ratio_recommendation(self):
+        post_opening(
+            sku=self.sku,
+            quantity=30,
+            unit_cost=100000,
+            actor=self.user,
+        )
         projection = self._projection()
         projection.beginning_qty = Decimal("30")
         projection.save(update_fields=["beginning_qty"])
@@ -2560,6 +2572,12 @@ class MerchandisingReportViewTests(TestCase):
         )
         self.product.status.name = "Discontinue"
         self.product.status.save(update_fields=["name"])
+        post_opening(
+            sku=self.sku,
+            quantity=200,
+            unit_cost=100000,
+            actor=self.user,
+        )
         projection = SalesProjection.objects.create(
             scenario=scenario,
             month=date(2026, 9, 1),
@@ -2634,6 +2652,36 @@ class MerchandisingReportViewTests(TestCase):
             "Sales Projection melampaui stock",
         ):
             approve_scenario(scenario.id, self.user)
+
+    def test_approval_refreshes_dynamic_beginning_before_no_incoming_guard(self):
+        post_opening(
+            sku=self.sku,
+            quantity=100,
+            unit_cost=100000,
+            actor=self.user,
+        )
+        self.product.status.name = "Discontinue"
+        self.product.status.save(update_fields=["name"])
+        scenario = ProjectionScenario.objects.create(
+            name="Dynamic Beginning Approval",
+            start_month=date(2026, 9, 1),
+            end_month=date(2026, 9, 1),
+            created_by=self.user,
+        )
+        projection = SalesProjection.objects.create(
+            scenario=scenario,
+            month=date(2026, 9, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("0"),
+            system_recommendation=Decimal("100"),
+        )
+
+        approve_scenario(scenario.id, self.user)
+
+        projection.refresh_from_db()
+        scenario.refresh_from_db()
+        self.assertEqual(projection.beginning_qty, Decimal("100"))
+        self.assertEqual(scenario.status, ProjectionScenario.Status.APPROVED)
 
     def test_scenario_library_edit_button_starts_disabled_until_a_field_changes(self):
         current_month = timezone.localdate().replace(day=1)

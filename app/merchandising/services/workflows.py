@@ -266,6 +266,13 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
         plan.sales_projection_id: plan
         for plan in IncomingPlan.objects.select_for_update().filter(scenario=scenario)
     }
+    refresh_scenario_stock_chain(
+        projections,
+        plans_by_projection.values(),
+        today=timezone.localdate(),
+    )
+    SalesProjection.objects.bulk_update(projections, ["beginning_qty"])
+    IncomingPlan.objects.bulk_update(plans_by_projection.values(), ["prior_ending_qty"])
     sales_total = Decimal("0")
     incoming_total = Decimal("0")
     for projection in projections:

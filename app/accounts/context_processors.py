@@ -6,6 +6,21 @@ from finance.catalog import FINANCE_NAV_SECTIONS, ROUTES as FINANCE_ROUTES
 from .access import MODULE_TABS, can_access_tab
 
 
+def current_business_module(request):
+    namespace = getattr(getattr(request, "resolver_match", None), "namespace", "")
+    if namespace == "rnd":
+        return "rnd"
+    if namespace == "finance":
+        return "finance"
+    if request.path.startswith("/marketing/"):
+        return "marketing"
+    if namespace in {"merchandising", "purchasing", "production", "inventory"}:
+        return "operation"
+    if namespace in {"sales", "traffic"} or request.path.startswith("/imports/sales/"):
+        return "sales"
+    return request.session.get("active_module", "sales")
+
+
 def tab_permissions(request):
     if not getattr(request.user, "is_authenticated", False):
         return {}
@@ -16,19 +31,7 @@ def tab_permissions(request):
         }
         for module, tabs in MODULE_TABS.items()
     }
-    namespace = getattr(getattr(request, "resolver_match", None), "namespace", "")
-    if namespace == "rnd":
-        current_module = "rnd"
-    elif namespace == "finance":
-        current_module = "finance"
-    elif request.path.startswith("/marketing/"):
-        current_module = "marketing"
-    elif namespace in {"merchandising", "purchasing", "production", "inventory"}:
-        current_module = "operation"
-    elif namespace in {"sales", "traffic"} or request.path.startswith("/imports/sales/"):
-        current_module = "sales"
-    else:
-        current_module = request.session.get("active_module", "sales")
+    current_module = current_business_module(request)
     current_url_name = getattr(getattr(request, "resolver_match", None), "url_name", "")
     current_slug = (getattr(getattr(request, "resolver_match", None), "kwargs", {}) or {}).get("slug")
     finance_nav_sections = []

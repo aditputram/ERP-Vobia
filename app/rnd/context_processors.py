@@ -1,10 +1,40 @@
 from urllib.parse import urlsplit
 
+from accounts.access import allowed_tab_keys, module_level
+from accounts.context_processors import current_business_module
 from django.urls import Resolver404, resolve, reverse
 
 from .models import Collection, DesignAsset, DevelopmentProduct, RndNotification
-from .notifications import notification_category, notification_module
+from .notifications import notification_category
 from .services import can_approve_module
+
+
+NOTIFICATION_MODULES = (
+    (RndNotification.Module.SALES, "Sales"),
+    (RndNotification.Module.OPERATION, "Operation"),
+    (RndNotification.Module.RND, "R&D"),
+    (RndNotification.Module.MARKETING, "Marketing"),
+    (RndNotification.Module.FINANCE, "Finance"),
+    (RndNotification.Module.HRGA, "HRGA"),
+)
+
+
+def available_notification_modules(user):
+    explicit_access = getattr(user, "module_access", {}) or {}
+    return [
+        {"key": key, "label": label}
+        for key, label in NOTIFICATION_MODULES
+        if user.is_superuser
+        or (
+            key == RndNotification.Module.HRGA
+            and explicit_access.get("hrga", "none") != "none"
+        )
+        or (
+            key != RndNotification.Module.HRGA
+            and module_level(user, key) != "none"
+            and bool(allowed_tab_keys(user, key))
+        )
+    ]
 
 
 def _product_thumbnail(product):
@@ -87,13 +117,16 @@ def _approval_items(user):
 
 def rnd_notifications(request):
     user = getattr(request, "user", None)
+    module_options = available_notification_modules(user) if getattr(user, "is_authenticated", False) else []
     if (
         not getattr(user, "is_authenticated", False)
         or not getattr(user, "pk", None)
         or request.GET.get("embed") == "1"
+        or not module_options
     ):
         return {
             "show_rnd_notifications": False,
+            "notification_modules": (),
             "rnd_notification_items": (),
             "rnd_notification_unread_count": 0,
             "rnd_notification_badge": "",
@@ -101,19 +134,29 @@ def rnd_notifications(request):
             "rnd_approval_count": 0,
         }
 
-    notification_query = RndNotification.objects.filter(recipient=user).select_related("actor")
+    module_keys = [row["key"] for row in module_options]
+    active_module = current_business_module(request)
+    if active_module not in module_keys:
+        active_module = module_keys[0]
+    for row in module_options:
+        row["active"] = row["key"] == active_module
+
+    notification_query = RndNotification.objects.filter(
+        recipient=user,
+        module__in=module_keys,
+    ).select_related("actor")
     unread_count = notification_query.filter(read_at__isnull=True).count()
     notifications = list(notification_query[:30])
     for notification in notifications:
         notification.category = notification_category(notification)
-        notification.module = notification_module(notification)
     _attach_notification_thumbnails(notifications)
-    approval_items = _approval_items(user)
+    approval_items = _approval_items(user) if RndNotification.Module.RND in module_keys else []
     approval_count = len(approval_items) + sum(
         notification.category == "approval" for notification in notifications
     )
     return {
         "show_rnd_notifications": True,
+        "notification_modules": module_options,
         "rnd_notification_items": notifications,
         "rnd_notification_unread_count": unread_count,
         "rnd_notification_badge": "99+" if unread_count > 99 else str(unread_count),

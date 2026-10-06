@@ -84,6 +84,7 @@
             const item = document.createElement('a');
             item.className = `rnd-notification-item${notification.unread ? ' is-unread' : ''}${notification.category === 'approval' ? ' rnd-approval-item' : ''}`;
             item.href = notification.open_url;
+            item.dataset.notificationModule = notification.module;
             item.dataset.notificationCategory = notification.category;
             const dot = document.createElement('span');
             dot.className = 'rnd-notification-dot';
@@ -108,7 +109,7 @@
             }
             list.append(item);
         };
-        data.rnd_approvals.forEach(approval => appendNotification({...approval, category: 'approval'}));
+        data.rnd_approvals.forEach(approval => appendNotification({...approval, category: 'approval', module: 'rnd'}));
         data.rnd_notifications.forEach(appendNotification);
         const empty = document.createElement('div');
         empty.className = 'rnd-notification-empty';

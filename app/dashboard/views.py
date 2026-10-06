@@ -11,7 +11,7 @@ from audit.services import record_audit
 from accounts.access import first_allowed_route, module_level
 from chat.context_processors import unread_chat
 from chat.models import ChatMessage, ChatThread, accessible_threads
-from rnd.context_processors import rnd_notifications
+from rnd.context_processors import available_notification_modules, rnd_notifications
 from rnd.models import RndNotification
 
 
@@ -87,7 +87,13 @@ MODULES = (
 
 @login_required
 def notification_open(request, notification_id):
-    notification = get_object_or_404(RndNotification, id=notification_id, recipient=request.user)
+    module_keys = [row["key"] for row in available_notification_modules(request.user)]
+    notification = get_object_or_404(
+        RndNotification,
+        id=notification_id,
+        recipient=request.user,
+        module__in=module_keys,
+    )
     if notification.read_at is None:
         notification.read_at = timezone.now()
         notification.save(update_fields=("read_at", "updated_at"))
@@ -100,7 +106,12 @@ def notification_open(request, notification_id):
 @login_required
 @require_POST
 def notifications_mark_all_read(request):
-    RndNotification.objects.filter(recipient=request.user, read_at__isnull=True).update(read_at=timezone.now())
+    module_keys = [row["key"] for row in available_notification_modules(request.user)]
+    RndNotification.objects.filter(
+        recipient=request.user,
+        module__in=module_keys,
+        read_at__isnull=True,
+    ).update(read_at=timezone.now())
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         return HttpResponse(status=204)
     return redirect("dashboard:index")
@@ -156,6 +167,7 @@ def live_status(request):
             "message": item["message"],
             "created_at": timezone.localtime(item["created_at"]).strftime("%d %b %Y · %H:%M"),
             "thumbnail_url": item["thumbnail_url"],
+            "module": RndNotification.Module.RND,
         }
         for item in notification_context["rnd_approval_items"]
     ]

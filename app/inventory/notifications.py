@@ -67,6 +67,7 @@ def sync_fifo_short_notification(exception, *, actor=None):
             source_key=source_key,
             defaults={
                 "actor": actor,
+                "module": RndNotification.Module.OPERATION,
                 "title": "Stok warehouse belum tercatat",
                 "message": message,
                 "target_url": _target_url(user, exception),

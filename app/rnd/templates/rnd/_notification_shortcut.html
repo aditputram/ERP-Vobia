@@ -7,6 +7,11 @@
         <div><span>VOBIA SPACE</span><strong>Notifikasi</strong></div>
         <button type="button" aria-label="Tutup notifikasi" data-rnd-notification-close>×</button>
     </header>
+    <nav class="rnd-notification-tabs rnd-notification-module-tabs" aria-label="Modul notifikasi">
+        {% for module in notification_modules %}
+        <button class="{% if module.active %}is-active{% endif %}" type="button" aria-selected="{% if module.active %}true{% else %}false{% endif %}" data-rnd-notification-module="{{ module.key }}">{{ module.label }}</button>
+        {% endfor %}
+    </nav>
     <nav class="rnd-notification-tabs" aria-label="Kategori notifikasi">
         <button class="is-active" type="button" aria-selected="true" data-rnd-notification-tab="all">All</button>
         <button type="button" aria-selected="false" data-rnd-notification-tab="new">New</button>
@@ -24,14 +29,14 @@
     </div>
     <div class="rnd-notification-list" data-rnd-notification-list>
         {% for item in rnd_approval_items %}
-        <a class="rnd-notification-item rnd-approval-item" href="{{ item.target_url }}" data-notification-category="approval">
+        <a class="rnd-notification-item rnd-approval-item" href="{{ item.target_url }}" data-notification-module="rnd" data-notification-category="approval">
             <span class="rnd-notification-dot" aria-hidden="true"></span>
             <span><strong>{{ item.title }}</strong><span>{{ item.message }}</span><time>{{ item.created_at|date:"d M Y · H:i" }}</time></span>
             {% if item.thumbnail_url %}<img class="rnd-notification-thumbnail" src="{{ item.thumbnail_url }}" alt="" loading="lazy" decoding="async">{% endif %}
         </a>
         {% endfor %}
         {% for notification in rnd_notification_items %}
-        <a class="rnd-notification-item{% if not notification.read_at %} is-unread{% endif %}{% if notification.category == 'approval' %} rnd-approval-item{% endif %}" href="{% url 'dashboard:notification_open' notification.id %}" data-notification-category="{{ notification.category }}">
+        <a class="rnd-notification-item{% if not notification.read_at %} is-unread{% endif %}{% if notification.category == 'approval' %} rnd-approval-item{% endif %}" href="{% url 'dashboard:notification_open' notification.id %}" data-notification-module="{{ notification.module }}" data-notification-category="{{ notification.category }}">
             <span class="rnd-notification-dot" aria-hidden="true"></span>
             <span>
                 <strong>{{ notification.title }}</strong>
@@ -58,25 +63,37 @@
         comment: ['Belum ada komentar', 'Komentar Design Library akan muncul di sini.'],
         approval: ['Belum ada aktivitas approval', 'Permintaan dan hasil keputusan approval akan muncul di sini.'],
     };
-    const showCategory = category => {
+    const showNotifications = () => {
+        const module = popup.querySelector('[data-rnd-notification-module].is-active')?.dataset.rndNotificationModule;
+        const category = popup.querySelector('[data-rnd-notification-tab].is-active')?.dataset.rndNotificationTab || 'all';
         const empty = popup.querySelector('[data-rnd-notification-empty]');
         let visible = 0;
         popup.querySelectorAll('[data-notification-category]').forEach(item => {
-            item.hidden = category !== 'all' && item.dataset.notificationCategory !== category;
+            item.hidden = item.dataset.notificationModule !== module || (category !== 'all' && item.dataset.notificationCategory !== category);
             if (!item.hidden) visible++;
         });
         empty.hidden = Boolean(visible);
         [empty.querySelector('strong').textContent, empty.querySelector('span').textContent] = emptyCopy[category];
+        popup.querySelector('[data-rnd-approval-count]').textContent = popup.querySelectorAll(`[data-notification-module="${module}"][data-notification-category="approval"]`).length;
     };
+    popup.querySelectorAll('[data-rnd-notification-module]').forEach(tab => tab.addEventListener('click', () => {
+        popup.querySelectorAll('[data-rnd-notification-module]').forEach(item => {
+            const active = item === tab;
+            item.classList.toggle('is-active', active);
+            item.setAttribute('aria-selected', active);
+        });
+        showNotifications();
+    }));
     popup.querySelectorAll('[data-rnd-notification-tab]').forEach(tab => tab.addEventListener('click', () => {
         popup.querySelectorAll('[data-rnd-notification-tab]').forEach(item => {
             const active = item === tab;
             item.classList.toggle('is-active', active);
             item.setAttribute('aria-selected', active);
         });
-        showCategory(tab.dataset.rndNotificationTab);
+        showNotifications();
     }));
-    popup.addEventListener('rnd-notifications-updated', () => showCategory(popup.querySelector('[data-rnd-notification-tab].is-active').dataset.rndNotificationTab));
+    popup.addEventListener('rnd-notifications-updated', showNotifications);
+    showNotifications();
     const form = popup.querySelector('[data-rnd-mark-all]');
     form.addEventListener('submit', async event => {
         event.preventDefault();

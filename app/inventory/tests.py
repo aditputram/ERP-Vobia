@@ -771,6 +771,15 @@ class InventoryWorkflowTests(TestCase):
 
     @patch("inventory.notifications.send_web_push")
     def test_fifo_short_notifies_warehouse_once_and_opens_from_space_notifications(self, send_push_mock):
+        self.user.module_access = {
+            "sales": "none",
+            "operation": "approve",
+            "rnd": "none",
+            "marketing": "none",
+            "finance": "none",
+        }
+        self.user.tab_access = {"operation": ["inventory_summary"]}
+        self.user.save(update_fields=("module_access", "tab_access"))
         no_operation_user = User.objects.create_user(
             username="finance-only",
             password="test-password",
@@ -798,6 +807,14 @@ class InventoryWorkflowTests(TestCase):
         self.assertFalse(RndNotification.objects.filter(recipient=no_operation_user).exists())
         send_push_mock.assert_called_once()
         self.assertEqual(send_push_mock.call_args.kwargs["title"], "Stok Warehouse perlu diaudit")
+        RndNotification.objects.create(
+            recipient=self.user,
+            source_key="hidden-rnd-notification",
+            module=RndNotification.Module.RND,
+            title="Notifikasi R&D tersembunyi",
+            message="User ini tidak mempunyai akses modul R&D.",
+            target_url=reverse("rnd:dashboard"),
+        )
 
         rebuild_fifo_for_sku(sku=self.sku, actor=self.user, reason="Verifikasi replay idempotent.")
         self.assertEqual(
@@ -812,7 +829,13 @@ class InventoryWorkflowTests(TestCase):
         page = self.client.get(reverse("inventory:overview"))
         self.assertContains(page, "VOBIA SPACE")
         self.assertContains(page, notification.title)
+        self.assertContains(page, 'data-rnd-notification-module="operation"')
+        self.assertNotContains(page, 'data-rnd-notification-module="sales"')
+        self.assertNotContains(page, 'data-rnd-notification-module="rnd"')
+        self.assertContains(page, 'data-notification-module="operation"')
+        self.assertNotContains(page, "Notifikasi R&amp;D tersembunyi")
         live_status = self.client.get(reverse("dashboard:live_status")).json()
+        self.assertEqual(live_status["rnd_unread_count"], 1)
         self.assertEqual(live_status["rnd_notifications"][0]["module"], "operation")
         self.assertEqual(
             live_status["rnd_notifications"][0]["open_url"],

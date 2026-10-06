@@ -52,10 +52,6 @@ def notification_category(notification):
     return CATEGORY_BY_TITLE.get(notification.title, "new")
 
 
-def notification_module(notification):
-    return "operation" if notification.source_key.startswith("inventory-exception:") else "rnd"
-
-
 def _actor_name(actor):
     return (actor.get_full_name() or actor.username).strip()
 

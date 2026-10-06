@@ -374,6 +374,8 @@ class RndWorkflowTests(TestCase):
         self.client.force_login(self.admin)
         approval_page = self.client.get(reverse("rnd:dashboard"))
         self.assertContains(approval_page, 'data-rnd-notification-tab="approval"')
+        for module in ("sales", "operation", "rnd", "marketing", "finance", "hrga"):
+            self.assertContains(approval_page, f'data-rnd-notification-module="{module}"')
         self.assertContains(approval_page, "Approve dokumen")
         self.assertContains(approval_page, product.name)
         approval_status = self.client.get(reverse("dashboard:live_status")).json()

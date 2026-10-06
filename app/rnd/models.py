@@ -110,6 +110,14 @@ class DesignAssetComment(UUIDTimestampedModel):
 
 
 class RndNotification(UUIDTimestampedModel):
+    class Module(models.TextChoices):
+        SALES = "sales", "Sales"
+        OPERATION = "operation", "Operation"
+        RND = "rnd", "R&D"
+        MARKETING = "marketing", "Marketing"
+        FINANCE = "finance", "Finance"
+        HRGA = "hrga", "HRGA"
+
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -123,6 +131,7 @@ class RndNotification(UUIDTimestampedModel):
         related_name="rnd_notifications_created",
     )
     source_key = models.CharField(max_length=140)
+    module = models.CharField(max_length=20, choices=Module.choices, default=Module.RND, db_index=True)
     title = models.CharField(max_length=180)
     message = models.CharField(max_length=360)
     target_url = models.CharField(max_length=500)

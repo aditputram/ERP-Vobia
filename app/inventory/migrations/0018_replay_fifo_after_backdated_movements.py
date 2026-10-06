@@ -1,4 +1,4 @@
-from django.db import migrations
+from django.db import migrations, transaction
 
 
 REPLAY_REASON = (
@@ -25,16 +25,55 @@ def replay_fifo(apps, schema_editor):
     from inventory.services.fifo import rebuild_fifo_for_sku
     from master_data.models import SKU
 
-    for sku in SKU.objects.filter(pk__in=sku_ids).order_by("sku"):
-        rebuild_fifo_for_sku(
-            sku=sku,
+    skus = list(SKU.objects.filter(pk__in=sku_ids).order_by("sku"))
+    blocked = []
+    for sku in skus:
+        try:
+            with transaction.atomic():
+                rebuild_fifo_for_sku(
+                    sku=sku,
+                    actor=None,
+                    reason=f"Preflight rollback: {REPLAY_REASON}",
+                )
+                transaction.set_rollback(True)
+        except Exception as exc:
+            blocked.append(
+                {
+                    "sku": sku.sku,
+                    "exception": type(exc).__name__,
+                    "message": str(exc),
+                }
+            )
+
+    if blocked:
+        AuditEvent = apps.get_model("audit", "AuditEvent")
+        AuditEvent.objects.create(
             actor=None,
-            reason=REPLAY_REASON,
+            action="fifo_backdate_backfill_blocked",
+            entity_type="inventory.inventorymovement",
+            entity_id="all-skus",
+            reason="Preflight FIFO menemukan data legacy yang wajib diperbaiki sebelum replay.",
+            after_values={"blocked_count": len(blocked), "blocked": blocked},
         )
+        raise RuntimeError(
+            "FIFO backfill diblokir oleh data legacy: "
+            + "; ".join(
+                f"{row['sku']} ({row['exception']}: {row['message']})"
+                for row in blocked[:5]
+            )
+        )
+
+    with transaction.atomic():
+        for sku in skus:
+            rebuild_fifo_for_sku(
+                sku=sku,
+                actor=None,
+                reason=REPLAY_REASON,
+            )
 
 
 class Migration(migrations.Migration):
-    atomic = True
+    atomic = False
 
     dependencies = [
         ("accounts", "0004_user_tab_access"),

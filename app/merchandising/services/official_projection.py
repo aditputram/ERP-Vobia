@@ -1,14 +1,15 @@
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from dashboard.models import CampaignProduct
-from django.db.models import DecimalField, ExpressionWrapper, F, Max, Min, Sum
+from django.db.models import DecimalField, ExpressionWrapper, F, Max, Min, Q, Sum
 from django.utils import timezone
 
 from sales.models import SalesOrderLine
 from inventory.models import FIFOOpeningSnapshot, InventoryMovement, PhysicalReturnReceipt
-from master_data.models import SKU
+from inventory.services.reporting import inventory_summary_rows
+from master_data.models import SKU, Warehouse
 
 from merchandising.models import MerchandisingMonthlySnapshot
 
@@ -232,6 +233,44 @@ def official_current_month_values(batch, sku_ids, state):
             month=date(year, month_number, 1),
         )
     }
+    month_start = date(year, month_number, 1)
+    prior_month_end = month_start - timedelta(days=1)
+    main_warehouse = Warehouse.objects.filter(code="MAIN", is_active=True).first()
+    live_movements = InventoryMovement.objects.filter(
+        sku_id__in=sku_ids,
+        movement_date__lte=state["run_date"],
+    ).exclude(
+        movement_type=InventoryMovement.MovementType.OPENING,
+    ).exclude(
+        sales_line__order__affects_inventory=False,
+    )
+    if main_warehouse:
+        live_movements = live_movements.filter(
+            Q(warehouse=main_warehouse) | Q(warehouse__isnull=True)
+        )
+    ledger_sku_ids = set(
+        FIFOOpeningSnapshot.objects.filter(
+            sku_id__in=sku_ids,
+            cutover_date__lte=state["run_date"],
+        ).values_list("sku_id", flat=True)
+    ) | set(live_movements.values_list("sku_id", flat=True))
+    live_prior_ending = {
+        row["sku"].id: row["balance"]
+        for row in inventory_summary_rows(
+            skus,
+            as_of_date=prior_month_end,
+            warehouse=main_warehouse,
+        )
+    }
+    live_incoming = {
+        row["sku_id"]: row["qty"] or ZERO
+        for row in live_movements.filter(
+            direction=InventoryMovement.Direction.IN,
+            movement_date__gte=month_start,
+        )
+        .values("sku_id")
+        .annotate(qty=Sum("quantity"))
+    }
     if month_number == 1:
         prior_ending = {
             sku_id: snapshot.prior_year_ending_qty
@@ -246,6 +285,12 @@ def official_current_month_values(batch, sku_ids, state):
                 month=date(year, month_number - 1, 1),
             )
         }
+    prior_ending.update(
+        {
+            sku_id: live_prior_ending.get(sku_id, ZERO)
+            for sku_id in ledger_sku_ids
+        }
+    )
 
     actual_lines = SalesOrderLine.objects.filter(
         is_counted=True,
@@ -277,33 +322,46 @@ def official_current_month_values(batch, sku_ids, state):
     returns = received_return_values(sku_ids, year, through_date=state["run_date"])
 
     values = {}
-    for sku_id, snapshot in current_snapshots.items():
+    for sku_id, sku in sku_by_id.items():
+        snapshot = current_snapshots.get(sku_id)
         actual = actuals.get(sku_id, {})
         selling_context = selling_contexts.get(sku_id, {})
+        incoming_qty = (
+            live_incoming.get(sku_id, ZERO)
+            if sku_id in ledger_sku_ids
+            else snapshot.incoming_qty if snapshot else ZERO
+        )
         values[sku_id] = current_month_metric_values(
             prior_ending_qty=prior_ending.get(sku_id, ZERO),
-            incoming_qty=snapshot.incoming_qty,
+            incoming_qty=incoming_qty,
             actual_qty=actual.get("actual_qty", ZERO),
             actual_gross=actual.get("actual_gross"),
             actual_net=actual.get("actual_net", ZERO),
             actual_return=returns.get((sku_id, month_number), ZERO),
             actual_cogs=actual.get("actual_cogs"),
             cutoff_date=state["cutoff_date"],
-            cogs=snapshot.cogs_snapshot,
-            retail_price=snapshot.retail_price_snapshot,
+            cogs=(
+                sku.current_master_cogs
+                if sku.current_master_cogs is not None
+                else snapshot.cogs_snapshot if snapshot else ZERO
+            ),
+            retail_price=(
+                sku.current_retail_price
+                if sku.current_retail_price is not None
+                else snapshot.retail_price_snapshot if snapshot else ZERO
+            ),
             run_date=state["run_date"],
             selling_days=selling_context.get("selling_days"),
         )
-        sku = sku_by_id.get(sku_id)
-        product = sku.product_variant.product if sku else None
+        product = sku.product_variant.product
         values[sku_id].update(
             {
                 **selling_context,
-                "sku": sku.sku if sku else "",
-                "product_id": product.id if product else None,
-                "product_name": product.name if product else snapshot.product_snapshot,
-                "article": product.article if product else "",
-                "product_status": product.status.name if product else snapshot.status_snapshot,
+                "sku": sku.sku,
+                "product_id": product.id,
+                "product_name": product.name,
+                "article": product.article,
+                "product_status": product.status.name,
             }
         )
     return values

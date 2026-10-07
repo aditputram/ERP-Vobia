@@ -52,6 +52,7 @@ from .services.builder import (
     aggregate_preview_by_parent,
     build_draft_matrix,
     historical_sales_qty_for_skus,
+    official_values_for_skus,
     recommendation_for,
     refresh_scenario_stock_chain,
     summarize_preview,
@@ -1208,6 +1209,89 @@ class MerchandisingReportViewTests(TestCase):
             values["sales_net"],
             values["sales_gross"] - values["sales_discount"] - values["sales_return"],
         )
+
+    def test_official_current_month_values_include_new_sku_and_follow_live_ledger(self):
+        product = Product.objects.create(
+            code="NEW-DYNAMIC-PRODUCT",
+            parent_sku="NEW-DYNAMIC-PARENT",
+            name="New Dynamic Product",
+            status=self.product.status,
+            category=self.product.category,
+        )
+        variant = ProductVariant.objects.create(product=product, name="Black", color="Black")
+        sku = SKU.objects.create(
+            sku="NEW-DYNAMIC-SKU",
+            product_variant=variant,
+            current_retail_price=Decimal("200000"),
+            current_master_cogs=Decimal("100000"),
+        )
+        warehouse = Warehouse.objects.get(code="MAIN")
+        state = {
+            "year": 2026,
+            "current_month_number": 8,
+            "cutoff_date": date(2026, 8, 10),
+            "run_date": date(2026, 8, 20),
+        }
+
+        def add_incoming(key, quantity):
+            InventoryMovement.objects.create(
+                movement_key=key,
+                movement_date=date(2026, 8, 1),
+                movement_type=InventoryMovement.MovementType.INCOMING,
+                direction=InventoryMovement.Direction.IN,
+                sku=sku,
+                warehouse=warehouse,
+                quantity=quantity,
+                source_reference=key,
+                posted_by=self.user,
+            )
+
+        add_incoming("NEW-DYNAMIC-IN-1", 12)
+        first = official_current_month_values(self.batch, [sku.id], state)[sku.id]
+        self.assertEqual(first["beginning_qty"], Decimal("12"))
+
+        add_incoming("NEW-DYNAMIC-IN-2", 3)
+        refreshed = official_current_month_values(self.batch, [sku.id], state)[sku.id]
+        self.assertEqual(refreshed["beginning_qty"], Decimal("15"))
+        self.assertEqual(
+            official_values_for_skus([sku], date(2026, 8, 20))[sku.id]["beginning_qty"],
+            Decimal("15"),
+        )
+        recommendation = recommendation_for(
+            sku=sku,
+            target_month=date(2026, 9, 1),
+            method=ProjectionRule.Method.INCREASE_PERCENT,
+            parameter=Decimal("10"),
+            today=date(2026, 8, 20),
+        )
+        self.assertEqual(recommendation["beginning_qty"], Decimal("15"))
+
+    def test_live_ledger_overrides_imported_current_snapshot(self):
+        warehouse = Warehouse.objects.get(code="MAIN")
+        InventoryMovement.objects.create(
+            movement_key="REPORT-LIVE-INCOMING",
+            movement_date=date(2026, 8, 1),
+            movement_type=InventoryMovement.MovementType.INCOMING,
+            direction=InventoryMovement.Direction.IN,
+            sku=self.sku,
+            warehouse=warehouse,
+            quantity=12,
+            source_reference="REPORT-LIVE-INCOMING",
+            posted_by=self.user,
+        )
+
+        values = official_current_month_values(
+            self.batch,
+            [self.sku.id],
+            {
+                "year": 2026,
+                "current_month_number": 8,
+                "cutoff_date": date(2026, 8, 10),
+                "run_date": date(2026, 8, 20),
+            },
+        )[self.sku.id]
+
+        self.assertEqual(values["beginning_qty"], Decimal("12"))
 
     def test_planning_history_uses_canonical_sales_instead_of_snapshot_or_saved_baseline(self):
         for month, quantity, status in (

@@ -2683,6 +2683,80 @@ class MerchandisingReportViewTests(TestCase):
         self.assertEqual(projection.beginning_qty, Decimal("100"))
         self.assertEqual(scenario.status, ProjectionScenario.Status.APPROVED)
 
+    @patch(
+        "merchandising.services.workflows.timezone.localdate",
+        return_value=date(2026, 10, 7),
+    )
+    def test_approval_validates_edited_future_chain_before_approving(self, _localdate):
+        post_opening(
+            sku=self.sku,
+            quantity=10,
+            unit_cost=100000,
+            actor=self.user,
+        )
+        self.product.status.name = "Discontinue"
+        self.product.status.save(update_fields=["name"])
+        scenario = ProjectionScenario.objects.create(
+            name="Edited Future Chain",
+            start_month=date(2026, 11, 1),
+            end_month=date(2026, 12, 1),
+            created_by=self.user,
+        )
+        november = SalesProjection.objects.create(
+            scenario=scenario,
+            month=date(2026, 11, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("10"),
+            system_recommendation=Decimal("2"),
+        )
+        december = SalesProjection.objects.create(
+            scenario=scenario,
+            month=date(2026, 12, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("8"),
+            system_recommendation=Decimal("6"),
+        )
+
+        with patch(
+            "merchandising.services.builder.official_values_for_skus",
+            return_value={self.sku.id: {"ending_qty": Decimal("10")}},
+        ):
+            with self.assertRaisesMessage(ValidationError, "Dec 2026"):
+                approve_scenario(
+                    scenario.id,
+                    self.user,
+                    sales_values={
+                        str(november.id): "5",
+                        str(december.id): "6",
+                    },
+                )
+
+        scenario.refresh_from_db()
+        self.assertEqual(scenario.status, ProjectionScenario.Status.DRAFT)
+
+    @patch("merchandising.views.timezone.localdate", return_value=date(2026, 10, 7))
+    def test_draft_page_exposes_backend_current_month_to_stock_chain(self, _localdate):
+        scenario = ProjectionScenario.objects.create(
+            name="Browser Stock Chain",
+            start_month=date(2026, 10, 1),
+            end_month=date(2026, 10, 1),
+            created_by=self.user,
+        )
+        SalesProjection.objects.create(
+            scenario=scenario,
+            month=date(2026, 10, 1),
+            sku=self.sku,
+            beginning_qty=Decimal("10"),
+            system_recommendation=Decimal("1"),
+        )
+
+        response = self.client.get(
+            "/merchandising/planning-builder/",
+            {"view_draft": scenario.id},
+        )
+
+        self.assertContains(response, 'data-draft-current-month="2026-10"')
+
     def test_scenario_library_edit_button_starts_disabled_until_a_field_changes(self):
         current_month = timezone.localdate().replace(day=1)
         ProjectionScenario.objects.create(

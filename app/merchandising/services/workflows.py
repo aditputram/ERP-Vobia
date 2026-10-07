@@ -238,24 +238,30 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
     if not scenario.quantities_editable:
         raise ValidationError("Hanya Scenario Draft atau Revision Draft yang dapat diedit.")
     locked_ids = po_locked_projection_ids(scenario)
-    projections = list(
+    all_projections = list(
         SalesProjection.objects.select_for_update().filter(scenario=scenario).select_related(
+            "scenario",
             "sku__product_variant__product__status",
             "sku__product_variant__product__category",
         )
     )
-    if not projections:
+    if not all_projections:
         raise ValidationError("Scenario belum memiliki Draft Projection.")
     targeted_projection_ids = set(sales_values) | set(incoming_values)
     locked_targets = targeted_projection_ids & {str(item) for item in locked_ids}
     if locked_targets:
         labels = ", ".join(
             f"{item.sku.sku} {item.month:%b %Y}"
-            for item in projections
+            for item in all_projections
             if str(item.id) in locked_targets
         )
         raise ValidationError(f"Tidak dapat mengubah {labels}: sudah dialokasikan ke PO.")
-    projections = [projection for projection in projections if projection.id not in locked_ids]
+    unlocked_projection_ids = {
+        projection.id for projection in all_projections if projection.id not in locked_ids
+    }
+    projections = [
+        projection for projection in all_projections if projection.id in unlocked_projection_ids
+    ]
     if targeted_projection_ids:
         projections = [
             projection
@@ -266,15 +272,8 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
         plan.sales_projection_id: plan
         for plan in IncomingPlan.objects.select_for_update().filter(scenario=scenario)
     }
-    refresh_scenario_stock_chain(
-        projections,
-        plans_by_projection.values(),
-        today=timezone.localdate(),
-    )
-    SalesProjection.objects.bulk_update(projections, ["beginning_qty"])
-    IncomingPlan.objects.bulk_update(plans_by_projection.values(), ["prior_ending_qty"])
+    planning_today = timezone.localdate()
     sales_total = Decimal("0")
-    incoming_total = Decimal("0")
     for projection in projections:
         projection_key = str(projection.id)
         final_sales = _whole_nonnegative(
@@ -292,6 +291,17 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
         ])
         sales_total += final_sales
 
+    refresh_scenario_stock_chain(
+        all_projections,
+        plans_by_projection.values(),
+        today=planning_today,
+    )
+
+    incoming_total = Decimal("0")
+    for projection in projections:
+        projection_key = str(projection.id)
+        final_sales = projection.proposed_qty
+
         prior_ending = projection.beginning_qty or Decimal("0")
         existing_plan = plans_by_projection.get(projection.id)
         target_ratio = existing_plan.target_stock_ratio if existing_plan else None
@@ -301,11 +311,6 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
             product.status.name in NO_INCOMING_STATUSES
             or product.category.name in NO_INCOMING_CATEGORIES
         )
-        available_stock = max(prior_ending, Decimal("0"))
-        if no_incoming and final_sales > available_stock:
-            raise ValidationError(
-                f"{projection.sku.sku}: Sales Projection melampaui stock untuk Product yang tidak boleh Incoming."
-            )
         buffer_recommendation = planning_buffer_incoming(
             final_sales,
             prior_ending,
@@ -346,27 +351,72 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
             },
         )
         plan.full_clean()
+        plans_by_projection[projection.id] = plan
         incoming_total += chosen_incoming
 
-    chain_projections = list(
-        SalesProjection.objects.select_for_update()
-        .filter(scenario=scenario)
-        .select_related(
-            "scenario",
-            "sku__product_variant__product__status",
-            "sku__product_variant__product__category",
-        )
-    )
-    chain_plans = list(
-        IncomingPlan.objects.select_for_update().filter(scenario=scenario)
-    )
     refresh_scenario_stock_chain(
-        chain_projections,
-        chain_plans,
-        today=timezone.localdate(),
+        all_projections,
+        plans_by_projection.values(),
+        today=planning_today,
     )
-    SalesProjection.objects.bulk_update(chain_projections, ["beginning_qty"])
-    IncomingPlan.objects.bulk_update(chain_plans, ["prior_ending_qty"])
+
+    editable_ids = {projection.id for projection in projections}
+    for projection in all_projections:
+        plan = plans_by_projection.get(projection.id)
+        if plan is None:
+            continue
+        if projection.id not in unlocked_projection_ids:
+            continue
+        prior_ending = projection.beginning_qty or Decimal("0")
+        final_sales = projection.proposed_qty
+        product = projection.sku.product_variant.product
+        no_incoming = (
+            product.status.name in NO_INCOMING_STATUSES
+            or product.category.name in NO_INCOMING_CATEGORIES
+        )
+        if (
+            projection.id in editable_ids
+            and no_incoming
+            and final_sales > max(prior_ending, Decimal("0"))
+        ):
+            raise ValidationError(
+                f"{projection.sku.sku} {projection.month:%b %Y}: Sales Projection melampaui "
+                f"stock tersedia {max(prior_ending, Decimal('0')):.0f} "
+                f"(Qty Sales {final_sales:.0f}) untuk Product yang tidak boleh Incoming."
+            )
+        values = incoming_calculation(
+            final_sales,
+            prior_ending,
+            plan.target_stock_ratio,
+        )
+        buffer_recommendation = planning_buffer_incoming(
+            final_sales,
+            prior_ending,
+            incoming_allowed=not no_incoming,
+        )
+        chosen_incoming = Decimal("0") if no_incoming else plan.proposed_incoming
+        recommended = (
+            Decimal("0")
+            if no_incoming
+            else max(values["recommended"], buffer_recommendation)
+        )
+        plan.prior_ending_qty = prior_ending
+        plan.minimum_incoming = Decimal("0") if no_incoming else values["minimum"]
+        plan.recommended_incoming = recommended
+        plan.adit_adjustment = chosen_incoming - recommended or None
+        plan.full_clean()
+
+    SalesProjection.objects.bulk_update(all_projections, ["beginning_qty"])
+    chain_plans = list(plans_by_projection.values())
+    IncomingPlan.objects.bulk_update(
+        chain_plans,
+        [
+            "prior_ending_qty",
+            "minimum_incoming",
+            "recommended_incoming",
+            "adit_adjustment",
+        ],
+    )
     record_audit(
         actor=actor,
         action="projection_scenario_draft_updated",
@@ -400,13 +450,33 @@ def approve_scenario(scenario_id, actor, sales_values=None, incoming_values=None
         incoming_values=incoming_values,
         reason=reason,
     )
-    projections = list(SalesProjection.objects.filter(scenario=scenario).order_by("month", "sku__sku"))
+    projections = list(
+        SalesProjection.objects.filter(scenario=scenario)
+        .select_related(
+            "sku__product_variant__product__status",
+            "sku__product_variant__product__category",
+        )
+        .order_by("month", "sku__sku")
+    )
     plans_by_projection = {
         plan.sales_projection_id: plan
         for plan in IncomingPlan.objects.filter(scenario=scenario)
     }
     if len(plans_by_projection) != len(projections):
         raise ValidationError("Incoming Plan belum lengkap untuk seluruh Draft Projection.")
+    for projection in projections:
+        product = projection.sku.product_variant.product
+        no_incoming = (
+            product.status.name in NO_INCOMING_STATUSES
+            or product.category.name in NO_INCOMING_CATEGORIES
+        )
+        available_stock = max(projection.beginning_qty or Decimal("0"), Decimal("0"))
+        if no_incoming and projection.proposed_qty > available_stock:
+            raise ValidationError(
+                f"{projection.sku.sku} {projection.month:%b %Y}: Sales Projection melampaui "
+                f"stock tersedia {available_stock:.0f} (Qty Sales {projection.proposed_qty:.0f}) "
+                "untuk Product yang tidak boleh Incoming."
+            )
     insufficient_incoming = [
         (projection, plans_by_projection[projection.id])
         for projection in projections

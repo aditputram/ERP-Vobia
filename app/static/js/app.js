@@ -780,6 +780,7 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshDraftGrowth();
 
   const refreshDraftStockChain = () => {
+    const chainAnchorMonth = document.querySelector('[data-draft-current-month]')?.dataset.draftCurrentMonth || '';
     const parentMonths = new Map();
     const totalMonths = new Map();
     const addTotals = (map, key, values) => {
@@ -840,6 +841,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const state = states.get(id) || {
           month: input.dataset.month,
           priorEnding: Number(input.dataset.beginning) || 0,
+          chainAnchor: Boolean(chainAnchorMonth) && input.dataset.month <= chainAnchorMonth,
           sales: Number(input.dataset.sales ?? input.value) || 0,
           incoming: Number(input.dataset.incoming ?? input.value) || 0,
           cogs: Number(input.dataset.cogs) || 0,
@@ -858,7 +860,9 @@ document.addEventListener('DOMContentLoaded', () => {
       let priorEnding = ordered[0]?.priorEnding || 0;
       let previousMonth = null;
       ordered.forEach(state => {
-        if (previousMonth && !isNextMonth(previousMonth, state.month)) priorEnding = state.priorEnding;
+        if (!previousMonth || state.chainAnchor || !isNextMonth(previousMonth, state.month)) {
+          priorEnding = state.priorEnding;
+        }
         state.beginning = priorEnding + state.incoming;
         state.ending = state.beginning - state.sales;
         const values = metricValues(state);

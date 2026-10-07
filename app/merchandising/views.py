@@ -996,6 +996,7 @@ def planning_builder(request):
     draft_sku_matrix_rows = []
     draft_parent_matrix_rows = []
     draft_matrix_summary = None
+    draft_current_month = ""
     draft_history_months = []
     draft_history_by_sku = {}
     draft_product_count = 0
@@ -1022,10 +1023,12 @@ def planning_builder(request):
             draft_incoming_plans = list(IncomingPlan.objects.filter(
                 scenario=viewed_draft_scenario,
             ).select_related("sales_projection"))
+            draft_today = timezone.localdate()
+            draft_current_month = draft_today.strftime("%Y-%m")
             refresh_scenario_stock_chain(
                 draft_projections,
                 draft_incoming_plans,
-                today=timezone.localdate(),
+                today=draft_today,
             )
             draft_sales_target_qty = _latest_sales_target_qty(draft_projections)
             draft_skus = list({row.sku_id: row.sku for row in draft_projections}.values())
@@ -1133,6 +1136,7 @@ def planning_builder(request):
             "draft_sku_matrix_rows": draft_sku_matrix_rows,
             "draft_parent_matrix_rows": draft_parent_matrix_rows,
             "draft_matrix_summary": draft_matrix_summary,
+            "draft_current_month": draft_current_month,
             "draft_product_count": draft_product_count,
             "draft_missing_months": draft_missing_months,
             "draft_po_locked_count": len(draft_po_locked_projection_ids),

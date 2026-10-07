@@ -1293,6 +1293,63 @@ class MerchandisingReportViewTests(TestCase):
 
         self.assertEqual(values["beginning_qty"], Decimal("12"))
 
+    def test_new_master_sku_appears_in_projection_and_dashboard_without_snapshot(self):
+        product = Product.objects.create(
+            code="MASTER-ONLY-PRODUCT",
+            parent_sku="MASTER-ONLY-PARENT",
+            name="Master Only Product",
+            status=self.product.status,
+            category=self.product.category,
+        )
+        variant = ProductVariant.objects.create(
+            product=product,
+            name="Black",
+            color="Black",
+        )
+        sku = SKU.objects.create(
+            sku="MASTER-ONLY-SKU",
+            product_variant=variant,
+            size="M",
+            current_retail_price=Decimal("250000"),
+            current_master_cogs=Decimal("125000"),
+        )
+        current_month = timezone.localdate().month
+
+        projection = self.client.get(
+            "/merchandising/projection/",
+            {
+                "q": sku.sku,
+                "month": [str(current_month)],
+                "metric": ["beginning", "ending"],
+                "submetric": ["qty"],
+            },
+        )
+
+        self.assertEqual(projection.context["visible_row_count"], 1)
+        self.assertEqual(
+            projection.context["table_rows"][0]["identity"]["sku__sku"],
+            sku.sku,
+        )
+        current_cells = {
+            header["metric"]: cell["value"]
+            for header, cell in zip(
+                projection.context["dynamic_headers"],
+                projection.context["table_rows"][0]["cells"],
+            )
+            if header["month_number"] == current_month
+        }
+        self.assertEqual(current_cells["beginning_qty"], Decimal("0"))
+        self.assertEqual(current_cells["ending_qty"], Decimal("0"))
+        self.assertIn(product.name, projection.context["products"])
+
+        dashboard = self.client.get(
+            "/merchandising/dashboard/",
+            {"product": [product.name]},
+        )
+        self.assertEqual(dashboard.context["filtered_count"], 1)
+        self.assertEqual(dashboard.context["selected"]["product"], [product.name])
+        self.assertIn(product.name, dashboard.context["products"])
+
     def test_planning_history_uses_canonical_sales_instead_of_snapshot_or_saved_baseline(self):
         for month, quantity, status in (
             (6, 3, "Selesai"),

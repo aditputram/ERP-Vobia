@@ -19,7 +19,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from inventory.services.fifo import inventory_balance
-from master_data.models import Category, Product, ProductStatus, Subcategory
+from master_data.models import Category, Product, ProductStatus, SKU, Subcategory
 from sales.models import SalesOrderLine, SalesPlan
 
 from .forms import IncomingMonthCloseForm, ProjectionBuilderForm, ProjectionScenarioForm
@@ -189,25 +189,37 @@ def _latest_sales_target_qty(projections):
     return targets
 
 
-def _filtered_snapshots(request, batch):
-    rows = MerchandisingMonthlySnapshot.objects.filter(batch=batch)
+def _active_skus():
+    return SKU.objects.filter(
+        is_active=True,
+        product_variant__is_active=True,
+        product_variant__product__is_active=True,
+    ).select_related(
+        "product_variant__product__status",
+        "product_variant__product__category",
+        "product_variant__product__subcategory",
+    )
+
+
+def _filtered_skus(request):
+    rows = _active_skus()
     selected = {
         "status": _getlist(request, "status"),
         "category": _getlist(request, "category"),
         "product": _getlist(request, "product"),
     }
     if selected["status"]:
-        rows = rows.filter(status_snapshot__in=selected["status"])
+        rows = rows.filter(product_variant__product__status__name__in=selected["status"])
     if selected["category"]:
-        rows = rows.filter(category_snapshot__in=selected["category"])
+        rows = rows.filter(product_variant__product__category__name__in=selected["category"])
     if selected["product"]:
-        rows = rows.filter(product_snapshot__in=selected["product"])
+        rows = rows.filter(product_variant__product__name__in=selected["product"])
     query = request.GET.get("q", "").strip()
     if query:
         rows = rows.filter(
-            Q(sku__sku__icontains=query)
-            | Q(product_snapshot__icontains=query)
-            | Q(variant_snapshot__icontains=query)
+            Q(sku__icontains=query)
+            | Q(product_variant__product__name__icontains=query)
+            | Q(product_variant__name__icontains=query)
         )
     return rows, selected, query
 
@@ -215,47 +227,57 @@ def _filtered_snapshots(request, batch):
 def _filter_options(batch):
     if not batch:
         return {"statuses": [], "categories": [], "products": []}
-    rows = MerchandisingMonthlySnapshot.objects.filter(batch=batch)
+    rows = _active_skus()
     return {
-        "statuses": sorted(set(rows.values_list("status_snapshot", flat=True))),
-        "categories": sorted(set(rows.values_list("category_snapshot", flat=True))),
-        "products": sorted(set(rows.values_list("product_snapshot", flat=True))),
+        "statuses": sorted(set(rows.values_list("product_variant__product__status__name", flat=True))),
+        "categories": sorted(set(rows.values_list("product_variant__product__category__name", flat=True))),
+        "products": sorted(set(rows.values_list("product_variant__product__name", flat=True))),
     }
 
 
-def _cascading_projection_snapshots(request, batch):
+def _cascading_projection_skus(request):
     """Filter Projection rows and keep every downstream option within its parent scope."""
-    base_rows = MerchandisingMonthlySnapshot.objects.filter(batch=batch)
-    status_options = sorted(set(base_rows.values_list("status_snapshot", flat=True)))
+    base_rows = _active_skus()
+    status_options = sorted(set(
+        base_rows.values_list("product_variant__product__status__name", flat=True)
+    ))
     selected_statuses = [
         value for value in _getlist(request, "status") if value in status_options
     ]
 
     category_rows = base_rows
     if selected_statuses:
-        category_rows = category_rows.filter(status_snapshot__in=selected_statuses)
-    category_options = sorted(set(category_rows.values_list("category_snapshot", flat=True)))
+        category_rows = category_rows.filter(
+            product_variant__product__status__name__in=selected_statuses
+        )
+    category_options = sorted(set(
+        category_rows.values_list("product_variant__product__category__name", flat=True)
+    ))
     selected_categories = [
         value for value in _getlist(request, "category") if value in category_options
     ]
 
     product_rows = category_rows
     if selected_categories:
-        product_rows = product_rows.filter(category_snapshot__in=selected_categories)
-    product_options = sorted(set(product_rows.values_list("product_snapshot", flat=True)))
+        product_rows = product_rows.filter(
+            product_variant__product__category__name__in=selected_categories
+        )
+    product_options = sorted(set(
+        product_rows.values_list("product_variant__product__name", flat=True)
+    ))
     selected_products = [
         value for value in _getlist(request, "product") if value in product_options
     ]
 
     rows = product_rows
     if selected_products:
-        rows = rows.filter(product_snapshot__in=selected_products)
+        rows = rows.filter(product_variant__product__name__in=selected_products)
     query = request.GET.get("q", "").strip()
     if query:
         rows = rows.filter(
-            Q(sku__sku__icontains=query)
-            | Q(product_snapshot__icontains=query)
-            | Q(variant_snapshot__icontains=query)
+            Q(sku__icontains=query)
+            | Q(product_variant__product__name__icontains=query)
+            | Q(product_variant__name__icontains=query)
         )
     return (
         rows,
@@ -520,8 +542,13 @@ def dashboard(request):
     partial_selling_rows = []
     planning_preview = {"draft_scenario_count": 0, "draft_scenarios": [], "draft_projection_count": 0}
     if batch:
-        snapshots, selected, query = _filtered_snapshots(request, batch)
-        sku_ids = list(snapshots.order_by().values_list("sku_id", flat=True).distinct())
+        skus, selected, query = _filtered_skus(request)
+        sku_rows = list(skus.order_by("sku"))
+        sku_ids = [sku.id for sku in sku_rows]
+        snapshots = MerchandisingMonthlySnapshot.objects.filter(
+            batch=batch,
+            sku_id__in=sku_ids,
+        )
         filtered_count = len(sku_ids)
         source_range_exceptions = snapshots.filter(source_row__gt=693).values("sku_id").distinct().count()
         planning_state = official_planning_state(batch)
@@ -546,13 +573,21 @@ def dashboard(request):
             )
             for sku_id in sku_ids
         }
-        price_by_sku = {
-            sku_id: {
-                "cogs": snapshot.cogs_snapshot,
-                "retail": snapshot.retail_price_snapshot,
+        price_by_sku = {}
+        for sku in sku_rows:
+            snapshot = current_snapshots.get(sku.id)
+            price_by_sku[sku.id] = {
+                "cogs": (
+                    sku.current_master_cogs
+                    if sku.current_master_cogs is not None
+                    else snapshot.cogs_snapshot if snapshot else Decimal("0")
+                ),
+                "retail": (
+                    sku.current_retail_price
+                    if sku.current_retail_price is not None
+                    else snapshot.retail_price_snapshot if snapshot else Decimal("0")
+                ),
             }
-            for sku_id, snapshot in current_snapshots.items()
-        }
         future_values, planning_preview = future_planning_values(
             sku_ids=sku_ids,
             planning_year=planning_state["year"],
@@ -1370,23 +1405,51 @@ def projection(request):
     if not selected_submetrics:
         selected_submetrics = ["qty"]
     if batch:
-        snapshots, selected, query, filter_options = _cascading_projection_snapshots(
-            request, batch
-        )
+        skus, selected, query, filter_options = _cascading_projection_skus(request)
         planning_state = official_planning_state(batch)
         current_month_number = planning_state["current_month_number"]
         planning_state["current_month"] = month_name[current_month_number]
-        identity_rows = list(snapshots.order_by("source_row").values(
-            "sku_id", "sku__sku", "source_row", "status_snapshot", "product_snapshot",
-            "variant_snapshot", "category_snapshot", "subcategory_snapshot", "size_snapshot",
-            "cogs_snapshot", "retail_price_snapshot",
-            "sku__product_variant__product__parent_sku",
-        ).distinct())
-        sku_ids = [row["sku_id"] for row in identity_rows]
-        monthly = MerchandisingMonthlySnapshot.objects.filter(
-            batch=batch, sku_id__in=sku_ids
-        ).in_bulk(field_name="id")
-        by_sku_month = {(row.sku_id, row.month.month): row for row in monthly.values()}
+        sku_rows = list(skus.order_by("sku"))
+        sku_ids = [sku.id for sku in sku_rows]
+        monthly_rows = list(
+            MerchandisingMonthlySnapshot.objects.filter(
+                batch=batch,
+                sku_id__in=sku_ids,
+            ).order_by("source_row", "month")
+        )
+        identity_snapshots = {}
+        for snapshot in monthly_rows:
+            identity_snapshots.setdefault(snapshot.sku_id, snapshot)
+        by_sku_month = {(row.sku_id, row.month.month): row for row in monthly_rows}
+        identity_rows = []
+        for sku in sku_rows:
+            product = sku.product_variant.product
+            snapshot = (
+                by_sku_month.get((sku.id, current_month_number))
+                or identity_snapshots.get(sku.id)
+            )
+            identity_rows.append({
+                "sku_id": sku.id,
+                "sku__sku": sku.sku,
+                "source_row": snapshot.source_row if snapshot else 0,
+                "status_snapshot": product.status.name,
+                "product_snapshot": product.name,
+                "variant_snapshot": sku.product_variant.name,
+                "category_snapshot": product.category.name,
+                "subcategory_snapshot": product.subcategory.name if product.subcategory else "",
+                "size_snapshot": sku.size,
+                "cogs_snapshot": (
+                    sku.current_master_cogs
+                    if sku.current_master_cogs is not None
+                    else snapshot.cogs_snapshot if snapshot else Decimal("0")
+                ),
+                "retail_price_snapshot": (
+                    sku.current_retail_price
+                    if sku.current_retail_price is not None
+                    else snapshot.retail_price_snapshot if snapshot else Decimal("0")
+                ),
+                "sku__product_variant__product__parent_sku": product.parent_sku,
+            })
         current_values = official_current_month_values(batch, sku_ids, planning_state)
         current_month_date = date(planning_state["year"], current_month_number, 1)
         current_target_sales, current_target_preview = current_month_target_sales(
@@ -1574,10 +1637,10 @@ def projection(request):
                 return closed_value[metric]
             if month_number > current_month_number:
                 return future_values.get((sku_id, month_number), {}).get(metric)
-            if not snapshot:
-                return None
             if month_number == current_month_number and metric in current_values.get(sku_id, {}):
                 return current_values[sku_id][metric]
+            if not snapshot:
+                return None
             return getattr(snapshot, metric)
 
         def aggregate_metric_for_ids(ids, header, metric):

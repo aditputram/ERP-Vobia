@@ -154,6 +154,99 @@ def historical_sales_qty_for_skus(
     return months, values
 
 
+def actual_sales_qty_for_skus(skus, month):
+    """Return canonical Sales QTY for one completed calendar month."""
+    sku_ids = [sku.id for sku in skus]
+    values = {sku_id: Decimal("0") for sku_id in sku_ids}
+    if not sku_ids:
+        return values
+    rows = (
+        SalesOrderLine.objects.filter(
+            is_counted=True,
+            sku_id__in=sku_ids,
+            order__order_date__gte=month,
+            order__order_date__lt=next_month(month),
+        )
+        .values("sku_id")
+        .annotate(total=Sum("quantity"))
+    )
+    for row in rows:
+        values[row["sku_id"]] = Decimal(row["total"] or 0)
+    return values
+
+
+def refresh_scenario_baseline_chain(projections, *, today=None):
+    """Make every baseline equal the immediately preceding month's Sales QTY.
+
+    Completed prior months use actual Sales. The running and future months use
+    the preceding target in the same scenario, then the official/approved
+    target when the scenario does not contain that month.
+    """
+    projections = list(projections)
+    if not projections:
+        return projections
+    today = today or date.today()
+    current_month = today.replace(day=1)
+    by_sku_month = {
+        (projection.sku_id, projection.month): projection
+        for projection in projections
+    }
+    skus_by_id = {projection.sku_id: projection.sku for projection in projections}
+    actual_months = {
+        previous_month(projection.month)
+        for projection in projections
+        if previous_month(projection.month) < current_month
+    }
+    actuals = {
+        month: actual_sales_qty_for_skus(skus_by_id.values(), month)
+        for month in actual_months
+    }
+    needs_official = any(
+        previous_month(projection.month) == current_month
+        and (projection.sku_id, current_month) not in by_sku_month
+        for projection in projections
+    )
+    official = (
+        official_values_for_skus(skus_by_id.values(), today)
+        if needs_official
+        else {}
+    )
+    approved = {
+        (projection.sku_id, projection.month): projection
+        for projection in SalesProjection.objects.filter(
+            sku_id__in=skus_by_id,
+            month__in={previous_month(row.month) for row in projections},
+            approval_status=SalesProjection.ApprovalStatus.APPROVED,
+        ).order_by("approved_at")
+    }
+
+    for projection in projections:
+        baseline_month = previous_month(projection.month)
+        projection.baseline_month = baseline_month
+        if baseline_month < current_month:
+            projection.baseline_qty = actuals[baseline_month].get(
+                projection.sku_id,
+                Decimal("0"),
+            )
+            continue
+        prior = by_sku_month.get((projection.sku_id, baseline_month))
+        if prior is not None:
+            projection.baseline_qty = Decimal(prior.proposed_qty)
+            continue
+        if baseline_month == current_month:
+            projection.baseline_qty = Decimal(
+                official.get(projection.sku_id, {}).get("sales_qty", 0)
+            )
+            continue
+        prior = approved.get((projection.sku_id, baseline_month))
+        projection.baseline_qty = (
+            Decimal(prior.final_approved_qty or 0)
+            if prior is not None
+            else Decimal("0")
+        )
+    return projections
+
+
 def drafted_product_ids(target_month):
     """Products already claimed by a saved projection for the target month."""
     if not target_month:
@@ -863,6 +956,7 @@ def refresh_scenario_stock_chain(projections, incoming_plans, *, today=None):
     if not projections:
         return projections
     today = today or date.today()
+    refresh_scenario_baseline_chain(projections, today=today)
     current_month = today.replace(day=1)
     plans_by_projection = {
         plan.sales_projection_id: plan for plan in incoming_plans
@@ -981,8 +1075,8 @@ def recommendation_for(
             beginning,
             run_date=today,
         ) if data_cutoff else Decimal("0")
-        baseline_qty = actual
-        baseline_month = data_cutoff or current_month
+        baseline_month = previous_month(target_month)
+        baseline_qty = actual_sales_qty_for_skus([sku], baseline_month)[sku.id]
     elif target_month > current_month:
         incoming_qty = IncomingPlan.objects.filter(
             sku=sku,
@@ -991,7 +1085,16 @@ def recommendation_for(
         ).aggregate(total=Sum("final_approved_incoming"))["total"] or Decimal("0")
         previous_ending_qty = beginning
         baseline_month = previous_month(target_month)
-        if baseline_month == current_month:
+        prior = None
+        if scenario is not None:
+            prior = SalesProjection.objects.filter(
+                scenario=scenario,
+                sku=sku,
+                month=baseline_month,
+            ).first()
+        if prior is not None:
+            baseline_qty = Decimal(prior.proposed_qty)
+        elif baseline_month == current_month:
             if official_current_value is None:
                 raise ValidationError(f"{sku.sku}: Official Current Projection {baseline_month:%b %Y} belum tersedia.")
             baseline_qty = Decimal(official_current_value["sales_qty"])
@@ -1001,13 +1104,6 @@ def recommendation_for(
                 month=baseline_month,
                 approval_status=SalesProjection.ApprovalStatus.APPROVED,
             ).first()
-            if prior is None and scenario is not None:
-                prior = SalesProjection.objects.filter(
-                    scenario=scenario,
-                    sku=sku,
-                    month=baseline_month,
-                    approval_status=SalesProjection.ApprovalStatus.DRAFT,
-                ).first()
             if method in {
                 ProjectionRule.Method.SAME_AS_LAST_MONTH,
                 ProjectionRule.Method.INCREASE_PERCENT,

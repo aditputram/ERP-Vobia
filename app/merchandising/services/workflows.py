@@ -406,7 +406,10 @@ def save_scenario_draft(scenario_id, actor, sales_values=None, incoming_values=N
         plan.adit_adjustment = chosen_incoming - recommended or None
         plan.full_clean()
 
-    SalesProjection.objects.bulk_update(all_projections, ["beginning_qty"])
+    SalesProjection.objects.bulk_update(
+        all_projections,
+        ["baseline_month", "baseline_qty", "beginning_qty"],
+    )
     chain_plans = list(plans_by_projection.values())
     IncomingPlan.objects.bulk_update(
         chain_plans,

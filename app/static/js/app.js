@@ -734,7 +734,30 @@ document.addEventListener('DOMContentLoaded', () => {
     })}%`;
     element.classList.add(growth > 0 ? 'growth-positive' : (growth < 0 ? 'growth-negative' : 'growth-neutral'));
   };
+  const isNextPlanningMonth = (previous, current) => {
+    const [year, month] = previous.split('-').map(Number);
+    const next = new Date(Date.UTC(year, month, 1));
+    return next.toISOString().slice(0, 7) === current;
+  };
+  const syncDraftBaselines = () => {
+    const currentMonth = document.querySelector('[data-draft-current-month]')?.dataset.draftCurrentMonth || '';
+    document.querySelectorAll('[data-draft-sku-row]').forEach(row => {
+      const inputs = [...row.querySelectorAll('[data-scenario-sales-input]')]
+        .sort((left, right) => left.dataset.month.localeCompare(right.dataset.month));
+      inputs.forEach((input, index) => {
+        const prior = inputs[index - 1];
+        if (
+          prior
+          && prior.dataset.month >= currentMonth
+          && isNextPlanningMonth(prior.dataset.month, input.dataset.month)
+        ) {
+          input.dataset.baseline = String(Number(prior.value) || 0);
+        }
+      });
+    });
+  };
   const refreshDraftGrowth = () => {
+    syncDraftBaselines();
     const parentMonths = new Map();
     const totalMonths = new Map();
     document.querySelectorAll('[data-draft-sku-row]').forEach(row => {
@@ -791,6 +814,9 @@ document.addEventListener('DOMContentLoaded', () => {
       map.set(key, total);
     };
     const metricValues = state => ({
+      'baseline:qty': state.baseline,
+      'baseline:cogs': state.baseline * state.cogs,
+      'baseline:gross': state.baseline * state.retail,
       'beginning:qty': state.beginning,
       'beginning:cogs': state.beginning * state.cogs,
       'beginning:gross': state.beginning * state.retail,
@@ -807,11 +833,6 @@ document.addEventListener('DOMContentLoaded', () => {
       beginningGross: state.beginning * state.retail,
       salesGross: state.sales * state.retail,
     });
-    const isNextMonth = (previous, current) => {
-      const [year, month] = previous.split('-').map(Number);
-      const next = new Date(Date.UTC(year, month, 1));
-      return next.toISOString().slice(0, 7) === current;
-    };
     const renderCell = (cell, values) => {
       if (!cell || cell.querySelector('input')) return;
       const metric = cell.dataset.metric;
@@ -834,6 +855,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (metric === 'ending') cell.classList.toggle('metric-negative', value < 0);
     };
 
+    syncDraftBaselines();
     document.querySelectorAll('[data-draft-sku-row]').forEach(row => {
       const states = new Map();
       row.querySelectorAll('[data-scenario-sales-input], [data-scenario-incoming-input]').forEach(input => {
@@ -842,6 +864,7 @@ document.addEventListener('DOMContentLoaded', () => {
           month: input.dataset.month,
           priorEnding: Number(input.dataset.beginning) || 0,
           chainAnchor: Boolean(chainAnchorMonth) && input.dataset.month <= chainAnchorMonth,
+          baseline: Number(input.dataset.baseline) || 0,
           sales: Number(input.dataset.sales ?? input.value) || 0,
           incoming: Number(input.dataset.incoming ?? input.value) || 0,
           cogs: Number(input.dataset.cogs) || 0,
@@ -860,7 +883,7 @@ document.addEventListener('DOMContentLoaded', () => {
       let priorEnding = ordered[0]?.priorEnding || 0;
       let previousMonth = null;
       ordered.forEach(state => {
-        if (!previousMonth || state.chainAnchor || !isNextMonth(previousMonth, state.month)) {
+        if (!previousMonth || state.chainAnchor || !isNextPlanningMonth(previousMonth, state.month)) {
           priorEnding = state.priorEnding;
         }
         state.beginning = priorEnding + state.incoming;

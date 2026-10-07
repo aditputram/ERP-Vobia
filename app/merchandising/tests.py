@@ -54,6 +54,7 @@ from .services.builder import (
     historical_sales_qty_for_skus,
     official_values_for_skus,
     recommendation_for,
+    refresh_scenario_baseline_chain,
     refresh_scenario_stock_chain,
     summarize_preview,
 )
@@ -589,9 +590,91 @@ class MerchandisingWorkflowTests(TestCase):
             parameter=0,
             today=date(2026, 8, 20),
         )
-        self.assertEqual(result["baseline_month"], date(2026, 8, 10))
+        self.assertEqual(result["baseline_month"], date(2026, 7, 1))
+        self.assertEqual(result["baseline_qty"], Decimal("0"))
         self.assertEqual(result["beginning_qty"], Decimal("100"))
         self.assertEqual(result["recommendation"], Decimal("27"))
+
+    def test_baseline_chain_uses_closed_actual_then_prior_scenario_target(self):
+        order = SalesOrder.objects.create(
+            source=SalesOrder.Source.OTHER,
+            source_label="Offline",
+            order_number="SEP-ACTUAL",
+            order_datetime=timezone.make_aware(datetime(2026, 9, 5, 10, 0)),
+            order_date=date(2026, 9, 5),
+            current_status="Selesai",
+            source_status="Selesai",
+            is_final=True,
+            import_origin=SalesOrder.ImportOrigin.MANUAL,
+            affects_inventory=True,
+            first_seen_batch_id="00000000-0000-0000-0000-000000000000",
+            latest_batch_id="00000000-0000-0000-0000-000000000000",
+        )
+        SalesOrderLine.objects.create(
+            order=order,
+            sku=self.sku,
+            sku_code_snapshot=self.sku.sku,
+            current_status="Selesai",
+            source_status="Selesai",
+            quantity=7,
+            net_unit_price=Decimal("180000"),
+            retail_price_snapshot=Decimal("200000"),
+            sales_cogs_snapshot=Decimal("100000"),
+            total_gross_sales=Decimal("1400000"),
+            total_net_sales=Decimal("1260000"),
+            total_cogs=Decimal("700000"),
+            gpm=Decimal("560000"),
+            is_counted=True,
+        )
+        self.scenario.start_month = date(2026, 10, 1)
+        self.scenario.end_month = date(2026, 12, 1)
+        self.scenario.save(update_fields=["start_month", "end_month"])
+        projections = [
+            SalesProjection.objects.create(
+                scenario=self.scenario,
+                month=month,
+                sku=self.sku,
+                baseline_qty=Decimal("999"),
+                system_recommendation=Decimal(target),
+            )
+            for month, target in (
+                (date(2026, 10, 1), 10),
+                (date(2026, 11, 1), 20),
+                (date(2026, 12, 1), 30),
+            )
+        ]
+
+        refresh_scenario_baseline_chain(projections, today=date(2026, 10, 7))
+
+        self.assertEqual(
+            [(row.baseline_month, row.baseline_qty) for row in projections],
+            [
+                (date(2026, 9, 1), Decimal("7")),
+                (date(2026, 10, 1), Decimal("10")),
+                (date(2026, 11, 1), Decimal("20")),
+            ],
+        )
+
+        with patch(
+            "merchandising.services.workflows.timezone.localdate",
+            return_value=date(2026, 10, 7),
+        ):
+            save_scenario_draft(
+                self.scenario.id,
+                self.user,
+                sales_values={
+                    str(projections[0].id): "15",
+                    str(projections[1].id): "25",
+                    str(projections[2].id): "30",
+                },
+            )
+        refreshed = list(
+            SalesProjection.objects.filter(scenario=self.scenario).order_by("month")
+        )
+        self.assertEqual(
+            [row.baseline_qty for row in refreshed],
+            [Decimal("7"), Decimal("15"), Decimal("25")],
+        )
 
     def test_future_recommendation_is_whole_unit_and_incoming_updates_stock_chain(self):
         target_month = date(2026, 9, 1)

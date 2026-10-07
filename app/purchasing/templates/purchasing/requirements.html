@@ -2,7 +2,7 @@
 {% block title %}PPIC Requirement · Vobia ERP{% endblock %}
 {% block content %}
 <header class="page-header">
-  <div><p class="eyebrow">PPIC · REQUIREMENT</p><h1>PPIC Requirement</h1><p>Mengacu ke sheet PPIC Requirement (PPIC Generator) Vobia MD 2026. Hanya Final Approved Incoming yang boleh membentuk requirement.</p></div>
+  <div><p class="eyebrow">PPIC · REQUIREMENT</p><h1>PPIC Requirement</h1><p>Mengacu ke sheet PPIC Requirement (PPIC Generator) Vobia MD 2026. Hanya Final Approved Incoming dari Planning Builder yang boleh membentuk requirement.</p></div>
   <div class="header-actions"><a class="secondary-button" href="?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=xlsx">Export Excel</a><a class="primary-button" href="{% url 'purchasing:generator' %}">Buka PO Generator</a></div>
 </header>
 

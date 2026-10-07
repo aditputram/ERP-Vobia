@@ -422,6 +422,9 @@ class PurchasingWorkflowTests(TestCase):
                 self.assertContains(response, "Planning Builder")
                 self.assertContains(response, "Production Monitoring")
                 self.assertContains(response, "Inventory Summary")
+                self.assertNotContains(response, "Manual Requirement Product")
+                if route == "purchasing:generator":
+                    self.assertNotContains(response, "PO produk baru")
 
     def test_requirement_need_month_filter_updates_table_and_kpis(self):
         september_plan = self._approved_incoming(100)

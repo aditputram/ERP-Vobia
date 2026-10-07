@@ -59,18 +59,11 @@
 </section>
 {% endif %}
 
-<section class="dashboard-grid section-gap">
-  <article class="panel">
-    <div class="panel-header"><div><p class="eyebrow">MANUAL</p><h2>PO produk baru</h2></div></div>
-    <p class="muted">Khusus produk baru yang belum berasal dari PPIC Requirement. SKU wajib sudah tersedia di Master Data.</p>
-    <form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="form_name" value="manual_po">{{ manual_form.as_p }}<button class="secondary-button" type="submit">Create Draft Manual PO</button></form>
-  </article>
-  <article class="panel span-two">
+<section class="panel section-gap">
     <div class="panel-header"><div><p class="eyebrow">PRINT PO</p><h2>Preview dan print PO terbaru</h2></div><a class="row-link" href="{% url 'purchasing:purchase_orders' %}">Lihat seluruh Purchase Order →</a></div>
     {% if pos %}<div class="table-wrap"><table><thead><tr><th>No. PO</th><th>Vendor</th><th>Need Month</th><th>Required Arrival</th><th>Status</th><th>Qty</th><th>Action</th></tr></thead><tbody>
     {% for po in pos %}<tr><td><strong>{{ po.po_number|default:"Draft – belum bernomor" }}</strong></td><td>{{ po.supplier.name }}</td><td>{{ po.need_month|date:"F Y" }}</td><td>{{ po.required_arrival|date:"d M Y"|default:"—" }}</td><td><span class="status-badge {% if po.status == 'RELEASED' %}ready{% endif %}">{{ po.get_status_display }}</span></td><td>{{ po.total_qty|floatformat:"0g" }}</td><td><a class="row-link" href="{% url 'purchasing:po_detail' po.id %}">Buka PO</a>{% if po.status == 'RELEASED' %} · <a class="row-link" target="_blank" href="{% url 'purchasing:po_print' po.id %}">Print</a>{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>{% else %}<div class="empty-state">Belum ada PO.</div>{% endif %}
-  </article>
 </section>
 {% include "includes/multi_select_script.html" %}
 {% endblock %}

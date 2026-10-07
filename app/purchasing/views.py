@@ -18,7 +18,7 @@ from inventory.services.aging import po_aging_snapshot
 from imports.services.storage import DuplicateRawFile
 from master_data.models import Supplier
 
-from .forms import LegacyWIPSupplierRevisionForm, ManualPOForm, POWIPImportUploadForm, SupplierForm
+from .forms import LegacyWIPSupplierRevisionForm, POWIPImportUploadForm, SupplierForm
 from .models import PPICRequirement, POWIPImportBatch, POWIPImportIssue, PurchaseOrder
 from .services.wip_import import approve_po_wip_import, create_po_wip_import
 from .services.workflows import (
@@ -510,7 +510,6 @@ def requirements(request):
 
 @login_required
 def overview(request):
-    manual_form = ManualPOForm()
     source = request.POST if request.method == "POST" else request.GET
     generator_state = _generator_state(source)
     show_preview = request.GET.get("review") == "1"
@@ -518,25 +517,7 @@ def overview(request):
     selected_supplier = None
     if request.method == "POST":
         form_name = request.POST.get("form_name")
-        if form_name == "manual_po":
-            manual_form = ManualPOForm(request.POST)
-            if manual_form.is_valid():
-                data = manual_form.cleaned_data
-                try:
-                    po = create_draft_po(
-                        supplier=data["supplier"],
-                        need_month=data["need_month"],
-                        required_arrival=data["required_arrival"],
-                        actor=request.user,
-                        manual_lines=[(data["sku"], data["quantity"])],
-                        notes=data["notes"],
-                    )
-                except ValidationError as exc:
-                    manual_form.add_error(None, exc)
-                else:
-                    messages.success(request, "Draft PO manual berhasil dibuat. Review lalu Release.")
-                    return redirect("purchasing:po_detail", po_id=po.id)
-        elif form_name == "generator_create":
+        if form_name == "generator_create":
             show_preview = True
             created, generator_errors, selected_supplier, _ = _create_generator_pos(
                 request, generator_state
@@ -556,7 +537,6 @@ def overview(request):
         request,
         "purchasing/overview.html",
         {
-            "manual_form": manual_form,
             "pos": pos,
             "generator": generator_state,
             "show_preview": show_preview,

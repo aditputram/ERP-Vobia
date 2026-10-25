@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db.models import Sum
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -16,14 +17,16 @@ from pypdf import PdfReader
 
 from accounts.models import User
 from audit.models import AuditEvent
+from finance.models import InboundLossJournalAllocation, JournalEntry, JournalLine
+from finance.views import _profit_loss_data
 from master_data.models import Category, Product, ProductStatus, ProductVariant, SKU, Supplier, Warehouse
 from purchasing.models import PurchaseOrder, PurchaseOrderLine
 from production.models import ProductionActivity, ProductionDeliveryOrder, ProductionStage
-from production.services import ensure_production_order
+from production.services import ensure_production_order, production_cogs_finalization_card, production_snapshot
 from sales.models import SalesOrder, SalesOrderLine
 from rnd.models import RndNotification
 
-from .models import ExpectedReturn, FIFOAllocation, FIFOLayer, FIFOOpeningImportBatch, FIFOOpeningSnapshot, InboundReceipt, InventoryException, InventoryMovement, PhysicalReturnReceipt, QCFollowUp
+from .models import ExpectedReturn, FIFOAllocation, FIFOLayer, FIFOOpeningImportBatch, FIFOOpeningSnapshot, InboundDiscrepancy, InboundReceipt, InventoryException, InventoryMovement, PhysicalReturnReceipt, QCFollowUp
 from .services.aging import po_aging_snapshot, refresh_po_close
 from .services.fifo import (
     inventory_balance,
@@ -33,6 +36,7 @@ from .services.fifo import (
     post_opening,
     post_sales_out,
     rebuild_fifo_for_sku,
+    reconcile_delivery_inbound,
     record_inbound,
     record_physical_return,
     record_qc,
@@ -117,7 +121,7 @@ class InventoryWorkflowTests(TestCase):
         self.client.force_login(self.user)
         expected_sheets = {
             "inventory:turnover": ["Inventory Turnover"],
-            "inventory:inbound": ["Delivery Queue", "Completed Delivery", "Outstanding PO", "Inbound History"],
+            "inventory:inbound": ["Delivery Queue", "Completed Delivery", "Outstanding PO", "Inbound History", "Inbound Exceptions"],
             "inventory:return_log": ["Selected Order", "Marketplace Claims", "Return History"],
             "inventory:outbound": ["Outbound"],
         }
@@ -383,6 +387,103 @@ class InventoryWorkflowTests(TestCase):
                 reference="GRN-002",
                 actor=self.user,
             )
+
+    def test_delivery_inbound_reconciliation_only_adds_sellable_to_fifo(self):
+        record_qc(
+            po_line=self.po_line,
+            inspected_at=timezone.make_aware(datetime(2026, 9, 5, 10, 0)),
+            qty_inspected=10,
+            qty_passed=10,
+            qty_failed=0,
+            actor=self.user,
+        )
+        delivery_order = ProductionDeliveryOrder.objects.create(
+            number="DOP.VOB-09/26-EXC",
+            issue_month=date(2026, 9, 1),
+            sequence=99,
+            delivery_date=date(2026, 9, 6),
+            production_order=self.production_order,
+            created_by=self.user,
+        )
+        delivery = ProductionActivity.objects.create(
+            production_order=self.production_order,
+            action="warehouse_delivery",
+            entry_kind=ProductionActivity.EntryKind.ACTIVITY,
+            activity_type=ProductionActivity.ActivityType.WAREHOUSE_DELIVERY,
+            activity_date=date(2026, 9, 6),
+            quantity=Decimal("10"),
+            po_line=self.po_line,
+            delivery_order=delivery_order,
+            description="Deliver with inbound exception",
+            actor=self.user,
+        )
+
+        receipt, movement, discrepancies = reconcile_delivery_inbound(
+            delivery_activity=delivery,
+            inbound_date=date(2026, 9, 7),
+            received_qty=5,
+            shortage_qty=2,
+            lost_qty=1,
+            damaged_qty=1,
+            not_sellable_qty=1,
+            warehouse=self.warehouse,
+            reference="GRN-EXCEPTION-001",
+            actor=self.user,
+            notes="Kurang kirim, hilang dalam perjalanan, rusak, dan tidak layak jual.",
+        )
+
+        self.assertEqual(receipt.received_qty, Decimal("5"))
+        self.assertEqual(movement.created_fifo_layer.original_qty, Decimal("5"))
+        self.assertEqual(len(discrepancies), 4)
+        self.assertEqual(InboundDiscrepancy.objects.aggregate(total=Sum("quantity"))["total"], Decimal("5"))
+        non_physical = InboundDiscrepancy.objects.filter(
+            discrepancy_type__in=(InboundDiscrepancy.Type.SHORTAGE, InboundDiscrepancy.Type.LOST)
+        )
+        self.assertTrue(all(row.warehouse_id is None and row.movement_id is None for row in non_physical))
+        physical = InboundDiscrepancy.objects.filter(
+            discrepancy_type__in=(InboundDiscrepancy.Type.DAMAGED, InboundDiscrepancy.Type.NOT_SELLABLE)
+        ).select_related("movement", "warehouse")
+        self.assertTrue(
+            all(
+                row.warehouse.code == "REJECT"
+                and row.movement.movement_type == InventoryMovement.MovementType.REJECTED_IN
+                and row.movement.allocated_cost == 0
+                for row in physical
+            )
+        )
+        snapshot = production_snapshot(self.production_order)
+        self.assertEqual(snapshot["received_qty"], Decimal("5"))
+        self.assertEqual(snapshot["inbound_discrepancy_qty"], Decimal("5"))
+        self.assertEqual(snapshot["ready_inbound_qty"], Decimal("0"))
+        self.assertEqual(snapshot["delivering_qty"], Decimal("0"))
+        costing = production_cogs_finalization_card(self.production_order, actor=self.user)
+        self.assertTrue(costing["ready"], costing["blockers"])
+        self.assertEqual(costing["total_inbound_discrepancy_qty"], Decimal("5"))
+        self.assertEqual(costing["rows"][0]["final_unit_cogs"], Decimal("120000.0000"))
+        self.assertEqual(costing["total_inbound_loss_amount"], Decimal("600000"))
+        self.assertEqual(costing["total_inventory_cost"], Decimal("600000"))
+
+        journal = JournalEntry.objects.get(source_metadata__workflow="INBOUND_LOSS")
+        self.assertEqual(journal.status, JournalEntry.Status.DRAFT)
+        self.assertEqual(journal.entry_date, date(2026, 9, 7))
+        lines = {line.account.code: line for line in JournalLine.objects.filter(entry=journal)}
+        self.assertEqual(lines["9100"].debit, Decimal("600000"))
+        self.assertEqual(lines["110401"].credit, Decimal("600000"))
+        self.assertEqual(InboundLossJournalAllocation.objects.filter(entry=journal).count(), 4)
+
+        report = _profit_loss_data(
+            date(2026, 9, 1),
+            date(2026, 9, 30),
+            [],
+        )
+        expenses = {row["account"].code: row["amount"] for row in report["expense"]}
+        self.assertEqual(expenses["9100"], Decimal("600000"))
+
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("inventory:inbound"))
+        self.assertEqual(len(page.context["completed_delivery_rows"]), 1)
+        self.assertContains(page, "INBOUND EXCEPTION HISTORY")
+        self.assertContains(page, "Not Sellable")
 
     def test_unallocated_inbound_can_be_undone_with_audit_trail(self):
         record_qc(
@@ -1155,6 +1256,7 @@ class InventoryWorkflowTests(TestCase):
         url = (
             f"{reverse('inventory:return_log')}?source=Shopee%20Vobia"
             "&order_number=RETURN-ORDER-1"
+            "&summary_month=2026-09"
         )
         response = self.client.get(url)
 

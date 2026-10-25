@@ -39,6 +39,9 @@ class ProductionPlan(models.Model):
     target_trial_date = models.DateField(null=True, blank=True)
     target_cut_start_date = models.DateField(null=True, blank=True)
     target_cut_end_date = models.DateField(null=True, blank=True)
+    additional_process_name = models.CharField(max_length=80, blank=True)
+    target_additional_process_start_date = models.DateField(null=True, blank=True)
+    target_additional_process_end_date = models.DateField(null=True, blank=True)
     target_make_start_date = models.DateField(null=True, blank=True)
     target_make_end_date = models.DateField(null=True, blank=True)
     target_trim_start_date = models.DateField(null=True, blank=True)
@@ -89,6 +92,11 @@ class ProductionPlan(models.Model):
         super().clean()
         pairs = (
             ("target_cut_start_date", "target_cut_end_date", "Cut"),
+            (
+                "target_additional_process_start_date",
+                "target_additional_process_end_date",
+                "Additional Process",
+            ),
             ("target_make_start_date", "target_make_end_date", "Make"),
             ("target_trim_start_date", "target_trim_end_date", "Trim"),
             ("target_qc_start_date", "target_qc_end_date", "QC"),
@@ -109,6 +117,7 @@ class ProductionStage(models.Model):
     class Stage(models.TextChoices):
         MATERIAL_PURCHASE = "MATERIAL_PURCHASE", "Pembelian Material"
         CUT = "CUT", "Cut · Potong"
+        ADDITIONAL_PROCESS = "ADDITIONAL_PROCESS", "Additional Process"
         MAKE = "MAKE", "Make · Jahit"
         TRIM = "TRIM", "Trim · Finishing"
 
@@ -175,9 +184,16 @@ class ProductionStage(models.Model):
             raise ValidationError(
                 {"material_arrival_date": "Tanggal material datang hanya digunakan pada tahap Pembelian Material."}
             )
-        cmt_stages = {self.Stage.CUT, self.Stage.MAKE, self.Stage.TRIM}
+        cmt_stages = {
+            self.Stage.CUT,
+            self.Stage.ADDITIONAL_PROCESS,
+            self.Stage.MAKE,
+            self.Stage.TRIM,
+        }
         if self.stage not in cmt_stages and self.completed_qty != 0:
-            raise ValidationError({"completed_qty": "Qty selesai hanya digunakan untuk tahap Cut, Make, dan Trim."})
+            raise ValidationError(
+                {"completed_qty": "Qty selesai hanya digunakan untuk tahap Cut, Additional Process, Make, dan Trim."}
+            )
         if self.completed_qty != self.completed_qty.to_integral_value():
             raise ValidationError({"completed_qty": "Qty Production harus berupa bilangan bulat."})
 
@@ -329,6 +345,7 @@ class ProductionActivity(models.Model):
         TRIAL_APPROVE = "TRIAL_APPROVE", "Approve Trial Production"
         TRIAL_REVISION = "TRIAL_REVISION", "Revision Required Trial Production"
         CUT = "CUT", "Cut · Potong"
+        ADDITIONAL_PROCESS = "ADDITIONAL_PROCESS", "Additional Process"
         MAKE = "MAKE", "Make · Jahit"
         TRIM = "TRIM", "Trim · Finishing"
         QC = "QC", "Quality Control"

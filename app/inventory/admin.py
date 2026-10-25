@@ -5,6 +5,7 @@ from .models import (
     FIFOAllocation,
     FIFOOpeningSnapshot,
     FIFOLayer,
+    InboundDiscrepancy,
     InboundReceipt,
     InventoryException,
     InventoryMovement,
@@ -19,6 +20,7 @@ admin.site.register(QCInspection)
 admin.site.register(QCFollowUp)
 admin.site.register(QCFollowUpEvent)
 admin.site.register(InboundReceipt)
+admin.site.register(InboundDiscrepancy)
 admin.site.register(InventoryMovement)
 admin.site.register(FIFOLayer)
 admin.site.register(FIFOAllocation)

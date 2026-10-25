@@ -20,7 +20,7 @@
   <div class="table-wrap"><table><thead><tr><th>Tanggal Reject</th><th>PO Production</th><th>Supplier</th><th>SKU</th><th>Product</th><th>Size</th><th>Qty</th><th>Alasan Gagal</th><th>Status Pengiriman</th><th>Dicatat oleh</th><th></th></tr></thead><tbody>
     {% for row in rows %}<tr>
       <td>{{ row.rejected_date|date:"d M Y" }}</td>
-      <td><strong>{{ row.item.po_line.po.po_number }}</strong></td>
+      <td><strong>{{ row.item.po_line.po.production_reference }}</strong></td>
       <td>{{ row.item.po_line.po.supplier.name }}</td>
       <td><span class="sku-tag">{{ row.item.po_line.sku.sku }}</span></td>
       <td>{{ row.item.po_line.sku.product_variant.product.name }}</td>

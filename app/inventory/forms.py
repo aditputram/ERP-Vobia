@@ -90,17 +90,59 @@ class DeliveryReceiveForm(forms.Form):
         initial=timezone.localdate,
         widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
     )
-    received_qty = forms.IntegerField(label="Quantity Received", min_value=1)
+    received_qty = forms.IntegerField(
+        label="Sellable Received",
+        min_value=0,
+        required=False,
+        widget=forms.NumberInput(attrs={"min": 0, "step": 1, "data-inbound-qty": ""}),
+    )
+    shortage_qty = forms.IntegerField(
+        label="Shortage",
+        min_value=0,
+        required=False,
+        initial=0,
+        widget=forms.NumberInput(attrs={"min": 0, "step": 1, "data-inbound-qty": ""}),
+    )
+    lost_qty = forms.IntegerField(
+        label="Lost",
+        min_value=0,
+        required=False,
+        initial=0,
+        widget=forms.NumberInput(attrs={"min": 0, "step": 1, "data-inbound-qty": ""}),
+    )
+    damaged_qty = forms.IntegerField(
+        label="Damaged",
+        min_value=0,
+        required=False,
+        initial=0,
+        widget=forms.NumberInput(attrs={"min": 0, "step": 1, "data-inbound-qty": ""}),
+    )
+    not_sellable_qty = forms.IntegerField(
+        label="Not Sellable",
+        min_value=0,
+        required=False,
+        initial=0,
+        widget=forms.NumberInput(attrs={"min": 0, "step": 1, "data-inbound-qty": ""}),
+    )
     warehouse = forms.ModelChoiceField(
         label="Gudang penerima",
         queryset=Warehouse.objects.filter(is_active=True),
     )
     notes = forms.CharField(label="Catatan", required=False, widget=forms.Textarea(attrs={"rows": 2}))
 
-    def __init__(self, *args, max_qty=None, min_date=None, default_warehouse_code="MAIN", **kwargs):
+    def __init__(
+        self,
+        *args,
+        max_qty=None,
+        min_date=None,
+        default_warehouse_code="MAIN",
+        allow_discrepancies=True,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.expected_qty = int(max_qty) if max_qty is not None else None
         self.min_date = min_date
+        self.allow_discrepancies = allow_discrepancies
         if not self.is_bound:
             self.fields["warehouse"].initial = self.fields["warehouse"].queryset.filter(
                 code=default_warehouse_code
@@ -110,8 +152,15 @@ class DeliveryReceiveForm(forms.Form):
         if min_date is not None:
             self.fields["inbound_date"].widget.attrs["min"] = min_date.isoformat()
         if max_qty is not None:
-            self.fields["received_qty"].max_value = int(max_qty)
-            self.fields["received_qty"].widget.attrs["max"] = int(max_qty)
+            for name in (
+                "received_qty",
+                "shortage_qty",
+                "lost_qty",
+                "damaged_qty",
+                "not_sellable_qty",
+            ):
+                self.fields[name].max_value = int(max_qty)
+                self.fields[name].widget.attrs["max"] = int(max_qty)
 
     def clean_inbound_date(self):
         inbound_date = self.cleaned_data["inbound_date"]
@@ -121,13 +170,28 @@ class DeliveryReceiveForm(forms.Form):
             )
         return inbound_date
 
-    def clean_received_qty(self):
-        quantity = self.cleaned_data["received_qty"]
-        if self.expected_qty is not None and quantity != self.expected_qty:
+    def clean(self):
+        cleaned = super().clean()
+        quantity_fields = (
+            "received_qty",
+            "shortage_qty",
+            "lost_qty",
+            "damaged_qty",
+            "not_sellable_qty",
+        )
+        quantities = {name: cleaned.get(name) or 0 for name in quantity_fields}
+        cleaned.update(quantities)
+        exception_total = sum(quantities[name] for name in quantity_fields[1:])
+        if not self.allow_discrepancies and exception_total:
+            raise forms.ValidationError("Rejected Goods harus diterima penuh tanpa inbound discrepancy.")
+        accounted = sum(quantities.values())
+        if self.expected_qty is not None and accounted != self.expected_qty:
             raise forms.ValidationError(
-                f"Quantity Received harus sama dengan Qty Delivering ({self.expected_qty} pcs)."
+                f"Total Sellable + Exception harus sama dengan Qty Delivering ({self.expected_qty} pcs)."
             )
-        return quantity
+        if exception_total and not (cleaned.get("notes") or "").strip():
+            self.add_error("notes", "Catatan wajib diisi bila ada inbound exception.")
+        return cleaned
 
 
 class ReturnForm(forms.Form):

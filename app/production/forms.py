@@ -12,6 +12,16 @@ from .services import (
 )
 
 
+def _qc_disposition_choices(production_order, *, re_qc=False):
+    ppic_plan = getattr(production_order.po, "ppic_production_plan", None) if production_order else None
+    choices = list(QCInspection.Disposition.choices)
+    if not ppic_plan or ppic_plan.production_method != "FPP":
+        choices = [choice for choice in choices if choice[0] != QCInspection.Disposition.VENDOR_REJECTED]
+    if re_qc:
+        choices = [choice for choice in choices if choice[0] != QCInspection.Disposition.ACCEPTED_EXCEPTION]
+    return choices
+
+
 class ProductionPlanForm(forms.ModelForm):
     change_reason = forms.CharField(
         label="Alasan perubahan plan",
@@ -110,7 +120,7 @@ class ProductionActivityForm(forms.Form):
             plan__status=ProductionPlan.Status.ACTIVE,
         ).select_related("po", "po__supplier")
         self.fields["production_order"].label_from_instance = lambda row: (
-            f"{row.po.po_number} · {row.po.supplier.name}"
+            f"{row.po.production_reference} · {row.po.supplier.name}"
         )
         self.fields["activity_type"].choices = [("", "Pilih activity...")] + list(eligible_choices)
         if production_order:
@@ -143,6 +153,9 @@ class ProductionActivityForm(forms.Form):
                         "line": line,
                         "field_name": field_name,
                         "available_cut_qty": availability[ProductionStage.Stage.CUT],
+                        "available_additional_process_qty": availability[
+                            ProductionStage.Stage.ADDITIONAL_PROCESS
+                        ],
                         "available_make_qty": availability[ProductionStage.Stage.MAKE],
                         "available_trim_qty": availability[ProductionStage.Stage.TRIM],
                         "available_delivery_qty": delivery_line_availability(production_order, line),
@@ -176,7 +189,8 @@ class ProductionActivityForm(forms.Form):
                 )
                 self.fields[disposition_name] = forms.ChoiceField(
                     label="Tindak Lanjut Barang Gagal",
-                    choices=[("", "— Pilih tindak lanjut —")] + list(QCInspection.Disposition.choices),
+                    choices=[("", "— Pilih tindak lanjut —")]
+                    + _qc_disposition_choices(production_order),
                     required=False,
                     disabled=disabled,
                     widget=forms.Select(attrs={"data-qc-disposition": ""}),
@@ -207,6 +221,7 @@ class ProductionActivityForm(forms.Form):
                 "line": row["line"],
                 "field": self[row["field_name"]],
                 "available_cut_qty": row["available_cut_qty"],
+                "available_additional_process_qty": row["available_additional_process_qty"],
                 "available_make_qty": row["available_make_qty"],
                 "available_trim_qty": row["available_trim_qty"],
                 "available_delivery_qty": row["available_delivery_qty"],
@@ -262,6 +277,7 @@ class ProductionActivityForm(forms.Form):
         activity_type = cleaned.get("activity_type")
         if activity_type in {
             ProductionActivity.ActivityType.CUT,
+            ProductionActivity.ActivityType.ADDITIONAL_PROCESS,
             ProductionActivity.ActivityType.MAKE,
             ProductionActivity.ActivityType.TRIM,
             ProductionActivity.ActivityType.WAREHOUSE_DELIVERY,
@@ -320,6 +336,12 @@ class ProductionCorrectionForm(forms.Form):
     notes = forms.CharField(label="Catatan activity yang benar", required=False, widget=forms.Textarea(attrs={"rows": 2}))
     reason = forms.CharField(label="Alasan koreksi", widget=forms.Textarea(attrs={"rows": 3}))
 
+    def __init__(self, *args, production_order=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["failed_disposition"].choices = [("", "—")] + _qc_disposition_choices(
+            production_order
+        )
+
 
 class ReworkCompletionForm(forms.Form):
     activity_date = forms.DateField(
@@ -355,9 +377,13 @@ class ReQCForm(forms.Form):
     )
     notes = forms.CharField(label="Catatan Re-QC", required=False, widget=forms.Textarea(attrs={"rows": 3}))
 
-    def __init__(self, *args, max_qty, **kwargs):
+    def __init__(self, *args, max_qty, production_order=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.max_qty = int(max_qty)
+        self.fields["failed_disposition"].choices = [
+            ("", "— Tidak ada barang gagal —"),
+            *_qc_disposition_choices(production_order, re_qc=True),
+        ]
         self.fields["qty_passed"].max_value = self.max_qty
         self.fields["qty_passed"].widget.attrs["max"] = self.max_qty
         self.fields["qty_passed"].widget.attrs["data-re-qc-total"] = self.max_qty
@@ -415,6 +441,7 @@ class ProductionStageUpdateForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         cmt_labels = {
             ProductionStage.Stage.CUT: "Qty sudah di-Cut",
+            ProductionStage.Stage.ADDITIONAL_PROCESS: "Qty sudah di-Additional Process",
             ProductionStage.Stage.MAKE: "Qty sudah di-Make",
             ProductionStage.Stage.TRIM: "Qty sudah di-Trim",
         }

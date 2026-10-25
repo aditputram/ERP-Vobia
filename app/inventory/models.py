@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -96,6 +97,7 @@ class QCInspection(models.Model):
     class Disposition(models.TextChoices):
         REWORK = "REWORK", "Rework"
         REJECTED = "REJECTED", "Rejected"
+        VENDOR_REJECTED = "VENDOR_REJECTED", "Rejected / Not Received"
         ACCEPTED_EXCEPTION = "ACCEPTED_WITH_EXCEPTION", "Accepted with Exception"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -127,6 +129,12 @@ class QCInspection(models.Model):
             raise ValidationError("Qty Passed + Failed tidak boleh melebihi Qty Inspected.")
         if self.qty_failed > 0 and not self.failed_disposition:
             raise ValidationError({"failed_disposition": "Disposition wajib untuk Qty Failed."})
+        if self.failed_disposition == self.Disposition.VENDOR_REJECTED:
+            ppic_plan = getattr(self.po_line.po, "ppic_production_plan", None)
+            if not ppic_plan or ppic_plan.production_method != "FPP":
+                raise ValidationError(
+                    {"failed_disposition": "Rejected / Not Received hanya berlaku untuk FPP."}
+                )
 
 
 class QCFollowUp(models.Model):
@@ -134,6 +142,7 @@ class QCFollowUp(models.Model):
         AWAITING_REWORK = "AWAITING_REWORK", "Menunggu Rework"
         READY_RE_QC = "READY_RE_QC", "Menunggu Re-QC"
         REJECTED = "REJECTED", "Rejected"
+        VENDOR_REJECTED = "VENDOR_REJECTED", "Rejected / Not Received"
         ACCEPTED_EXCEPTION = "ACCEPTED_EXCEPTION", "Accepted with Exception"
         RESOLVED = "RESOLVED", "Lolos Re-QC"
 
@@ -267,6 +276,90 @@ class InboundReceipt(models.Model):
         super().clean()
         if self.received_qty != self.received_qty.to_integral_value():
             raise ValidationError({"received_qty": "Received Qty harus bilangan bulat."})
+
+
+class InboundDiscrepancy(models.Model):
+    class Type(models.TextChoices):
+        SHORTAGE = "SHORTAGE", "Shortage"
+        LOST = "LOST", "Lost"
+        DAMAGED = "DAMAGED", "Damaged"
+        NOT_SELLABLE = "NOT_SELLABLE", "Not Sellable"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    delivery_activity = models.ForeignKey(
+        "production.ProductionActivity",
+        on_delete=models.PROTECT,
+        related_name="inbound_discrepancies",
+    )
+    po_line = models.ForeignKey(
+        "purchasing.PurchaseOrderLine",
+        on_delete=models.PROTECT,
+        related_name="inbound_discrepancies",
+    )
+    inbound_date = models.DateField()
+    discrepancy_type = models.CharField(max_length=30, choices=Type.choices)
+    quantity = models.DecimalField(max_digits=18, decimal_places=4)
+    warehouse = models.ForeignKey(
+        "master_data.Warehouse",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="inbound_discrepancies",
+    )
+    movement = models.OneToOneField(
+        "InventoryMovement",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="inbound_discrepancy",
+    )
+    notes = models.TextField(blank=True)
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("inbound_date", "created_at")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["delivery_activity", "discrepancy_type"],
+                name="inventory_unique_delivery_discrepancy_type",
+            ),
+            models.CheckConstraint(
+                condition=Q(quantity__gt=0),
+                name="inventory_inbound_discrepancy_positive",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.quantity != self.quantity.to_integral_value():
+            raise ValidationError({"quantity": "Qty discrepancy harus bilangan bulat."})
+        if self.delivery_activity_id and self.po_line_id:
+            if self.delivery_activity.po_line_id != self.po_line_id:
+                raise ValidationError("Delivery Activity dan PO Line discrepancy tidak sesuai.")
+        physical_types = {self.Type.DAMAGED, self.Type.NOT_SELLABLE}
+        if self.discrepancy_type in physical_types and not self.warehouse_id:
+            raise ValidationError({"warehouse": "Barang fisik exception wajib memiliki warehouse."})
+        if self.discrepancy_type not in physical_types and self.warehouse_id:
+            raise ValidationError({"warehouse": "Shortage/Lost tidak memiliki barang fisik di warehouse."})
+
+    def __str__(self):
+        return (
+            f"{self.get_discrepancy_type_display()} · "
+            f"{self.po_line.sku.sku} · {self.quantity:g} pcs"
+        )
+
+    @property
+    def loss_amount(self):
+        allocation = getattr(self, "finance_journal_allocation", None)
+        if allocation is not None:
+            return allocation.loss_amount
+        return self.quantity * Decimal(self.po_line.cogs_snapshot or 0)
+
+    @property
+    def loss_journal_number(self):
+        allocation = getattr(self, "finance_journal_allocation", None)
+        return allocation.entry.number if allocation is not None else ""
 
 
 class InventoryMovement(models.Model):

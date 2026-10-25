@@ -12,6 +12,7 @@ from audit.services import record_audit
 from .models import (
     Account,
     FINANCE_OPENING_DATE,
+    InboundLossJournalAllocation,
     JournalEntry,
     JournalLine,
     JournalNumberSequence,
@@ -26,6 +27,7 @@ OPENING_ENTRY_NUMBER = "OPENING-20260831"
 OPENING_OFFSET_ACCOUNT_CODE = "300001"
 SALES_JOURNAL_WORKFLOW = "SALES_JOURNAL_BATCH"
 SALES_RETURN_JOURNAL_WORKFLOW = "SALES_RETURN_JOURNAL_BATCH"
+INBOUND_LOSS_JOURNAL_WORKFLOW = "INBOUND_LOSS"
 PENDING_SALES_INVOICE_STATUSES = ("Belum Bayar", "Belum Dibayar", "Perlu Dikirim")
 
 
@@ -234,6 +236,121 @@ def _validated_account(account_id, *, allowed_types, parent_code=None, label):
     if not account or (parent_code and getattr(account.parent, "code", None) != parent_code):
         raise ValidationError(f"{label} tidak valid atau tidak dapat dipakai transaksi.")
     return account
+
+
+@transaction.atomic
+def create_inbound_loss_journal_draft(*, discrepancies, actor):
+    """Expense company-borne inbound exceptions without inflating sellable COGS."""
+    discrepancies = list(discrepancies)
+    if not discrepancies:
+        return None
+
+    delivery_ids = {row.delivery_activity_id for row in discrepancies}
+    inbound_dates = {row.inbound_date for row in discrepancies}
+    if len(delivery_ids) != 1 or len(inbound_dates) != 1:
+        raise ValidationError("Inbound exception dalam satu jurnal harus berasal dari satu pengiriman dan tanggal.")
+    inbound_date = inbound_dates.pop()
+    if inbound_date < FINANCE_OPENING_DATE:
+        return None
+
+    discrepancy_ids = [row.id for row in discrepancies]
+    if InboundLossJournalAllocation.objects.filter(discrepancy_id__in=discrepancy_ids).exists():
+        raise ValidationError("Inbound exception ini sudah pernah dijurnal.")
+    missing_cogs = [row.po_line.sku.sku for row in discrepancies if row.po_line.cogs_snapshot is None]
+    if missing_cogs:
+        raise ValidationError("COGS snapshot belum tersedia untuk: " + ", ".join(sorted(set(missing_cogs))))
+
+    loss_account = _validated_account(
+        Account.objects.filter(code="9100").values_list("id", flat=True).first(),
+        allowed_types={"OEXP"},
+        label="Akun beban penyesuaian persediaan",
+    )
+    inventory_account = _validated_account(
+        Account.objects.filter(code="110401").values_list("id", flat=True).first(),
+        allowed_types={"INTR"},
+        label="Akun persediaan",
+    )
+    allocations = [
+        (
+            row,
+            (Decimal(row.quantity) * Decimal(row.po_line.cogs_snapshot)).quantize(MONEY_QUANTUM),
+        )
+        for row in discrepancies
+    ]
+    loss_total = sum((amount for _row, amount in allocations), Decimal("0")).quantize(MONEY_QUANTUM)
+    if loss_total <= 0:
+        raise ValidationError("Nilai kerugian inbound harus lebih dari nol.")
+
+    first = discrepancies[0]
+    delivery = first.delivery_activity
+    do_number = delivery.delivery_order.number
+    po_number = first.po_line.po.po_number
+    entry = JournalEntry(
+        number=next_journal_number(inbound_date),
+        entry_date=inbound_date,
+        description=f"Inbound Loss {do_number}",
+        reference=f"{do_number} / {po_number}"[:120],
+        source=JournalEntry.Source.SYSTEM,
+        source_metadata={
+            "workflow": INBOUND_LOSS_JOURNAL_WORKFLOW,
+            "delivery_activity_id": str(delivery.id),
+            "delivery_order": do_number,
+            "po_number": po_number,
+            "sku": first.po_line.sku.sku,
+            "discrepancy_ids": [str(row.id) for row in discrepancies],
+            "discrepancy_types": [row.discrepancy_type for row in discrepancies],
+            "quantity": str(sum((Decimal(row.quantity) for row in discrepancies), Decimal("0"))),
+        },
+        created_by=actor,
+    )
+    entry.full_clean()
+    entry.save()
+
+    lines = (
+        JournalLine(
+            entry=entry,
+            line_number=1,
+            account=loss_account,
+            description=f"Kerugian inbound · {do_number}",
+            debit=loss_total,
+            credit=Decimal("0"),
+        ),
+        JournalLine(
+            entry=entry,
+            line_number=2,
+            account=inventory_account,
+            description=f"Persediaan berkurang · {do_number}",
+            debit=Decimal("0"),
+            credit=loss_total,
+        ),
+    )
+    for line in lines:
+        line.full_clean()
+        line.save()
+
+    InboundLossJournalAllocation.objects.bulk_create(
+        [
+            InboundLossJournalAllocation(
+                entry=entry,
+                discrepancy=row,
+                loss_amount=amount,
+            )
+            for row, amount in allocations
+        ]
+    )
+    record_audit(
+        actor=actor,
+        action="finance_inbound_loss_journal_draft_created",
+        entity_type="finance.journal_entry",
+        entity_id=entry.id,
+        after_values={
+            "journal_number": entry.number,
+            "loss_amount": str(loss_total),
+            "discrepancy_count": len(discrepancies),
+        },
+        metadata=entry.source_metadata,
+    )
+    return entry
 
 
 @transaction.atomic

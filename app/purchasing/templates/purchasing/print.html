@@ -67,7 +67,9 @@
       <div class="document-title">
         <h1>Purchase Order</h1>
         <dl class="doc-meta">
-          <dt>PO Number</dt><dd>{{ po.po_number|default:"Draft" }}</dd>
+          {% if po.parent_plan_id %}<dt>PPO Number</dt><dd>{{ po.ppo_number|default:"Draft PPO" }}</dd>{% endif %}
+          <dt>PO Number</dt><dd>{{ po.po_number|default:"Draft" }}{% if not po.po_number and po.child_code %} {{ po.child_code }}{% endif %}</dd>
+          <dt>PO Type</dt><dd>{{ po.get_order_type_display }}</dd>
           <dt>PO Date</dt><dd>{{ po_date|date:"d M Y" }}</dd>
           <dt>Required Arrival</dt><dd>{{ po.required_arrival|date:"d M Y"|default:"—" }}</dd>
         </dl>
@@ -89,13 +91,19 @@
       <table class="items">
         <thead><tr><th>Item Description</th><th class="center">Qty</th><th class="center">Unit</th><th class="right">Unit COGS</th><th class="right">Total Cost</th></tr></thead>
         <tbody>
-          {% for item in print_lines %}<tr>
+          {% for row in print_items %}<tr>
+            <td><div class="item-name">{{ row.item.description }}</div><div class="item-sku">{{ row.item.product_label }}</div></td>
+            <td class="center">{{ row.item.quantity|floatformat:"0g" }}</td>
+            <td class="center">{{ row.item.unit|default:"—" }}</td>
+            <td class="right nowrap">Rp {{ row.item.unit_price|floatformat:"0g" }}</td>
+            <td class="right nowrap">Rp {{ row.line_total|floatformat:"0g" }}</td>
+          </tr>{% empty %}{% for item in print_lines %}<tr>
             <td><div class="item-name">{{ item.line.sku.product_variant.product.name }}</div><div class="item-sku">SKU: {{ item.line.sku.sku }}</div></td>
             <td class="center">{{ item.line.ordered_qty|floatformat:"0g" }}</td>
             <td class="center">Pcs</td>
             <td class="right nowrap">{% if item.line.cogs_snapshot != None %}Rp {{ item.line.cogs_snapshot|floatformat:"0g" }}{% else %}—{% endif %}</td>
             <td class="right nowrap">{% if item.line_total != None %}Rp {{ item.line_total|floatformat:"0g" }}{% else %}—{% endif %}</td>
-          </tr>{% endfor %}
+          </tr>{% endfor %}{% endfor %}
         </tbody>
       </table>
     </div>
@@ -111,7 +119,7 @@
       </div>
       <table class="totals">
         <tr><th>Subtotal</th><td>Rp {{ subtotal|floatformat:"0g" }}</td></tr>
-        <tr><th>Total Qty</th><td>{{ total_qty|floatformat:"0g" }} pcs</td></tr>
+        <tr><th>Total Qty</th><td>{{ total_qty|floatformat:"0g" }}{% if not print_items %} pcs{% endif %}</td></tr>
         <tr class="grand"><th>Total Cost</th><td>Rp {{ subtotal|floatformat:"0g" }}</td></tr>
       </table>
     </section>

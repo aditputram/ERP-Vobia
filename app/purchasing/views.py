@@ -1,33 +1,43 @@
-from collections import defaultdict
 from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.http import HttpResponseNotAllowed
 from django.utils import timezone
-from django.utils.dateparse import parse_date
 from django.shortcuts import get_object_or_404, redirect, render
 from openpyxl import Workbook
 
 from config.excel_exports import append_table, workbook_response
 from inventory.services.aging import po_aging_snapshot
 from imports.services.storage import DuplicateRawFile
-from master_data.models import Supplier
+from master_data.models import Product, Supplier
 
-from .forms import LegacyWIPSupplierRevisionForm, POWIPImportUploadForm, SupplierForm
-from .models import PPICRequirement, POWIPImportBatch, POWIPImportIssue, PurchaseOrder
+from .forms import (
+    LegacyWIPSupplierRevisionForm,
+    POWIPImportUploadForm,
+    PPICProductionPlanForm,
+    SupplierForm,
+)
+from .models import (
+    PPICProductionPlan,
+    PPICRequirement,
+    POWIPImportBatch,
+    POWIPImportIssue,
+    PurchaseOrder,
+)
 from .services.wip_import import approve_po_wip_import, create_po_wip_import
 from .services.workflows import (
     cancel_po,
-    create_draft_po,
     delete_unused_supplier,
     delete_draft_po,
+    generate_po_from_production_plan,
+    production_plan_po_groups,
     release_po,
     revise_legacy_wip_supplier,
+    save_ppic_production_plan,
 )
 
 
@@ -42,7 +52,7 @@ def _requirements_with_ui_state(selected_requirement_ids=None, selected_quantiti
             "sku__product_variant__product__category",
         )
         .filter(approved_qty__gt=0)
-        .prefetch_related("po_lines__po")
+        .prefetch_related("po_lines__po", "production_plan_lines__plan")
         .order_by("need_month", "sku__sku")
     )
     if need_month:
@@ -51,74 +61,26 @@ def _requirements_with_ui_state(selected_requirement_ids=None, selected_quantiti
         queryset
     )
     for row in requirements:
+        row.planned_qty = sum(
+            (
+                line.quantity
+                for line in row.production_plan_lines.all()
+                if line.plan.purchase_order_id is None
+            ),
+            Decimal("0"),
+        )
+        row.available_for_plan_qty = max(row.remaining_qty - row.planned_qty, Decimal("0"))
         row.ui_selected = str(row.id) in selected_requirement_ids
-        row.ui_quantity = selected_quantities.get(str(row.id), row.remaining_qty)
+        row.ui_quantity = selected_quantities.get(str(row.id), row.available_for_plan_qty)
         if row.remaining_qty <= 0:
             row.ui_status = "Fully Allocated"
+        elif row.available_for_plan_qty <= 0:
+            row.ui_status = "In Production Plan"
         elif row.ordered_qty > 0:
             row.ui_status = "Partially Allocated"
         else:
             row.ui_status = "Open"
     return requirements
-
-
-def _generator_eligible_requirements():
-    """Workbook Create PO eligibility: one existing non-cancelled PO line consumes the Need Key."""
-    requirements = list(
-        PPICRequirement.objects.select_related(
-            "sku",
-            "sku__product_variant",
-            "sku__product_variant__product",
-            "sku__product_variant__product__status",
-            "sku__product_variant__product__category",
-            "sku__product_variant__product__subcategory",
-        )
-        .prefetch_related("po_lines__po")
-        .order_by("need_month", "sku__product_variant__product__name", "sku__sku")
-    )
-    return [
-        row
-        for row in requirements
-        if row.approved_qty > 0
-        and not any(line.po.status != PurchaseOrder.Status.CANCELLED for line in row.po_lines.all())
-    ]
-
-
-def _generator_selected(source):
-    return {
-        "months": [value for value in source.getlist("month") if value],
-        "statuses": [value for value in source.getlist("status") if value],
-        "categories": [value for value in source.getlist("category") if value],
-        "products": [value for value in source.getlist("product") if value],
-        "sizes": [value for value in source.getlist("size") if value],
-    }
-
-
-def _generator_filter_rows(rows, selected, fields):
-    filtered = rows
-    if "months" in fields and selected["months"]:
-        filtered = [row for row in filtered if row.need_month.strftime("%Y-%m") in selected["months"]]
-    if "statuses" in fields and selected["statuses"]:
-        filtered = [
-            row
-            for row in filtered
-            if str(row.sku.product_variant.product.status_id) in selected["statuses"]
-        ]
-    if "categories" in fields and selected["categories"]:
-        filtered = [
-            row
-            for row in filtered
-            if str(row.sku.product_variant.product.category_id) in selected["categories"]
-        ]
-    if "products" in fields and selected["products"]:
-        filtered = [
-            row
-            for row in filtered
-            if str(row.sku.product_variant.product_id) in selected["products"]
-        ]
-    if "sizes" in fields and selected["sizes"]:
-        filtered = [row for row in filtered if (row.sku.size or "—") in selected["sizes"]]
-    return filtered
 
 
 def _unique_options(rows, value_getter, label_getter):
@@ -129,165 +91,27 @@ def _unique_options(rows, value_getter, label_getter):
     return [{"value": value, "label": label} for value, label in sorted(options.items(), key=lambda item: item[1])]
 
 
-def _generator_state(source):
-    base_rows = _generator_eligible_requirements()
-    selected = _generator_selected(source)
-
-    month_options = [
-        {"value": month.strftime("%Y-%m"), "label": month.strftime("%B %Y")}
-        for month in sorted({row.need_month for row in base_rows})
-    ]
-    valid_months = {option["value"] for option in month_options}
-    selected["months"] = [value for value in selected["months"] if value in valid_months]
-    after_month = _generator_filter_rows(base_rows, selected, {"months"})
-    status_options = _unique_options(
-        after_month,
-        lambda row: row.sku.product_variant.product.status_id,
-        lambda row: row.sku.product_variant.product.status.name,
-    )
-    valid_statuses = {option["value"] for option in status_options}
-    selected["statuses"] = [value for value in selected["statuses"] if value in valid_statuses]
-    after_status = _generator_filter_rows(after_month, selected, {"statuses"})
-    category_options = _unique_options(
-        after_status,
-        lambda row: row.sku.product_variant.product.category_id,
-        lambda row: row.sku.product_variant.product.category.name,
-    )
-    valid_categories = {option["value"] for option in category_options}
-    selected["categories"] = [value for value in selected["categories"] if value in valid_categories]
-    after_category = _generator_filter_rows(after_status, selected, {"categories"})
-    product_options = _unique_options(
-        after_category,
-        lambda row: row.sku.product_variant.product_id,
-        lambda row: row.sku.product_variant.product.name,
-    )
-    valid_products = {option["value"] for option in product_options}
-    selected["products"] = [value for value in selected["products"] if value in valid_products]
-    after_product = _generator_filter_rows(after_category, selected, {"products"})
-    size_options = _unique_options(after_product, lambda row: row.sku.size or "—", lambda row: row.sku.size or "—")
-    valid_sizes = {option["value"] for option in size_options}
-    selected["sizes"] = [value for value in selected["sizes"] if value in valid_sizes]
-    candidates = _generator_filter_rows(after_product, selected, {"sizes"})
-
-    for row in candidates:
-        row.po_qty = row.approved_qty
-        row.current_cogs = row.sku.current_master_cogs
-        row.cogs_field_name = f"cogs_{row.id}"
-        if row.cogs_field_name in source:
-            row.cogs_input_value = source.get(row.cogs_field_name, "")
-        elif row.current_cogs is not None:
-            row.cogs_input_value = format(
-                row.current_cogs.to_integral_value()
-                if row.current_cogs == row.current_cogs.to_integral_value()
-                else row.current_cogs,
-                "f",
-            )
-        else:
-            row.cogs_input_value = ""
-        try:
-            row.proposed_cogs = Decimal(row.cogs_input_value)
-        except Exception:
-            row.proposed_cogs = None
-        if (
-            row.proposed_cogs is None
-            or row.proposed_cogs <= 0
-            or row.proposed_cogs != row.proposed_cogs.to_integral_value()
-        ):
-            row.proposed_cogs = None
-        row.incoming_cogs = (
-            row.po_qty * row.proposed_cogs if row.proposed_cogs is not None else None
-        )
-
-    candidate_months = []
-    for need_month in sorted({row.need_month for row in candidates}):
-        field_name = f"arrival_{need_month:%Y_%m}"
-        candidate_months.append(
-            {
-                "date": need_month,
-                "field_name": field_name,
-                "value": source.get(field_name, ""),
-            }
-        )
-
-    return {
-        "selected": selected,
-        "month_options": month_options,
-        "status_options": status_options,
-        "category_options": category_options,
-        "product_options": product_options,
-        "size_options": size_options,
-        "candidates": candidates,
-        "candidate_months": candidate_months,
-        "candidate_qty": sum((row.po_qty for row in candidates), Decimal("0")),
-        "candidate_cogs": sum(
-            (row.incoming_cogs or Decimal("0") for row in candidates), Decimal("0")
-        ),
-        "has_missing_cogs": any(row.proposed_cogs is None for row in candidates),
-    }
-
-
-def _create_generator_pos(request, state):
-    errors = []
-    supplier = Supplier.objects.filter(pk=request.POST.get("supplier"), is_active=True).first()
-    if supplier is None:
-        errors.append("Vendor wajib dipilih dari Daftar Vendor aktif.")
-    if not state["candidates"]:
-        errors.append("Tidak ada requirement eligible untuk filter ini.")
-    cogs_by_requirement = {}
-    for row in state["candidates"]:
-        if row.proposed_cogs is None:
-            errors.append(f"PPIC COGS {row.sku.sku} wajib berupa Rupiah bulat positif.")
-        else:
-            cogs_by_requirement[row.id] = row.proposed_cogs
-
-    grouped = defaultdict(list)
-    arrivals = {}
-    for row in state["candidates"]:
-        grouped[row.need_month].append(row)
-    for need_month in grouped:
-        field_name = f"arrival_{need_month:%Y_%m}"
-        arrival = parse_date(request.POST.get(field_name, ""))
-        if arrival is None:
-            errors.append(f"Required Arrival {need_month:%B %Y} wajib diisi.")
-        else:
-            arrivals[need_month] = arrival
-    if errors:
-        return [], errors, supplier, arrivals
-
-    created = []
-    try:
-        with transaction.atomic():
-            for need_month, rows in sorted(grouped.items()):
-                quantities = {row.id: row.po_qty for row in rows}
-                created.append(
-                    create_draft_po(
-                        supplier=supplier,
-                        need_month=need_month,
-                        required_arrival=arrivals[need_month],
-                        actor=request.user,
-                        requirement_quantities=quantities,
-                        requirement_cogs={row.id: cogs_by_requirement[row.id] for row in rows},
-                        notes=request.POST.get("notes", "").strip(),
-                    )
-                )
-    except ValidationError as exc:
-        errors.extend(exc.messages)
-        return [], errors, supplier, arrivals
-    return created, [], supplier, arrivals
-
-
 def _tracking_rows(filters=None, *, limit=100):
     filters = filters or {}
     rows = []
     today = timezone.localdate()
-    pos = PurchaseOrder.objects.select_related("supplier").prefetch_related(
-        "lines__sku", "lines__qc_inspections", "lines__inbound_receipts"
+    pos = PurchaseOrder.objects.select_related("supplier", "parent_plan").prefetch_related(
+        "items__product", "lines__sku", "lines__qc_inspections", "lines__inbound_receipts"
     )
     query = filters.get("query", "")
     if query:
-        pos = pos.filter(Q(po_number__icontains=query) | Q(lines__sku__sku__icontains=query)).distinct()
+        pos = pos.filter(
+            Q(po_number__icontains=query)
+            | Q(parent_plan__ppo_number__icontains=query)
+            | Q(lines__sku__sku__icontains=query)
+        ).distinct()
     if filters.get("supplier"):
         pos = pos.filter(supplier_id=filters["supplier"])
+    if filters.get("products"):
+        pos = pos.filter(
+            Q(lines__sku__product_variant__product_id__in=filters["products"])
+            | Q(items__product_id__in=filters["products"])
+        ).distinct()
     if filters.get("po_status") in PurchaseOrder.Status.values:
         pos = pos.filter(status=filters["po_status"])
     if filters.get("need_month"):
@@ -300,6 +124,7 @@ def _tracking_rows(filters=None, *, limit=100):
     if limit is not None:
         pos = pos[:limit]
     for po in pos:
+        items = list(po.items.all())
         line_count = 0
         total_qty = Decimal("0")
         total_qc_passed = Decimal("0")
@@ -343,6 +168,7 @@ def _tracking_rows(filters=None, *, limit=100):
         rows.append(
             {
                 "po": po,
+                "item_count": len(items),
                 "line_count": line_count,
                 "total_qty": total_qty,
                 "qc_passed": total_qc_passed if has_production_qc else None,
@@ -353,11 +179,14 @@ def _tracking_rows(filters=None, *, limit=100):
                 "production_status": "—",
             }
         )
-        if po.status == PurchaseOrder.Status.RELEASED:
+        is_production_control = not po.parent_plan_id or po.parent_plan.purchase_order_id == po.id
+        if po.status == PurchaseOrder.Status.RELEASED and is_production_control:
             from production.services import ensure_production_order, production_snapshot
 
             production_order = ensure_production_order(po, actor=None)
             rows[-1]["production_status"] = production_snapshot(production_order)["current_label"]
+        elif po.parent_plan_id:
+            rows[-1]["production_status"] = "PO"
     if filters.get("schedule_status"):
         rows = [row for row in rows if row["schedule_status"] == filters["schedule_status"]]
     return rows
@@ -403,15 +232,18 @@ def _export_purchase_orders(rows):
     append_table(
         sheet,
         (
-            "No. PO", "Vendor", "Need Month", "Required Arrival", "Jumlah SKU", "PO Qty",
+            "No. PPO", "No. PO", "PO Type", "Vendor", "Need Month", "Required Arrival", "Items", "Jumlah SKU", "PO Qty",
             "Production", "Received", "Outstanding", "Schedule", "QC Passed", "Status",
         ),
         (
             (
+                row["po"].ppo_number or "—",
                 row["po"].po_number or "Draft",
+                row["po"].get_order_type_display(),
                 row["po"].supplier.name,
                 row["po"].need_month,
                 row["po"].required_arrival,
+                row["item_count"],
                 row["line_count"],
                 row["total_qty"],
                 row["production_status"],
@@ -466,7 +298,7 @@ def requirements(request):
         for row in after_status
         if not selected_category or str(row.sku.product_variant.product.category_id) == selected_category
     ]
-    allocation_status_order = ("Open", "Partially Allocated", "Fully Allocated")
+    allocation_status_order = ("Open", "Partially Allocated", "In Production Plan", "Fully Allocated")
     available_allocation_statuses = {row.ui_status for row in after_category}
     allocation_status_options = [
         {"value": value, "label": value}
@@ -493,7 +325,8 @@ def requirements(request):
             "requirements": rows,
             "total_approved": sum((row.approved_qty for row in after_category), Decimal("0")),
             "total_ordered": sum((row.ordered_qty for row in after_category), Decimal("0")),
-            "total_remaining": sum((row.remaining_qty for row in after_category), Decimal("0")),
+            "total_planned": sum((row.planned_qty for row in after_category), Decimal("0")),
+            "total_remaining": sum((row.available_for_plan_qty for row in after_category), Decimal("0")),
             "requirement_line_count": len(after_category),
             "need_month_options": month_options,
             "selected_need_month": selected_need_month,
@@ -508,27 +341,435 @@ def requirements(request):
     )
 
 
+def _production_plan_materials(source, requirements):
+    rows = []
+    products = {
+        str(row.sku.product_variant.product_id): row.sku.product_variant.product
+        for row in requirements
+    }
+    product_ids = source.getlist("material_product")
+    names = source.getlist("material_name")
+    quantities = source.getlist("material_quantity")
+    units = source.getlist("material_unit")
+    prices = source.getlist("material_unit_price")
+    material_types = source.getlist("material_type")
+    supplier_ids = source.getlist("material_supplier")
+    suppliers = {
+        str(row.id): row
+        for row in Supplier.objects.filter(id__in=[value for value in supplier_ids if value], is_active=True)
+    }
+    for index, name in enumerate(names):
+        if not name.strip():
+            continue
+        product = products.get(product_ids[index] if index < len(product_ids) else "")
+        if not product:
+            raise ValidationError(f"Material {name}: pilih Product/Parent SKU tujuan.")
+        supplier_id = supplier_ids[index] if index < len(supplier_ids) else ""
+        supplier = suppliers.get(supplier_id) if supplier_id else None
+        if supplier_id and not supplier:
+            raise ValidationError(f"Material {name}: supplier tidak valid atau sudah nonaktif.")
+        material_type = material_types[index] if index < len(material_types) else "MAIN"
+        if material_type not in {"MAIN", "SUPPORTING"}:
+            raise ValidationError(f"Material {name}: tipe material tidak valid.")
+        try:
+            quantity = Decimal(quantities[index])
+            unit_price = Decimal(prices[index])
+        except (ArithmeticError, IndexError, ValueError) as exc:
+            raise ValidationError(f"Material {name}: quantity dan harga harus berupa angka.") from exc
+        rows.append({
+            "product": product,
+            "supplier": supplier,
+            "material_type": material_type,
+            "material_name": name.strip(),
+            "quantity": quantity,
+            "unit": units[index].strip() if index < len(units) else "",
+            "unit_price": unit_price,
+        })
+    return rows
+
+
+def _production_plan_costs(source, requirements, *, additional_process_controlled):
+    products = {
+        str(row.sku.product_variant.product_id): row.sku.product_variant.product
+        for row in requirements
+    }
+    costs_by_product = {}
+    supplier_ids = source.getlist("cmt_supplier") + source.getlist("additional_process_supplier")
+    suppliers = {
+        str(row.id): row
+        for row in Supplier.objects.filter(id__in=[value for value in supplier_ids if value], is_active=True)
+    }
+
+    def merge_rows(product_field, cost_field, supplier_field, target, supplier_target, label, name_field=None):
+        seen_products = set()
+        product_ids = source.getlist(product_field)
+        costs = source.getlist(cost_field)
+        row_supplier_ids = source.getlist(supplier_field)
+        names = source.getlist(name_field) if name_field else []
+        for index, product_id in enumerate(product_ids):
+            if not product_id:
+                continue
+            product = products.get(product_id)
+            if not product:
+                raise ValidationError(f"Product biaya {label} harus termasuk dalam Production Plan.")
+            if product.id in seen_products:
+                raise ValidationError(f"Biaya {label} product {product.name} hanya boleh diisi satu kali.")
+            try:
+                value = Decimal((costs[index] or "0").replace(",", ""))
+            except (ArithmeticError, IndexError, ValueError) as exc:
+                raise ValidationError(f"Biaya {label} product {product.name} harus berupa angka.") from exc
+            if value < 0:
+                raise ValidationError(f"Biaya {label} product {product.name} tidak boleh negatif.")
+            supplier_id = row_supplier_ids[index] if index < len(row_supplier_ids) else ""
+            supplier = suppliers.get(supplier_id) if supplier_id else None
+            if supplier_id and not supplier:
+                raise ValidationError(f"Vendor {label} product {product.name} tidak valid atau sudah nonaktif.")
+            row = costs_by_product.setdefault(product.id, {
+                "product": product,
+                "cmt_unit_cost": Decimal("0"),
+                "cmt_supplier": None,
+                "additional_process_name": "",
+                "additional_process_unit_cost": Decimal("0"),
+                "additional_process_supplier": None,
+            })
+            row[target] = value
+            row[supplier_target] = supplier
+            if name_field:
+                row["additional_process_name"] = names[index].strip() if index < len(names) else ""
+            seen_products.add(product.id)
+
+    merge_rows(
+        "cmt_cost_product",
+        "cmt_unit_cost",
+        "cmt_supplier",
+        "cmt_unit_cost",
+        "cmt_supplier",
+        "CMT",
+    )
+    if additional_process_controlled:
+        merge_rows(
+            "additional_cost_product",
+            "additional_process_unit_cost",
+            "additional_process_supplier",
+            "additional_process_unit_cost",
+            "additional_process_supplier",
+            "Additional Process",
+            name_field="additional_process_cost_name",
+        )
+    return list(costs_by_product.values())
+
+
+def _production_plan_context(
+    *,
+    form,
+    requirements,
+    plan=None,
+    materials=None,
+    process_costs=None,
+    unit_cogs=None,
+):
+    requirements = list(requirements)
+    for row in requirements:
+        line = None
+        if plan:
+            line = next((item for item in plan.lines.all() if item.requirement_id == row.id), None)
+            row.plan_qty = line.quantity if line else Decimal("0")
+        else:
+            row.plan_qty = row.available_for_plan_qty
+        posted_cogs = unit_cogs.get(str(row.id)) if unit_cogs is not None else None
+        if posted_cogs is not None:
+            row.plan_unit_cogs = posted_cogs
+        elif line:
+            row.plan_unit_cogs = f"{line.unit_cogs:.0f}"
+        else:
+            row.plan_unit_cogs = ""
+    if materials is None:
+        materials = [
+            {
+                "product": row.product,
+                "supplier": row.supplier,
+                "material_type": row.material_type,
+                "material_name": row.material_name,
+                "quantity": row.quantity,
+                "unit": row.unit,
+                "unit_price": row.unit_price,
+                "total_cost": row.total_cost,
+            }
+            for row in plan.materials.all()
+        ] if plan else []
+    else:
+        materials = [
+            {
+                **row,
+                "total_cost": row["quantity"] * row["unit_price"],
+            }
+            for row in materials
+        ]
+    if process_costs is None:
+        process_costs = [
+            {
+                "product": row.product,
+                "cmt_unit_cost": row.cmt_unit_cost,
+                "cmt_supplier": row.cmt_supplier,
+                "additional_process_name": row.additional_process_name,
+                "additional_process_unit_cost": row.additional_process_unit_cost,
+                "additional_process_supplier": row.additional_process_supplier,
+            }
+            for row in plan.process_costs.all()
+        ] if plan else []
+    products = list({row.sku.product_variant.product_id: row.sku.product_variant.product for row in requirements}.values())
+    products.sort(key=lambda row: row.name)
+    product_names = [row.name for row in products]
+    po_preview_groups = []
+    if plan:
+        if plan.production_method == PPICProductionPlan.ProductionMethod.CMT:
+            po_preview_groups = production_plan_po_groups(plan)
+        else:
+            po_preview_groups = [{
+                "child_code": "",
+                "order_type_label": PurchaseOrder.OrderType.FPP.label,
+                "supplier": plan.supplier,
+                "items": list(plan.lines.all()),
+                "required_arrival": plan.target_inbound_date,
+                "total_cost": plan.planned_total_cost,
+            }]
+    addable_products = []
+    if requirements:
+        selected_product_ids = {row.sku.product_variant.product_id for row in requirements}
+        category_ids = {row.sku.product_variant.product.category_id for row in requirements}
+        product_groups = {}
+        for row in _requirements_with_ui_state(need_month=requirements[0].need_month):
+            product = row.sku.product_variant.product
+            if (
+                row.available_for_plan_qty <= 0
+                or product.id in selected_product_ids
+                or product.category_id not in category_ids
+            ):
+                continue
+            row.plan_qty = row.available_for_plan_qty
+            row.plan_unit_cogs = ""
+            group = product_groups.setdefault(product.id, {"product": product, "requirements": [], "total_qty": Decimal("0")})
+            group["requirements"].append(row)
+            group["total_qty"] += row.plan_qty
+        addable_products = sorted(product_groups.values(), key=lambda group: group["product"].name)
+    return {
+        "plan": plan,
+        "plan_form": form,
+        "requirements": requirements,
+        "materials": materials,
+        "process_costs": process_costs,
+        "material_products": products,
+        "supplier_options": Supplier.objects.filter(is_active=True).order_by("name"),
+        "product_label": (
+            product_names[0] if len(product_names) == 1 else f"{len(product_names)} Products Selected"
+        ),
+        "addable_products": addable_products,
+        "po_preview_groups": po_preview_groups,
+        "draft_storage_key": "production-plan:{}:{}".format(
+            plan.id if plan else "new",
+            ",".join(sorted(str(row.id) for row in requirements)),
+        ),
+        "total_qty": sum((row.plan_qty for row in requirements), Decimal("0")),
+        "plans": PPICProductionPlan.objects.select_related("supplier", "purchase_order").prefetch_related(
+            "lines__requirement__sku__product_variant__product",
+            "materials__product",
+            "materials__supplier",
+            "process_costs__product",
+            "process_costs__cmt_supplier",
+            "process_costs__additional_process_supplier",
+        ),
+    }
+
+
+@login_required
+def production_plans(request):
+    plans = PPICProductionPlan.objects.select_related("supplier", "purchase_order").prefetch_related(
+        "lines__requirement__sku__product_variant__product",
+        "materials__product",
+        "materials__supplier",
+        "process_costs__product",
+        "process_costs__cmt_supplier",
+        "process_costs__additional_process_supplier",
+    )
+    return render(request, "purchasing/production_plans.html", {"plans": plans})
+
+
+@login_required
+def production_plan_create(request):
+    if request.method == "POST" and request.POST.get("action") != "save":
+        requirement_ids = request.POST.getlist("requirement")
+        if not requirement_ids:
+            messages.error(request, "Pilih minimal satu requirement untuk Review Production Plan.")
+            return redirect("purchasing:requirements")
+        request.session["production_plan_review_requirements"] = requirement_ids
+        return redirect("purchasing:production_plan_create")
+    requirement_ids = (
+        request.POST.getlist("requirement")
+        if request.method == "POST"
+        else request.session.get("production_plan_review_requirements", [])
+    )
+    requirements = _requirements_with_ui_state(selected_requirement_ids=set(requirement_ids))
+    requirements = [row for row in requirements if str(row.id) in requirement_ids]
+    if not requirements:
+        messages.error(request, "Pilih minimal satu requirement untuk Review Production Plan.")
+        return redirect("purchasing:requirements")
+    form = PPICProductionPlanForm(
+        request.POST if request.POST.get("action") == "save" else None,
+        initial={"production_method": PPICProductionPlan.ProductionMethod.CMT},
+    )
+    need_months = {row.need_month for row in requirements}
+    if len(need_months) == 1:
+        form.instance.need_month = next(iter(need_months))
+    materials = []
+    process_costs = []
+    if request.POST.get("action") == "save":
+        try:
+            materials = _production_plan_materials(request.POST, requirements)
+            process_costs = _production_plan_costs(
+                request.POST,
+                requirements,
+                additional_process_controlled=request.POST.get("control_additional_process") == "on",
+            )
+        except ValidationError as exc:
+            form.add_error(None, exc)
+    if request.POST.get("action") == "save" and form.is_valid():
+        try:
+            plan = save_ppic_production_plan(
+                actor=request.user,
+                requirements=requirements,
+                quantities={str(row.id): request.POST.get(f"quantity_{row.id}") for row in requirements},
+                values={name: form.cleaned_data[name] for name in form.Meta.fields},
+                materials=materials,
+                process_costs=process_costs,
+                unit_cogs={str(row.id): request.POST.get(f"unit_cogs_{row.id}") for row in requirements},
+            )
+        except ValidationError as exc:
+            form.add_error(None, exc)
+        else:
+            request.session.pop("production_plan_review_requirements", None)
+            messages.success(request, "Production Plan Draft tersimpan. Review preview PO sebelum generate.")
+            return redirect("purchasing:production_plan_detail", plan_id=plan.id)
+    context = _production_plan_context(
+        form=form,
+        requirements=requirements,
+        materials=materials,
+        process_costs=process_costs,
+        unit_cogs={str(row.id): request.POST.get(f"unit_cogs_{row.id}") for row in requirements}
+        if request.POST.get("action") == "save" else None,
+    )
+    return render(request, "purchasing/production_plan_form.html", context)
+
+
+@login_required
+def production_plan_detail(request, plan_id):
+    plan = get_object_or_404(
+        PPICProductionPlan.objects.select_related("supplier", "purchase_order").prefetch_related(
+            "lines__requirement__sku__product_variant__product",
+            "materials__product",
+            "materials__supplier",
+            "process_costs__product",
+            "process_costs__cmt_supplier",
+            "process_costs__additional_process_supplier",
+        ),
+        pk=plan_id,
+    )
+    all_requirements = _requirements_with_ui_state()
+    requirement_ids = {line.requirement_id for line in plan.lines.all()}
+    requirements = [row for row in all_requirements if row.id in requirement_ids]
+    form = PPICProductionPlanForm(instance=plan)
+    materials = None
+    process_costs = None
+    unit_cogs = None
+    if request.method == "POST":
+        action = request.POST.get("action", "save")
+        if plan.status == PPICProductionPlan.Status.DRAFT:
+            form = PPICProductionPlanForm(request.POST, instance=plan)
+            submitted_ids = set(request.POST.getlist("requirement"))
+            category_ids = {row.sku.product_variant.product.category_id for row in requirements}
+            allowed_requirements = [
+                row for row in all_requirements
+                if row.need_month == plan.need_month
+                and row.sku.product_variant.product.category_id in category_ids
+                and (row.id in requirement_ids or row.available_for_plan_qty > 0)
+            ]
+            submitted_requirements = [row for row in allowed_requirements if str(row.id) in submitted_ids]
+            if submitted_requirements:
+                requirements = submitted_requirements
+            else:
+                form.add_error(None, "Production Plan wajib memiliki minimal satu Product Requirement.")
+            if len(submitted_requirements) != len(submitted_ids):
+                form.add_error(None, "Product tambahan harus memiliki Need Month dan Category yang sama serta masih Open.")
+            materials = []
+            process_costs = []
+            unit_cogs = {str(row.id): request.POST.get(f"unit_cogs_{row.id}") for row in requirements}
+            try:
+                materials = _production_plan_materials(request.POST, requirements)
+                process_costs = _production_plan_costs(
+                    request.POST,
+                    requirements,
+                    additional_process_controlled=request.POST.get("control_additional_process") == "on",
+                )
+            except ValidationError as exc:
+                form.add_error(None, exc)
+            if submitted_requirements and form.is_valid():
+                try:
+                    plan = save_ppic_production_plan(
+                        actor=request.user,
+                        plan=plan,
+                        requirements=requirements,
+                        quantities={str(row.id): request.POST.get(f"quantity_{row.id}") for row in requirements},
+                        values={name: form.cleaned_data[name] for name in form.Meta.fields},
+                        materials=materials,
+                        process_costs=process_costs,
+                        unit_cogs=unit_cogs,
+                    )
+                except ValidationError as exc:
+                    form.add_error(None, exc)
+                else:
+                    if action == "generate":
+                        try:
+                            po = generate_po_from_production_plan(plan.id, request.user)
+                        except ValidationError as exc:
+                            for message in exc.messages:
+                                messages.error(request, message)
+                        else:
+                            messages.success(request, "Draft PO berhasil dibuat dari Production Plan.")
+                            return redirect("purchasing:po_detail", po_id=po.id)
+                    else:
+                        messages.success(request, "Production Plan Draft diperbarui.")
+                        return redirect("purchasing:production_plan_detail", plan_id=plan.id)
+    return render(
+        request,
+        "purchasing/production_plan_form.html",
+        _production_plan_context(
+            form=form,
+            requirements=requirements,
+            plan=plan,
+            materials=materials,
+            process_costs=process_costs,
+            unit_cogs=unit_cogs,
+        ),
+    )
+
+
 @login_required
 def overview(request):
-    source = request.POST if request.method == "POST" else request.GET
-    generator_state = _generator_state(source)
-    show_preview = request.GET.get("review") == "1"
-    generator_errors = []
-    selected_supplier = None
-    if request.method == "POST":
-        form_name = request.POST.get("form_name")
-        if form_name == "generator_create":
-            show_preview = True
-            created, generator_errors, selected_supplier, _ = _create_generator_pos(
-                request, generator_state
-            )
-            if created:
-                line_count = sum(po.lines.count() for po in created)
-                messages.success(
-                    request,
-                    f"{len(created)} Draft PO berhasil dibuat dari {line_count} requirement eligible.",
-                )
-                return redirect("purchasing:purchase_orders")
+    plans = list(
+        PPICProductionPlan.objects.filter(
+            status=PPICProductionPlan.Status.DRAFT,
+            purchase_order__isnull=True,
+        )
+        .select_related("supplier")
+        .prefetch_related("lines__requirement__sku__product_variant__product", "materials__product")
+        .order_by("need_month", "created_at")
+    )
+    plan_months = sorted({plan.need_month for plan in plans})
+    selected_month = request.GET.get("month", "")
+    valid_months = {month.strftime("%Y-%m") for month in plan_months}
+    if selected_month not in valid_months:
+        selected_month = ""
+    if selected_month:
+        plans = [plan for plan in plans if plan.need_month.strftime("%Y-%m") == selected_month]
     pos = list(PurchaseOrder.objects.select_related("supplier", "created_by").prefetch_related("lines")[:100])
     for po in pos:
         po.total_qty = sum((line.ordered_qty for line in po.lines.all()), Decimal("0"))
@@ -538,11 +779,11 @@ def overview(request):
         "purchasing/overview.html",
         {
             "pos": pos,
-            "generator": generator_state,
-            "show_preview": show_preview,
-            "generator_errors": generator_errors,
-            "suppliers": Supplier.objects.filter(is_active=True).order_by("name"),
-            "selected_supplier": selected_supplier,
+            "plans": plans,
+            "plan_months": plan_months,
+            "selected_month": selected_month,
+            "plan_qty": sum((plan.total_qty for plan in plans), Decimal("0")),
+            "plan_cost": sum((plan.planned_total_cost for plan in plans), Decimal("0")),
         },
     )
 
@@ -552,6 +793,7 @@ def purchase_orders(request):
     selected = {
         "query": request.GET.get("q", "").strip(),
         "supplier": request.GET.get("supplier", ""),
+        "products": [value for value in request.GET.getlist("product") if value],
         "need_month": request.GET.get("need_month", ""),
         "po_status": request.GET.get("po_status", ""),
         "schedule_status": request.GET.get("schedule_status", ""),
@@ -570,6 +812,9 @@ def purchase_orders(request):
             "total_outstanding": sum((row["outstanding"] for row in rows), Decimal("0")),
             "selected": selected,
             "supplier_options": Supplier.objects.filter(purchase_orders__isnull=False).distinct().order_by("name"),
+            "product_options": Product.objects.filter(
+                variants__skus__purchase_order_lines__isnull=False
+            ).distinct().order_by("name"),
             "need_month_options": PurchaseOrder.objects.order_by("-need_month").values_list("need_month", flat=True).distinct(),
             "po_status_options": PurchaseOrder.Status.choices,
             "schedule_status_options": ("Open", "On Track", "Risk Late", "On Time", "Late", "Cancelled"),
@@ -614,11 +859,36 @@ def vendor_delete(request, supplier_id):
     return redirect("purchasing:vendors")
 
 
+def _po_items_for_display(po):
+    material_products = {}
+    material_type = {
+        PurchaseOrder.OrderType.MAIN_MATERIAL: "MAIN",
+        PurchaseOrder.OrderType.SUPPORTING_MATERIAL: "SUPPORTING",
+    }.get(po.order_type)
+    if po.parent_plan_id and material_type:
+        for material in po.parent_plan.materials.select_related("product").filter(
+            supplier_id=po.supplier_id,
+            material_type=material_type,
+        ):
+            key = (
+                material.material_name.strip().casefold(),
+                material.unit.strip().casefold(),
+                material.unit_price,
+            )
+            material_products.setdefault(key, set()).add(material.product.name)
+    items = list(po.items.select_related("product"))
+    for item in items:
+        key = (item.description.strip().casefold(), item.unit.strip().casefold(), item.unit_price)
+        item.product_label = item.product.name if item.product else ", ".join(sorted(material_products.get(key, ()))) or "—"
+        item.line_total = item.total_cost
+    return items
+
+
 @login_required
 def po_detail(request, po_id):
     po = get_object_or_404(
-        PurchaseOrder.objects.select_related("supplier", "created_by", "released_by").prefetch_related(
-            "lines__sku", "lines__requirement", "lines__qc_inspections", "lines__inbound_receipts"
+        PurchaseOrder.objects.select_related("supplier", "created_by", "released_by", "parent_plan").prefetch_related(
+            "items__product", "lines__sku", "lines__requirement", "lines__qc_inspections", "lines__inbound_receipts"
         ),
         pk=po_id,
     )
@@ -626,9 +896,12 @@ def po_detail(request, po_id):
     po_lines = list(po.lines.all())
     for line in po_lines:
         line.total_cogs = Decimal(line.ordered_qty) * Decimal(line.cogs_snapshot or 0)
+    po_items = _po_items_for_display(po)
     production_state = None
     activity_rows = []
-    if po.status == PurchaseOrder.Status.RELEASED:
+    is_production_control = not po.parent_plan_id or po.parent_plan.purchase_order_id == po.id
+    ppo_children = list(po.parent_plan.child_purchase_orders.select_related("supplier").order_by("child_code")) if po.parent_plan_id else []
+    if po.status == PurchaseOrder.Status.RELEASED and is_production_control:
         from production.services import ensure_production_order, production_snapshot
 
         production_order = ensure_production_order(po, actor=request.user)
@@ -664,6 +937,9 @@ def po_detail(request, po_id):
             "vendor_revision_form": vendor_revision_form,
             "production_state": production_state,
             "po_lines": po_lines,
+            "po_items": po_items,
+            "is_production_control": is_production_control,
+            "ppo_children": ppo_children,
             "activity_rows": activity_rows,
         },
     )
@@ -738,10 +1014,12 @@ def po_print(request, po_id):
             "supplier",
             "created_by",
             "released_by",
-        ).prefetch_related("lines__sku__product_variant__product"),
+            "parent_plan",
+        ).prefetch_related("items__product", "lines__sku__product_variant__product"),
         pk=po_id,
     )
     print_lines = []
+    print_items = []
     subtotal = Decimal("0")
     total_qty = Decimal("0")
     for line in po.lines.all():
@@ -754,12 +1032,21 @@ def po_print(request, po_id):
         total_qty += line.ordered_qty
         if line_total is not None:
             subtotal += line_total
+    for item in _po_items_for_display(po):
+        print_items.append({"item": item, "line_total": item.total_cost})
+        subtotal += item.total_cost
+        total_qty += item.quantity
+    if print_items:
+        print_lines = []
+        total_qty = sum((row["item"].quantity for row in print_items), Decimal("0"))
+        subtotal = sum((row["line_total"] for row in print_items), Decimal("0"))
     return render(
         request,
         "purchasing/print.html",
         {
             "po": po,
             "print_lines": print_lines,
+            "print_items": print_items,
             "subtotal": subtotal,
             "total_qty": total_qty,
             "po_date": po.released_at or po.created_at,

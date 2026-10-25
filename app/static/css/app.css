@@ -87,6 +87,7 @@ a { color: inherit; text-decoration: none; }
 .metric-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .metric-grid.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .metric-grid.six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.metric-grid.seven { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .metric-card { min-height: 108px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.78); }
 .metric-card > span { display: block; color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .08em; }
 .metric-card strong { display: block; margin: 10px 0 4px; font-size: 28px; line-height: 1; letter-spacing: -.04em; }
@@ -170,6 +171,7 @@ a { color: inherit; text-decoration: none; }
 .inventory-filter-grid .secondary-button, .inventory-filter-grid .primary-button { min-height: 40px; margin: 0; }
 .requirement-status-form { display: block; }
 .requirement-table { min-width: 900px; table-layout: fixed; }
+.requirement-table tbody tr:has([data-requirement-select]:checked) td { background: #f1f1ed; }
 .requirement-table th:nth-child(1), .requirement-table td:nth-child(1) { width: 14%; }
 .requirement-table th:nth-child(2), .requirement-table td:nth-child(2) { width: 10%; }
 .requirement-table th:nth-child(3), .requirement-table td:nth-child(3) { width: 26%; }
@@ -925,6 +927,16 @@ tbody tr:last-child td { border-bottom: 0; }
 /* Production v2: Plan → Activity ledger → read-only Monitoring */
 .production-plan-selector { grid-template-columns: minmax(320px, 1fr) auto; align-items: end; }
 .production-plan-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.production-process-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.production-process-card { display: grid; gap: 12px; padding: 14px; border: 1px solid #dce5bb; border-radius: 12px; background: #f7fbe9; }
+.production-process-card.is-disabled { border-color: var(--line); background: #f5f5f2; }
+.production-process-toggle { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 10px; font-weight: 850; }
+.production-process-toggle input { width: 17px; height: 17px; margin: 0; accent-color: var(--lime-dark); }
+.production-process-fields { display: grid; gap: 7px; }
+.production-process-fields label { display: grid; gap: 7px; color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.production-process-fields input { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: white; }
+.production-process-card.is-disabled .production-process-fields { opacity: .42; }
+.process-date-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .production-plan-field, .production-plan-pair { display: grid; gap: 7px; }
 .production-plan-field.full { grid-column: span 2; }
 .production-plan-field.wide { grid-column: 1 / -1; }
@@ -938,6 +950,30 @@ tbody tr:last-child td { border-bottom: 0; }
     width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: white; color: var(--ink);
 }
 .production-plan-grid textarea, .production-activity-form-grid textarea { min-height: 84px; resize: vertical; }
+.production-plan-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.production-plan-core-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.production-cost-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 0; }
+.production-plan-grid select { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: white; color: var(--ink); }
+.production-material-table input, .production-material-table select { width: 100%; min-width: 90px; min-height: 36px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
+.production-material-table th:nth-child(1), .production-material-table th:nth-child(2) { min-width: 190px; }
+.production-material-table th:last-child { width: 42px; }
+.compact-number-input { width: 105px; min-height: 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; }
+.compact-money-input { width: 125px; min-height: 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; }
+.compact-money-input[readonly] { background: #f2f3ed; color: var(--muted); }
+.production-plan-product-table th:last-child, .production-plan-product-table td:last-child { width: 42px; text-align: center; }
+.production-plan-remove-button { width: 26px; height: 26px; padding: 0; border: 1px solid #e2b4b1; border-radius: 50%; color: var(--danger); background: white; font-size: 16px; line-height: 1; cursor: pointer; }
+.production-plan-remove-button:hover { color: white; background: var(--danger); }
+.production-plan-remove-button:disabled { opacity: .28; cursor: not-allowed; }
+.production-plan-add-product { display: grid; grid-template-columns: minmax(280px, 1fr) auto; align-items: end; gap: 10px; margin: 0 0 14px; padding: 12px; border: 1px solid #dce5bb; border-radius: 12px; background: #f7fbe9; }
+.production-plan-add-product[hidden] { display: none; }
+.production-plan-add-product label { display: grid; gap: 7px; color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.production-plan-add-product select { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: white; color: var(--ink); }
+.production-plan-product-table tfoot .production-plan-total-row th { border-top: 1px solid #b8cf63; background: #d8f96c !important; color: #27300d; font-weight: 850; }
+.production-plan-actions { justify-content: flex-end; }
+.production-generate-panel, .workflow-notice { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.production-generate-panel h2, .workflow-notice h2 { margin: 4px 0; }
+.production-generate-panel p, .workflow-notice p { margin-bottom: 0; }
+.production-plan-fieldset:disabled { opacity: .82; }
 .production-roadmap-seven { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .production-roadmap.production-roadmap-five { display: flex; }
 .production-roadmap-five li { flex: 1; }
@@ -986,6 +1022,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .production-monitor-table { min-width: 1520px; }
 .production-monitor-table td > small, .production-monitor-table td > strong { display: block; }
 .production-monitor-table td > small { margin-top: 4px; color: var(--muted); font-size: 8px; }
+.production-monitor-row { cursor: pointer; }
+.production-monitor-row td { transition: background-color .15s ease; }
+.production-monitor-row:hover td, .production-monitor-row:focus-visible td { background: #f1f1ed; }
+.production-monitor-row:focus-visible { outline: 2px solid var(--lime-dark); outline-offset: -2px; }
 .state-done { color: var(--lime-dark); }
 .production-activity-layout { grid-template-columns: minmax(260px, .7fr) repeat(2, minmax(0, 1fr)); }
 .activity-choice-list { display: grid; gap: 8px; margin: 14px 0; }
@@ -1015,6 +1055,13 @@ tbody tr:last-child td { border-bottom: 0; }
 .delivery-order-detail { padding: 16px; }
 .delivery-order-product-table { min-width: 1120px; }
 .delivery-order-product-table input, .delivery-order-product-table select { width: 100%; min-height: 34px; padding: 6px 7px; border: 1px solid var(--line); border-radius: 7px; background: white; color: var(--ink); }
+.delivery-order-product-table small.muted { display: block; margin-top: 3px; font-size: 8px; }
+.delivery-inbound-reconciliation-row > td { padding: 10px 12px 12px; background: #f7f8f2; }
+.inbound-reconciliation-grid { display: grid; grid-template-columns: repeat(4, minmax(90px, 120px)) minmax(240px, 1fr); gap: 9px; align-items: end; }
+.inbound-reconciliation-grid label { display: grid; gap: 4px; color: var(--muted); font-size: 8px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.inbound-reconciliation-grid textarea { min-height: 44px; resize: vertical; }
+.compact-copy { margin: 7px 0 0; }
+@media (max-width: 1100px) { .inbound-reconciliation-grid { grid-template-columns: repeat(2, minmax(100px, 1fr)); } .inbound-reconciliation-notes { grid-column: 1 / -1; } }
 .finance-sales-settings-table { min-width: 1120px; }
 .finance-sales-settings-table th:first-child, .finance-sales-settings-table td:first-child { width: 82px; text-align: center; }
 .finance-sales-settings-form { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 7px; align-items: center; }
@@ -1143,7 +1190,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .module-access-card.is-disabled .module-tab-field { opacity: .45; }
 
 @media (max-width: 1080px) {
-    .metric-grid.five, .metric-grid.six { grid-template-columns: repeat(3, 1fr); }
+    .metric-grid.five, .metric-grid.six, .metric-grid.seven { grid-template-columns: repeat(3, 1fr); }
     .rnd-product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .rnd-design-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1153,7 +1200,7 @@ tbody tr:last-child td { border-bottom: 0; }
     .inventory-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .scenario-edit-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .production-roadmap { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 22px; }
-    .production-plan-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .production-plan-grid, .production-process-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .production-activity-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -1171,7 +1218,7 @@ tbody tr:last-child td { border-bottom: 0; }
     .page-header { align-items: flex-start; flex-direction: column; gap: 12px; margin-bottom: 14px; }
     .user-list-header { grid-template-columns: 42px minmax(0, 1fr); }
     .user-list-header .primary-button { grid-column: 2; justify-self: start; }
-    .metric-grid, .metric-grid.five, .metric-grid.six, .dashboard-grid { grid-template-columns: 1fr 1fr; }
+    .metric-grid, .metric-grid.five, .metric-grid.six, .metric-grid.seven, .dashboard-grid { grid-template-columns: 1fr 1fr; }
     .finance-opening-grid { grid-template-columns: 1fr 1fr; }
     .finance-area-grid { grid-template-columns: 1fr 1fr; }
     .rnd-product-grid { grid-template-columns: 1fr; }
@@ -1226,7 +1273,7 @@ tbody tr:last-child td { border-bottom: 0; }
     .trial-note-form > .secondary-button { grid-column: 1; grid-row: 6; }
     .cmt-quantity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .trial-summary .span-two { grid-column: auto; }
-    .production-plan-selector, .production-plan-grid, .production-monitor-card-grid, .production-activity-form-grid { grid-template-columns: 1fr; }
+    .production-plan-selector, .production-plan-grid, .production-process-grid, .production-monitor-card-grid, .production-activity-form-grid, .production-plan-add-product { grid-template-columns: 1fr; }
     .user-identity-grid, .module-access-grid { grid-template-columns: 1fr; }
     .module-tab-field > div { grid-template-columns: 1fr; }
     .production-plan-field.full, .production-plan-field.wide, .production-activity-form-grid .wide { grid-column: auto; }
@@ -1235,7 +1282,7 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 
 @media (max-width: 480px) {
-    .metric-grid, .metric-grid.five, .metric-grid.six, .dashboard-grid { grid-template-columns: 1fr; }
+    .metric-grid, .metric-grid.five, .metric-grid.six, .metric-grid.seven, .dashboard-grid { grid-template-columns: 1fr; }
     .finance-opening-grid { grid-template-columns: 1fr; }
     .finance-area-grid { grid-template-columns: 1fr; }
     .panel.span-two, .panel.span-three { grid-column: auto; }

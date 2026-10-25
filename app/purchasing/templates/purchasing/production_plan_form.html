@@ -1,0 +1,447 @@
+{% extends "base.html" %}
+{% block title %}Review Production Plan · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">PPIC · PRODUCTION PLAN</p><h1>{% if plan %}Review Production Plan{% else %}Buat Production Plan{% endif %}</h1><p>Susun metode, proses, dan biaya produksi. PO belum dibuat sampai tombol Generate Draft PO ditekan.</p></div>
+  <div class="header-actions"><a class="secondary-button" href="{% url 'purchasing:requirements' %}">Kembali ke Requirement</a><a class="secondary-button" href="{% url 'purchasing:production_plans' %}">Semua Plan</a>{% if plan.purchase_order_id %}<a class="primary-button" href="{% url 'purchasing:po_detail' plan.purchase_order_id %}">Buka PO</a>{% endif %}</div>
+</header>
+
+{% if plan_form.non_field_errors %}<div class="issue-list section-gap">{% for error in plan_form.non_field_errors %}<div class="issue-row error"><span>ERROR</span><div><strong>Production Plan belum dapat disimpan</strong><small>{{ error }}</small></div></div>{% endfor %}</div>{% endif %}
+
+<form method="post" id="production-plan-form" class="stack-form" data-single-submit data-draft-storage-key="{{ draft_storage_key }}">{% csrf_token %}
+  {% for row in requirements %}<input type="hidden" name="requirement" value="{{ row.id }}" data-requirement-input="{{ row.id }}">{% endfor %}
+  <fieldset class="production-plan-fieldset" {% if plan and plan.status != 'DRAFT' %}disabled{% endif %}>
+  <section class="panel">
+    <div class="panel-header"><div><p class="eyebrow">01 · PRODUCT REQUIREMENT</p><h2><span data-product-label>{{ product_label|default:"Products" }}</span> · {{ requirements.0.need_month|date:"F Y" }}</h2></div><div class="header-actions"><button class="secondary-button" type="button" data-toggle-add-product {% if not addable_products %}disabled{% endif %}>+ Add Product</button><span class="status-badge {% if plan and plan.status == 'GENERATED' %}ready{% else %}parsing{% endif %}">{% if plan %}{{ plan.get_status_display }}{% else %}Belum tersimpan{% endif %}</span></div></div>
+    <div class="production-plan-add-product" data-add-product-panel hidden>
+      <label><span>Product · Need Month dan Category yang sama</span><select data-add-product-select aria-label="Product yang ditambahkan"><option value="">Pilih product</option>{% for group in addable_products %}<option value="{{ group.product.id }}" data-material-label="{% if group.product.parent_sku %}{{ group.product.parent_sku }} · {% endif %}{{ group.product.name }}">{% if group.product.parent_sku %}{{ group.product.parent_sku }} · {% endif %}{{ group.product.name }} · {{ group.requirements|length }} SKU · {{ group.total_qty|floatformat:"0g" }} pcs</option>{% endfor %}</select></label>
+      <button class="primary-button" type="button" data-confirm-add-product>Tambahkan</button>
+    </div>
+    <div class="table-wrap"><table class="production-plan-product-table"><thead><tr><th>SKU</th><th>Product Name</th><th>Size</th><th>Approved</th><th>In PO</th><th>Production Plan Qty</th><th>COGS / Qty</th><th>Total COGS</th><th></th></tr></thead><tbody>
+      {% for row in requirements %}<tr data-plan-line data-requirement-id="{{ row.id }}" data-product-id="{{ row.sku.product_variant.product.id }}" data-product-name="{{ row.sku.product_variant.product.name }}" data-product-material-label="{% if row.sku.product_variant.product.parent_sku %}{{ row.sku.product_variant.product.parent_sku }} · {% endif %}{{ row.sku.product_variant.product.name }}"><td><span class="code-label">{{ row.sku.sku }}</span></td><td>{{ row.sku.product_variant.product.name }}</td><td>{{ row.sku.size|default:"—" }}</td><td>{{ row.approved_qty|floatformat:"0g" }}</td><td>{{ row.ordered_qty|floatformat:"0g" }}</td><td><input class="compact-number-input" type="number" min="1" step="1" name="quantity_{{ row.id }}" value="{{ row.plan_qty|floatformat:'0' }}" required data-plan-qty></td><td><input class="compact-money-input" type="text" inputmode="numeric" pattern="[0-9,]*" name="unit_cogs_{{ row.id }}" value="{{ row.plan_unit_cogs }}" placeholder="0" autocomplete="off" data-plan-cogs></td><td><strong data-line-cogs>Rp 0</strong></td><td><button class="production-plan-remove-button" type="button" data-remove-requirement aria-label="Hapus {{ row.sku.sku }} dari Production Plan" title="Hapus dari Production Plan">×</button></td></tr>{% endfor %}
+    </tbody><tfoot><tr class="production-plan-total-row"><th colspan="5">TOTAL</th><th data-total-plan-qty>{{ total_qty|floatformat:"0g" }}</th><th data-total-unit-cogs>Rp 0</th><th data-total-cogs>Rp 0</th><th></th></tr></tfoot></table></div>
+  </section>
+
+  <section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">02 · PRODUCTION METHOD &amp; VENDOR</p><h2>Tentukan cara produksi</h2></div><span class="pill">CMT / FPP</span></div>
+    <div class="production-plan-grid production-plan-core-grid">
+      <div class="production-plan-field"><label for="{{ plan_form.production_method.id_for_label }}">{{ plan_form.production_method.label }}</label>{{ plan_form.production_method }}{{ plan_form.production_method.errors }}</div>
+      <div class="production-plan-field" data-fpp-vendor-field><label for="{{ plan_form.supplier.id_for_label }}">{{ plan_form.supplier.label }}</label>{{ plan_form.supplier }}{{ plan_form.supplier.errors }}</div>
+      <div class="production-plan-field wide"><label for="{{ plan_form.notes.id_for_label }}">{{ plan_form.notes.label }}</label>{{ plan_form.notes }}{{ plan_form.notes.errors }}</div>
+    </div>
+  </section>
+
+  <section class="panel section-gap" data-method-panel="CMT">
+    <div class="panel-header"><div><p class="eyebrow">03A · CMT COST</p><h2>Material dan ongkos proses per product</h2><p>Biaya material, CMT, dan Additional Process hanya masuk ke COGS product yang dipilih.</p></div><button class="secondary-button" type="button" data-add-material>+ Tambah Material</button></div>
+    <div class="table-wrap"><table class="production-material-table"><thead><tr><th>Product / Parent SKU</th><th>Material</th><th>Material Type</th><th>Supplier</th><th>Qty</th><th>Unit</th><th>Harga / Unit</th><th>Total</th><th></th></tr></thead><tbody data-material-rows>
+      {% for material in materials %}<tr data-material-row><td><select name="material_product" aria-label="Product tujuan material"><option value="">Pilih product</option>{% for product in material_products %}<option value="{{ product.id }}" {% if material.product.id == product.id %}selected{% endif %}>{% if product.parent_sku %}{{ product.parent_sku }} · {% endif %}{{ product.name }}</option>{% endfor %}</select></td><td><input name="material_name" value="{{ material.material_name }}" placeholder="Nama material"></td><td><select name="material_type" aria-label="Material Type"><option value="MAIN" {% if material.material_type == 'MAIN' %}selected{% endif %}>Main Material</option><option value="SUPPORTING" {% if material.material_type == 'SUPPORTING' %}selected{% endif %}>Supporting Material</option></select></td><td><select name="material_supplier" aria-label="Supplier material"><option value="">Pilih supplier</option>{% for supplier in supplier_options %}<option value="{{ supplier.id }}" {% if material.supplier.id == supplier.id %}selected{% endif %}>{{ supplier.name }}</option>{% endfor %}</select></td><td><input type="number" min="0.0001" step="0.0001" name="material_quantity" value="{{ material.quantity|floatformat:'-4' }}" data-material-qty></td><td><input name="material_unit" value="{{ material.unit }}" placeholder="meter / pcs"></td><td><input type="number" min="0" step="1" name="material_unit_price" value="{{ material.unit_price|floatformat:'0' }}" data-material-price></td><td><strong data-material-total>Rp {{ material.total_cost|floatformat:"0g" }}</strong></td><td><button class="icon-button" type="button" data-remove-material aria-label="Hapus material">×</button></td></tr>
+      {% empty %}<tr data-material-row><td><select name="material_product" aria-label="Product tujuan material"><option value="">Pilih product</option>{% for product in material_products %}<option value="{{ product.id }}">{% if product.parent_sku %}{{ product.parent_sku }} · {% endif %}{{ product.name }}</option>{% endfor %}</select></td><td><input name="material_name" placeholder="Nama material"></td><td><select name="material_type" aria-label="Material Type"><option value="MAIN">Main Material</option><option value="SUPPORTING">Supporting Material</option></select></td><td><select name="material_supplier" aria-label="Supplier material"><option value="">Pilih supplier</option>{% for supplier in supplier_options %}<option value="{{ supplier.id }}">{{ supplier.name }}</option>{% endfor %}</select></td><td><input type="number" min="0.0001" step="0.0001" name="material_quantity" data-material-qty></td><td><input name="material_unit" placeholder="meter / pcs"></td><td><input type="number" min="0" step="1" name="material_unit_price" data-material-price></td><td><strong data-material-total>Rp 0</strong></td><td><button class="icon-button" type="button" data-remove-material aria-label="Hapus material">×</button></td></tr>{% endfor %}
+    </tbody></table></div>
+    <div class="section-gap" data-process-cost-block data-process-cost-layout="supplier-split">
+      <div class="panel-header"><div><p class="eyebrow">CMT COST</p><h3>Biaya CMT per Product</h3><p>Cut, Make, dan Trim menjadi satu biaya per quantity.</p></div><button class="secondary-button" type="button" data-add-cmt-cost>+ Tambah Biaya CMT</button></div>
+      <div class="table-wrap"><table class="production-material-table"><thead><tr><th>Product / Parent SKU</th><th>Production Qty</th><th>Vendor CMT</th><th>CMT Cost / Qty</th><th>Total CMT Cost</th><th></th></tr></thead><tbody data-cmt-cost-rows>
+        {% for cost in process_costs %}<tr data-cmt-cost-row><td><select name="cmt_cost_product" aria-label="Product tujuan biaya CMT"><option value="">Pilih product</option>{% for product in material_products %}<option value="{{ product.id }}" {% if cost.product.id == product.id %}selected{% endif %}>{% if product.parent_sku %}{{ product.parent_sku }} · {% endif %}{{ product.name }}</option>{% endfor %}</select></td><td><strong data-cost-product-qty>0 pcs</strong></td><td><select name="cmt_supplier" aria-label="Vendor CMT"><option value="">Pilih vendor</option>{% for supplier in supplier_options %}<option value="{{ supplier.id }}" {% if cost.cmt_supplier.id == supplier.id %}selected{% endif %}>{{ supplier.name }}</option>{% endfor %}</select></td><td><input class="compact-money-input" type="text" inputmode="numeric" pattern="[0-9,]*" name="cmt_unit_cost" value="{{ cost.cmt_unit_cost|floatformat:'0' }}" placeholder="0" autocomplete="off" data-cmt-unit-cost></td><td><strong data-cmt-cost-total>Rp 0</strong></td><td><button class="icon-button" type="button" data-remove-cmt-cost aria-label="Hapus biaya CMT product">×</button></td></tr>
+        {% empty %}<tr data-cmt-cost-row><td><select name="cmt_cost_product" aria-label="Product tujuan biaya CMT"><option value="">Pilih product</option>{% for product in material_products %}<option value="{{ product.id }}">{% if product.parent_sku %}{{ product.parent_sku }} · {% endif %}{{ product.name }}</option>{% endfor %}</select></td><td><strong data-cost-product-qty>0 pcs</strong></td><td><select name="cmt_supplier" aria-label="Vendor CMT"><option value="">Pilih vendor</option>{% for supplier in supplier_options %}<option value="{{ supplier.id }}">{{ supplier.name }}</option>{% endfor %}</select></td><td><input class="compact-money-input" type="text" inputmode="numeric" pattern="[0-9,]*" name="cmt_unit_cost" placeholder="0" autocomplete="off" data-cmt-unit-cost></td><td><strong data-cmt-cost-total>Rp 0</strong></td><td><button class="icon-button" type="button" data-remove-cmt-cost aria-label="Hapus biaya CMT product">×</button></td></tr>{% endfor %}
+      </tbody><tfoot><tr class="production-plan-total-row"><th colspan="4">TOTAL CMT COST</th><th data-cmt-cost-grand-total>Rp 0</th><th></th></tr></tfoot></table></div>
+
+      <div class="panel-header section-gap" data-additional-cost-section><div><p class="eyebrow">ADDITIONAL PROCESS COST</p><h3>Biaya Additional Process per Product</h3><p>Biaya bordir, sablon, atau proses tambahan lain dipisahkan dari CMT.</p></div><button class="secondary-button" type="button" data-add-additional-cost>+ Tambah Biaya Additional</button></div>
+      <div class="table-wrap"><table class="production-material-table"><thead><tr><th>Product / Parent SKU</th><th>Process</th><th>Vendor</th><th>Production Qty</th><th>Cost / Qty</th><th>Total Additional Cost</th><th></th></tr></thead><tbody data-additional-cost-rows>
+        {% for cost in process_costs %}<tr data-additional-cost-row><td><select name="additional_cost_product" aria-label="Product tujuan biaya Additional Process"><option value="">Pilih product</option>{% for product in material_products %}<option value="{{ product.id }}" {% if cost.product.id == product.id %}selected{% endif %}>{% if product.parent_sku %}{{ product.parent_sku }} · {% endif %}{{ product.name }}</option>{% endfor %}</select></td><td><input name="additional_process_cost_name" value="{{ cost.additional_process_name }}" placeholder="Bordir / Sablon"></td><td><select name="additional_process_supplier" aria-label="Vendor Additional Process"><option value="">Pilih vendor</option>{% for supplier in supplier_options %}<option value="{{ supplier.id }}" {% if cost.additional_process_supplier.id == supplier.id %}selected{% endif %}>{{ supplier.name }}</option>{% endfor %}</select></td><td><strong data-cost-product-qty>0 pcs</strong></td><td><input class="compact-money-input" type="text" inputmode="numeric" pattern="[0-9,]*" name="additional_process_unit_cost" value="{{ cost.additional_process_unit_cost|floatformat:'0' }}" placeholder="0" autocomplete="off" data-additional-unit-cost></td><td><strong data-additional-cost-total>Rp 0</strong></td><td><button class="icon-button" type="button" data-remove-additional-cost aria-label="Hapus biaya Additional Process product">×</button></td></tr>
+        {% empty %}<tr data-additional-cost-row><td><select name="additional_cost_product" aria-label="Product tujuan biaya Additional Process"><option value="">Pilih product</option>{% for product in material_products %}<option value="{{ product.id }}">{% if product.parent_sku %}{{ product.parent_sku }} · {% endif %}{{ product.name }}</option>{% endfor %}</select></td><td><input name="additional_process_cost_name" placeholder="Bordir / Sablon"></td><td><select name="additional_process_supplier" aria-label="Vendor Additional Process"><option value="">Pilih vendor</option>{% for supplier in supplier_options %}<option value="{{ supplier.id }}">{{ supplier.name }}</option>{% endfor %}</select></td><td><strong data-cost-product-qty>0 pcs</strong></td><td><input class="compact-money-input" type="text" inputmode="numeric" pattern="[0-9,]*" name="additional_process_unit_cost" placeholder="0" autocomplete="off" data-additional-unit-cost></td><td><strong data-additional-cost-total>Rp 0</strong></td><td><button class="icon-button" type="button" data-remove-additional-cost aria-label="Hapus biaya Additional Process product">×</button></td></tr>{% endfor %}
+      </tbody><tfoot><tr class="production-plan-total-row"><th colspan="5">TOTAL ADDITIONAL PROCESS COST</th><th data-additional-cost-grand-total>Rp 0</th><th></th></tr></tfoot></table></div>
+    </div>
+  </section>
+
+  <section class="panel section-gap" data-method-panel="FPP" hidden>
+    <div class="panel-header"><div><p class="eyebrow">03B · FULL PACKAGE COST</p><h2>Harga jadi dari vendor</h2><p>Isi COGS per quantity untuk setiap SKU pada tabel Product Requirement di atas. Pilih proses yang tetap dikontrol Fobia di bagian Process Target.</p></div></div>
+  </section>
+
+  <section class="panel section-gap">
+    <div class="panel-header"><div><p class="eyebrow">04 · PROCESS TARGET</p><h2>Target proses produksi</h2><p>Centang hanya proses yang akan dikontrol. Tanggal proses lain tidak diwajibkan.</p></div><span class="pill">Planning date</span></div>
+    <div class="production-process-grid">
+      <article class="production-process-card" data-process-card data-process="material"><label class="production-process-toggle">{{ plan_form.control_material_purchase }}<span>{{ plan_form.control_material_purchase.label }}</span></label><div class="production-process-fields"><label>{{ plan_form.target_material_purchase_date.label }}{{ plan_form.target_material_purchase_date }}</label>{{ plan_form.target_material_purchase_date.errors }}</div></article>
+      <article class="production-process-card" data-process-card data-process="trial"><label class="production-process-toggle">{{ plan_form.control_trial }}<span>{{ plan_form.control_trial.label }}</span></label><div class="production-process-fields"><label>{{ plan_form.target_trial_date.label }}{{ plan_form.target_trial_date }}</label>{{ plan_form.target_trial_date.errors }}</div></article>
+      <article class="production-process-card" data-process-card data-process="cut"><label class="production-process-toggle">{{ plan_form.control_cut }}<span>{{ plan_form.control_cut.label }}</span></label><div class="production-process-fields process-date-pair"><label>Mulai{{ plan_form.target_cut_start_date }}</label><label>Selesai{{ plan_form.target_cut_end_date }}</label></div></article>
+      <article class="production-process-card" data-process-card data-process="additional"><label class="production-process-toggle">{{ plan_form.control_additional_process }}<span>{{ plan_form.control_additional_process.label }}</span></label><div class="production-process-fields"><label>{{ plan_form.additional_process_name.label }}{{ plan_form.additional_process_name }}</label>{{ plan_form.additional_process_name.errors }}<div class="process-date-pair"><label>Mulai{{ plan_form.target_additional_process_start_date }}</label><label>Selesai{{ plan_form.target_additional_process_end_date }}</label></div></div></article>
+      <article class="production-process-card" data-process-card data-process="make"><label class="production-process-toggle">{{ plan_form.control_make }}<span>{{ plan_form.control_make.label }}</span></label><div class="production-process-fields process-date-pair"><label>Mulai{{ plan_form.target_make_start_date }}</label><label>Selesai{{ plan_form.target_make_end_date }}</label></div></article>
+      <article class="production-process-card" data-process-card data-process="trim"><label class="production-process-toggle">{{ plan_form.control_trim }}<span>{{ plan_form.control_trim.label }}</span></label><div class="production-process-fields process-date-pair"><label>Mulai{{ plan_form.target_trim_start_date }}</label><label>Selesai{{ plan_form.target_trim_end_date }}</label></div></article>
+      <article class="production-process-card" data-process-card data-process="qc"><label class="production-process-toggle">{{ plan_form.control_qc }}<span>{{ plan_form.control_qc.label }}</span></label><div class="production-process-fields process-date-pair"><label>Mulai{{ plan_form.target_qc_start_date }}</label><label>Selesai{{ plan_form.target_qc_end_date }}</label></div></article>
+      <article class="production-process-card" data-process-card data-process="inbound"><label class="production-process-toggle">{{ plan_form.control_inbound }}<span>{{ plan_form.control_inbound.label }}</span></label><div class="production-process-fields"><label>{{ plan_form.target_inbound_date.label }}{{ plan_form.target_inbound_date }}</label>{{ plan_form.target_inbound_date.errors }}</div></article>
+    </div>
+  </section>
+
+  <section class="panel section-gap" data-po-preview-panel>
+    <div class="panel-header"><div><p class="eyebrow">05 · PO PREVIEW</p><h2>Ringkasan sebelum PO dibuat</h2></div><span class="status-badge parsing">Preview</span></div>
+    <section class="metric-grid three">
+      <article class="metric-card"><span>Production Qty</span><strong data-preview-qty>{{ total_qty|floatformat:"0g" }} pcs</strong><small>seluruh size terpilih</small></article>
+      <article class="metric-card"><span>Planned Total Cost</span><strong data-preview-total>Rp {% if plan %}{{ plan.planned_total_cost|floatformat:"0g" }}{% else %}0{% endif %}</strong><small>sesuai metode produksi</small></article>
+      <article class="metric-card"><span>Planned COGS / Unit</span><strong data-preview-unit>Rp {% if plan %}{{ plan.planned_unit_cogs|floatformat:"0g" }}{% else %}0{% endif %}</strong><small>snapshot untuk Draft PO</small></article>
+    </section>
+    <div class="table-wrap"><table><thead><tr><th>Need Month</th><th>Product</th><th>Method</th><th>Vendor</th><th>Target Inbound</th><th>Qty</th><th>COGS / Unit</th><th>Total</th></tr></thead><tbody><tr><td>{{ requirements.0.need_month|date:"F Y" }}</td><td><strong data-preview-product>{{ product_label }}</strong></td><td data-preview-method>—</td><td data-preview-vendor>—</td><td data-preview-inbound>—</td><td data-preview-qty-cell>{{ total_qty|floatformat:"0g" }}</td><td data-preview-unit-cell>Rp 0</td><td data-preview-total-cell>Rp 0</td></tr></tbody></table></div>
+    {% if po_preview_groups %}<div class="panel-header section-gap"><div><p class="eyebrow">PPO &amp; PO REVIEW</p><h3>Draft PPO · {{ po_preview_groups|length }} PO</h3></div><small class="muted">Simpan Draft untuk memperbarui pembagian</small></div><div class="table-wrap"><table><thead><tr><th>PPO</th><th>PO</th><th>PO Type</th><th>Vendor</th><th>Items</th><th>Target</th><th>Total</th></tr></thead><tbody>{% for group in po_preview_groups %}<tr><td>{% if forloop.first %}<strong>Draft PPO</strong>{% endif %}</td><td><strong>PO{% if group.child_code %} {{ group.child_code }}{% endif %}</strong></td><td>{{ group.order_type_label }}</td><td>{{ group.supplier.name|default:"Vendor belum dipilih" }}</td><td>{{ group.items|length }}</td><td>{{ group.required_arrival|date:"d M Y"|default:"—" }}</td><td><strong>Rp {{ group.total_cost|floatformat:"0g" }}</strong></td></tr>{% endfor %}</tbody></table></div>{% endif %}
+  </section>
+  </fieldset>
+
+  {% if not plan or plan.status == 'DRAFT' %}<div class="header-actions production-plan-actions section-gap"><button class="primary-button" type="submit" name="action" value="save" data-loading-label="Menyimpan Production Plan…">Simpan Draft Production Plan</button></div>{% endif %}
+</form>
+
+{% if plan and plan.status == 'DRAFT' %}<section class="panel section-gap production-generate-panel"><div><p class="eyebrow">FINAL STEP</p><h2>Generate Draft PPO &amp; PO</h2><p>Data form disimpan terlebih dahulu. Jika validasi belum lengkap, perubahan Production Plan tetap tersimpan.</p></div><button class="primary-button" type="submit" form="production-plan-form" name="action" value="generate" data-loading-label="Menyimpan &amp; Membuat Draft PPO &amp; PO…">Generate Draft PPO &amp; PO</button></section>{% endif %}
+
+<template id="material-row-template"><tr data-material-row><td><select name="material_product" aria-label="Product tujuan material"><option value="">Pilih product</option>{% for product in material_products %}<option value="{{ product.id }}">{% if product.parent_sku %}{{ product.parent_sku }} · {% endif %}{{ product.name }}</option>{% endfor %}</select></td><td><input name="material_name" placeholder="Nama material"></td><td><select name="material_type" aria-label="Material Type"><option value="MAIN">Main Material</option><option value="SUPPORTING">Supporting Material</option></select></td><td><select name="material_supplier" aria-label="Supplier material"><option value="">Pilih supplier</option>{% for supplier in supplier_options %}<option value="{{ supplier.id }}">{{ supplier.name }}</option>{% endfor %}</select></td><td><input type="number" min="0.0001" step="0.0001" name="material_quantity" data-material-qty></td><td><input name="material_unit" placeholder="meter / pcs"></td><td><input type="number" min="0" step="1" name="material_unit_price" data-material-price></td><td><strong data-material-total>Rp 0</strong></td><td><button class="icon-button" type="button" data-remove-material aria-label="Hapus material">×</button></td></tr></template>
+<template id="cmt-cost-row-template"><tr data-cmt-cost-row><td><select name="cmt_cost_product" aria-label="Product tujuan biaya CMT"><option value="">Pilih product</option>{% for product in material_products %}<option value="{{ product.id }}">{% if product.parent_sku %}{{ product.parent_sku }} · {% endif %}{{ product.name }}</option>{% endfor %}</select></td><td><strong data-cost-product-qty>0 pcs</strong></td><td><select name="cmt_supplier" aria-label="Vendor CMT"><option value="">Pilih vendor</option>{% for supplier in supplier_options %}<option value="{{ supplier.id }}">{{ supplier.name }}</option>{% endfor %}</select></td><td><input class="compact-money-input" type="text" inputmode="numeric" pattern="[0-9,]*" name="cmt_unit_cost" placeholder="0" autocomplete="off" data-cmt-unit-cost></td><td><strong data-cmt-cost-total>Rp 0</strong></td><td><button class="icon-button" type="button" data-remove-cmt-cost aria-label="Hapus biaya CMT product">×</button></td></tr></template>
+<template id="additional-cost-row-template"><tr data-additional-cost-row><td><select name="additional_cost_product" aria-label="Product tujuan biaya Additional Process"><option value="">Pilih product</option>{% for product in material_products %}<option value="{{ product.id }}">{% if product.parent_sku %}{{ product.parent_sku }} · {% endif %}{{ product.name }}</option>{% endfor %}</select></td><td><input name="additional_process_cost_name" placeholder="Bordir / Sablon"></td><td><select name="additional_process_supplier" aria-label="Vendor Additional Process"><option value="">Pilih vendor</option>{% for supplier in supplier_options %}<option value="{{ supplier.id }}">{{ supplier.name }}</option>{% endfor %}</select></td><td><strong data-cost-product-qty>0 pcs</strong></td><td><input class="compact-money-input" type="text" inputmode="numeric" pattern="[0-9,]*" name="additional_process_unit_cost" placeholder="0" autocomplete="off" data-additional-unit-cost></td><td><strong data-additional-cost-total>Rp 0</strong></td><td><button class="icon-button" type="button" data-remove-additional-cost aria-label="Hapus biaya Additional Process product">×</button></td></tr></template>
+{% for group in addable_products %}<template data-add-product-template="{{ group.product.id }}">{% for row in group.requirements %}<tr data-plan-line data-requirement-id="{{ row.id }}" data-product-id="{{ group.product.id }}" data-product-name="{{ group.product.name }}" data-product-material-label="{% if group.product.parent_sku %}{{ group.product.parent_sku }} · {% endif %}{{ group.product.name }}"><td><span class="code-label">{{ row.sku.sku }}</span></td><td>{{ group.product.name }}</td><td>{{ row.sku.size|default:"—" }}</td><td>{{ row.approved_qty|floatformat:"0g" }}</td><td>{{ row.ordered_qty|floatformat:"0g" }}</td><td><input class="compact-number-input" type="number" min="1" step="1" name="quantity_{{ row.id }}" value="{{ row.plan_qty|floatformat:'0' }}" required data-plan-qty></td><td><input class="compact-money-input" type="text" inputmode="numeric" pattern="[0-9,]*" name="unit_cogs_{{ row.id }}" value="" placeholder="0" autocomplete="off" data-plan-cogs></td><td><strong data-line-cogs>Rp 0</strong></td><td><button class="production-plan-remove-button" type="button" data-remove-requirement aria-label="Hapus {{ row.sku.sku }} dari Production Plan" title="Hapus dari Production Plan">×</button></td></tr>{% endfor %}</template>{% endfor %}
+<script>
+(() => {
+  const form = document.querySelector('#production-plan-form');
+  if (!form) return;
+  const draftKey = form.dataset.draftStorageKey;
+  const draftVersion = 6;
+  const csrf = form.querySelector('[name="csrfmiddlewaretoken"]')?.value;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(draftKey));
+    if (saved && saved.version !== draftVersion) {
+      sessionStorage.removeItem(draftKey);
+    } else if (saved?.html && saved?.fields) {
+      if (saved.fields.process_cost_product && !saved.fields.cmt_cost_product) {
+        saved.fields.cmt_cost_product = [...saved.fields.process_cost_product];
+        saved.fields.additional_cost_product = [...saved.fields.process_cost_product];
+      }
+      const restored = document.createElement('div');
+      restored.innerHTML = saved.html;
+      const freshCmtTitle = form.querySelector('[data-method-panel="CMT"] > .panel-header > div');
+      const restoredCmtTitle = restored.querySelector('[data-method-panel="CMT"] > .panel-header > div');
+      if (freshCmtTitle && restoredCmtTitle) restoredCmtTitle.replaceWith(freshCmtTitle.cloneNode(true));
+      const freshFppVendor = form.querySelector('[data-fpp-vendor-field]');
+      const restoredFppVendor = restored.querySelector('[name="supplier"]')?.closest('.production-plan-field');
+      if (freshFppVendor && restoredFppVendor) restoredFppVendor.replaceWith(freshFppVendor.cloneNode(true));
+      if (!restored.querySelector('[name="control_additional_process"]')) {
+        const additionalProcess = form.querySelector('[data-process="additional"]');
+        if (additionalProcess) restored.querySelector('[data-process="cut"]')?.after(additionalProcess.cloneNode(true));
+      }
+      if (!restored.querySelector('[name="material_supplier"]')) {
+        const freshMaterialTable = form.querySelector('[data-material-rows]')?.closest('table');
+        const restoredMaterialTable = restored.querySelector('[data-material-rows]')?.closest('table');
+        if (freshMaterialTable && restoredMaterialTable) {
+          restoredMaterialTable.querySelectorAll('thead th')[1]?.after(
+            freshMaterialTable.querySelectorAll('thead th')[3].cloneNode(true),
+          );
+          const freshRows = [...freshMaterialTable.querySelectorAll('[data-material-row]')];
+          restoredMaterialTable.querySelectorAll('[data-material-row]').forEach((row, index) => {
+            const supplierCell = (freshRows[index] || freshRows[0])?.querySelector('[name="material_supplier"]')?.closest('td');
+            if (supplierCell) row.children[1]?.after(supplierCell.cloneNode(true));
+          });
+        }
+      }
+      if (!restored.querySelector('[name="material_type"]')) {
+        const freshMaterialTable = form.querySelector('[data-material-rows]')?.closest('table');
+        const restoredMaterialTable = restored.querySelector('[data-material-rows]')?.closest('table');
+        if (freshMaterialTable && restoredMaterialTable) {
+          restoredMaterialTable.querySelectorAll('thead th')[1]?.after(
+            freshMaterialTable.querySelectorAll('thead th')[2].cloneNode(true),
+          );
+          const freshRows = [...freshMaterialTable.querySelectorAll('[data-material-row]')];
+          restoredMaterialTable.querySelectorAll('[data-material-row]').forEach((row, index) => {
+            const typeCell = (freshRows[index] || freshRows[0])?.querySelector('[name="material_type"]')?.closest('td');
+            if (typeCell) row.children[1]?.after(typeCell.cloneNode(true));
+          });
+        }
+      }
+      if (restored.querySelector('[data-process-cost-block]')?.dataset.processCostLayout !== 'supplier-split') {
+        restored.querySelector('.production-cost-grid')?.remove();
+        restored.querySelector('[data-process-cost-block]')?.remove();
+        const processCostBlock = form.querySelector('[data-process-cost-block]');
+        const cmtPanel = restored.querySelector('[data-method-panel="CMT"]');
+        if (processCostBlock && cmtPanel) cmtPanel.append(processCostBlock.cloneNode(true));
+      }
+      restored.querySelectorAll('[data-submitter-mirror]').forEach(input => input.remove());
+      const freshPoPreview = form.querySelector('[data-po-preview-panel]');
+      const restoredPoPreview = restored.querySelector('[data-po-preview-panel]');
+      if (freshPoPreview && restoredPoPreview) restoredPoPreview.replaceWith(freshPoPreview.cloneNode(true));
+      const freshSaveActions = form.querySelector('.production-plan-actions');
+      const restoredSaveActions = restored.querySelector('.production-plan-actions');
+      if (freshSaveActions && restoredSaveActions) restoredSaveActions.replaceWith(freshSaveActions.cloneNode(true));
+      form.innerHTML = restored.innerHTML;
+      if (csrf) form.querySelector('[name="csrfmiddlewaretoken"]').value = csrf;
+      form.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(input => { input.checked = false; });
+      Object.entries(saved.fields).forEach(([name, values]) => {
+        [...form.elements].filter(input => input.name === name).forEach((input, index) => {
+          if (input.type === 'checkbox' || input.type === 'radio') input.checked = values.includes(input.value);
+          else input.value = values[index] ?? '';
+        });
+      });
+    }
+  } catch (error) {
+    sessionStorage.removeItem(draftKey);
+  }
+  const method = form.querySelector('[name="production_method"]');
+  const money = value => `Rp ${Math.round(value || 0).toLocaleString('id-ID')}`;
+  const number = element => Number(element?.value || 0);
+  const moneyNumber = element => Number(String(element?.value || '').replaceAll(',', '')) || 0;
+  let previousMethod = method?.value || 'CMT';
+  const fppValues = new Map();
+  const addProductPanel = form.querySelector('[data-add-product-panel]');
+  const addProductSelect = form.querySelector('[data-add-product-select]');
+  const removedProductRows = new Map();
+  const persistDraft = () => {
+    const fields = {};
+    new FormData(form).forEach((value, name) => {
+      if (name === 'csrfmiddlewaretoken' || name === 'action') return;
+      (fields[name] ||= []).push(value);
+    });
+    sessionStorage.setItem(draftKey, JSON.stringify({version: draftVersion, html: form.innerHTML, fields}));
+  };
+  if (previousMethod === 'FPP') {
+    form.querySelectorAll('[data-plan-cogs]').forEach(input => fppValues.set(input.name, input.value));
+  }
+  const update = () => {
+    const selectedMethod = method?.value || 'CMT';
+    form.querySelector('[data-fpp-vendor-field]').style.display = selectedMethod === 'FPP' ? '' : 'none';
+    document.querySelectorAll('[data-method-panel]').forEach(panel => panel.hidden = panel.dataset.methodPanel !== selectedMethod);
+    if (selectedMethod !== previousMethod) {
+      ['material', 'cut'].forEach(process => {
+        const checkbox = form.querySelector(`[data-process="${process}"] input[type="checkbox"]`);
+        if (checkbox) checkbox.checked = selectedMethod === 'CMT';
+      });
+    }
+    form.querySelectorAll('[data-process-card]').forEach(card => {
+      const controlled = card.querySelector('input[type="checkbox"]').checked;
+      card.classList.toggle('is-disabled', !controlled);
+      card.querySelectorAll('input[type="date"], input[name="additional_process_name"]').forEach(input => { input.disabled = !controlled; });
+    });
+    const planLines = [...form.querySelectorAll('[data-plan-line]')];
+    const products = new Map(planLines.map(row => [row.dataset.productId, row.dataset.productName]));
+    const productLabel = products.size === 1 ? [...products.values()][0] : `${products.size} Products Selected`;
+    document.querySelector('[data-product-label]').textContent = productLabel;
+    document.querySelector('[data-preview-product]').textContent = productLabel;
+    planLines.forEach(row => { row.querySelector('[data-remove-requirement]').disabled = planLines.length === 1; });
+    const qty = planLines.reduce((sum, row) => sum + number(row.querySelector('[data-plan-qty]')), 0);
+    let materialTotal = 0;
+    const materialByProduct = new Map();
+    form.querySelectorAll('[data-material-row]').forEach(row => {
+      const total = number(row.querySelector('[data-material-qty]')) * number(row.querySelector('[data-material-price]'));
+      materialTotal += total;
+      const productId = row.querySelector('[name="material_product"]').value;
+      if (productId) materialByProduct.set(productId, (materialByProduct.get(productId) || 0) + total);
+      row.querySelector('[data-material-total]').textContent = money(total);
+    });
+    const productQuantities = new Map();
+    planLines.forEach(row => productQuantities.set(
+      row.dataset.productId,
+      (productQuantities.get(row.dataset.productId) || 0) + number(row.querySelector('[data-plan-qty]')),
+    ));
+    const additionalControlled = form.querySelector('[name="control_additional_process"]')?.checked;
+    const processUnitByProduct = new Map();
+    let cmtProcessTotal = 0;
+    form.querySelectorAll('[data-cmt-cost-row]').forEach(row => {
+      const productId = row.querySelector('[name="cmt_cost_product"]').value;
+      const productQty = productQuantities.get(productId) || 0;
+      const cmtUnit = moneyNumber(row.querySelector('[data-cmt-unit-cost]'));
+      row.querySelectorAll('[data-cmt-unit-cost]').forEach(input => {
+        if (input.value && document.activeElement !== input) input.value = Math.round(moneyNumber(input)).toLocaleString('en-US');
+      });
+      const rowTotal = productQty * cmtUnit;
+      if (productId) processUnitByProduct.set(productId, (processUnitByProduct.get(productId) || 0) + cmtUnit);
+      cmtProcessTotal += rowTotal;
+      row.querySelector('[data-cost-product-qty]').textContent = `${productQty.toLocaleString('id-ID')} pcs`;
+      row.querySelector('[data-cmt-cost-total]').textContent = money(rowTotal);
+    });
+    let additionalProcessTotal = 0;
+    form.querySelectorAll('[data-additional-cost-row]').forEach(row => {
+      const productId = row.querySelector('[name="additional_cost_product"]').value;
+      const productQty = productQuantities.get(productId) || 0;
+      const input = row.querySelector('[data-additional-unit-cost]');
+      const additionalUnit = additionalControlled ? moneyNumber(input) : 0;
+      if (input.value && document.activeElement !== input) input.value = Math.round(moneyNumber(input)).toLocaleString('en-US');
+      const rowTotal = productQty * additionalUnit;
+      if (productId) processUnitByProduct.set(productId, (processUnitByProduct.get(productId) || 0) + additionalUnit);
+      additionalProcessTotal += rowTotal;
+      row.querySelector('[data-cost-product-qty]').textContent = `${productQty.toLocaleString('id-ID')} pcs`;
+      row.querySelector('[data-additional-cost-total]').textContent = money(rowTotal);
+      input.classList.toggle('is-disabled', !additionalControlled);
+    });
+    document.querySelector('[data-cmt-cost-grand-total]').textContent = money(cmtProcessTotal);
+    document.querySelector('[data-additional-cost-grand-total]').textContent = money(additionalProcessTotal);
+    const cmtTotal = materialTotal + cmtProcessTotal + additionalProcessTotal;
+    if (selectedMethod !== previousMethod) {
+      if (previousMethod === 'FPP') {
+        planLines.forEach(row => {
+          const input = row.querySelector('[data-plan-cogs]');
+          fppValues.set(input.name, input.value);
+        });
+      }
+      if (selectedMethod === 'FPP') {
+        planLines.forEach(row => {
+          const input = row.querySelector('[data-plan-cogs]');
+          input.value = fppValues.get(input.name) || '';
+        });
+      }
+    }
+    let total = 0;
+    planLines.forEach(row => {
+      const lineQty = number(row.querySelector('[data-plan-qty]'));
+      const cogsInput = row.querySelector('[data-plan-cogs]');
+      const productQty = productQuantities.get(row.dataset.productId) || 0;
+      const cmtUnit = (processUnitByProduct.get(row.dataset.productId) || 0)
+        + (productQty ? (materialByProduct.get(row.dataset.productId) || 0) / productQty : 0);
+      cogsInput.readOnly = selectedMethod === 'CMT';
+      if (selectedMethod === 'CMT') cogsInput.value = Math.round(cmtUnit || 0).toLocaleString('en-US');
+      else if (cogsInput.value) cogsInput.value = Math.round(moneyNumber(cogsInput)).toLocaleString('en-US');
+      const lineTotal = lineQty * (selectedMethod === 'CMT' ? cmtUnit : moneyNumber(cogsInput));
+      total += lineTotal;
+      row.querySelector('[data-line-cogs]').textContent = money(lineTotal);
+    });
+    if (selectedMethod === 'CMT') total = cmtTotal;
+    const unit = qty ? total / qty : 0;
+    const vendor = form.querySelector('[name="supplier"]');
+    const inbound = form.querySelector('[name="target_inbound_date"]');
+    document.querySelector('[data-total-plan-qty]').textContent = qty.toLocaleString('id-ID');
+    document.querySelector('[data-total-unit-cogs]').textContent = money(unit);
+    document.querySelector('[data-total-cogs]').textContent = money(total);
+    document.querySelectorAll('[data-preview-qty]').forEach(node => node.textContent = `${qty.toLocaleString('id-ID')} pcs`);
+    document.querySelector('[data-preview-total]').textContent = money(total);
+    document.querySelector('[data-preview-unit]').textContent = money(unit);
+    document.querySelector('[data-preview-method]').textContent = method?.selectedOptions[0]?.textContent || '—';
+    document.querySelector('[data-preview-vendor]').textContent = selectedMethod === 'CMT'
+      ? 'Per PO'
+      : (vendor?.selectedOptions[0]?.textContent || '—');
+    document.querySelector('[data-preview-inbound]').textContent = inbound?.disabled ? '—' : (inbound?.value || '—');
+    document.querySelector('[data-preview-qty-cell]').textContent = qty.toLocaleString('id-ID');
+    document.querySelector('[data-preview-unit-cell]').textContent = money(unit);
+    document.querySelector('[data-preview-total-cell]').textContent = money(total);
+    previousMethod = selectedMethod;
+  };
+  form.addEventListener('input', update);
+  form.addEventListener('change', update);
+  form.addEventListener('input', persistDraft);
+  form.addEventListener('change', persistDraft);
+  const draftObserver = new MutationObserver(persistDraft);
+  draftObserver.observe(form, {childList: true, subtree: true});
+  form.addEventListener('submit', () => {
+    draftObserver.disconnect();
+    sessionStorage.removeItem(draftKey);
+  });
+  document.querySelector('[data-add-material]')?.addEventListener('click', () => {
+    document.querySelector('[data-material-rows]').append(document.querySelector('#material-row-template').content.cloneNode(true));
+    update();
+  });
+  document.querySelector('[data-add-cmt-cost]')?.addEventListener('click', () => {
+    document.querySelector('[data-cmt-cost-rows]').append(document.querySelector('#cmt-cost-row-template').content.cloneNode(true));
+    update();
+  });
+  document.querySelector('[data-add-additional-cost]')?.addEventListener('click', () => {
+    document.querySelector('[data-additional-cost-rows]').append(document.querySelector('#additional-cost-row-template').content.cloneNode(true));
+    update();
+  });
+  const syncAddProductButton = () => {
+    const button = form.querySelector('[data-toggle-add-product]');
+    button.disabled = addProductSelect.options.length <= 1;
+    if (button.disabled) addProductPanel.hidden = true;
+  };
+  const addCostProduct = (productId, label) => {
+    const templates = [
+      document.querySelector('#material-row-template'),
+      document.querySelector('#cmt-cost-row-template'),
+      document.querySelector('#additional-cost-row-template'),
+    ];
+    const selects = [
+      ...form.querySelectorAll('[name="material_product"]'),
+      ...form.querySelectorAll('[name="cmt_cost_product"]'),
+      ...form.querySelectorAll('[name="additional_cost_product"]'),
+      ...templates.flatMap(template => [...template.content.querySelectorAll('select')]),
+    ];
+    selects.forEach(select => {
+      if ([...select.options].some(option => option.value === productId)) return;
+      select.add(new Option(label, productId));
+    });
+  };
+  form.querySelector('[data-toggle-add-product]')?.addEventListener('click', () => {
+    addProductPanel.hidden = !addProductPanel.hidden;
+  });
+  form.querySelector('[data-confirm-add-product]')?.addEventListener('click', () => {
+    const productId = addProductSelect.value;
+    if (!productId) return;
+    const option = addProductSelect.selectedOptions[0];
+    const template = document.querySelector(`[data-add-product-template="${productId}"]`);
+    const rows = removedProductRows.get(productId) || [...template.content.querySelectorAll('[data-plan-line]')].map(row => row.cloneNode(true));
+    rows.forEach(row => {
+      form.querySelector('.production-plan-product-table tbody').append(row);
+      const hidden = document.createElement('input');
+      hidden.type = 'hidden';
+      hidden.name = 'requirement';
+      hidden.value = row.dataset.requirementId;
+      hidden.dataset.requirementInput = row.dataset.requirementId;
+      form.prepend(hidden);
+    });
+    removedProductRows.delete(productId);
+    addCostProduct(productId, option.dataset.materialLabel || rows[0].dataset.productMaterialLabel);
+    option.remove();
+    addProductSelect.value = '';
+    addProductPanel.hidden = true;
+    syncAddProductButton();
+    update();
+  });
+  document.addEventListener('click', event => {
+    const requirementButton = event.target.closest('[data-remove-requirement]');
+    if (requirementButton) {
+      const row = requirementButton.closest('[data-plan-line]');
+      const productId = row.dataset.productId;
+      const cachedRows = removedProductRows.get(productId) || [];
+      cachedRows.push(row.cloneNode(true));
+      removedProductRows.set(productId, cachedRows);
+      form.querySelector(`[data-requirement-input="${row.dataset.requirementId}"]`)?.remove();
+      row.remove();
+      if (!form.querySelector(`[data-plan-line][data-product-id="${productId}"]`)) {
+        if (![...addProductSelect.options].some(option => option.value === productId)) {
+          const option = new Option(row.dataset.productName, productId);
+          option.dataset.materialLabel = row.dataset.productMaterialLabel;
+          addProductSelect.add(option);
+        }
+        const templates = [
+          document.querySelector('#material-row-template'),
+          document.querySelector('#cmt-cost-row-template'),
+          document.querySelector('#additional-cost-row-template'),
+        ];
+        const selects = [
+          ...form.querySelectorAll('[name="material_product"]'),
+          ...form.querySelectorAll('[name="cmt_cost_product"]'),
+          ...form.querySelectorAll('[name="additional_cost_product"]'),
+          ...templates.flatMap(template => [...template.content.querySelectorAll('select')]),
+        ];
+        selects.forEach(select => {
+          if (select.value === productId) select.value = '';
+          [...select.options].find(option => option.value === productId)?.remove();
+        });
+      }
+      syncAddProductButton();
+      update();
+      return;
+    }
+    const materialButton = event.target.closest('[data-remove-material]');
+    if (materialButton) {
+      const rows = document.querySelectorAll('[data-material-row]');
+      if (rows.length === 1) rows[0].querySelectorAll('input, select').forEach(input => input.value = '');
+      else materialButton.closest('[data-material-row]').remove();
+      update();
+      return;
+    }
+    const cmtCostButton = event.target.closest('[data-remove-cmt-cost]');
+    if (cmtCostButton) {
+      const rows = document.querySelectorAll('[data-cmt-cost-row]');
+      if (rows.length === 1) rows[0].querySelectorAll('input, select').forEach(input => input.value = '');
+      else cmtCostButton.closest('[data-cmt-cost-row]').remove();
+      update();
+      return;
+    }
+    const additionalCostButton = event.target.closest('[data-remove-additional-cost]');
+    if (!additionalCostButton) return;
+    const rows = document.querySelectorAll('[data-additional-cost-row]');
+    if (rows.length === 1) rows[0].querySelectorAll('input, select').forEach(input => input.value = '');
+    else additionalCostButton.closest('[data-additional-cost-row]').remove();
+    update();
+  });
+  syncAddProductButton();
+  update();
+})();
+</script>
+{% endblock %}

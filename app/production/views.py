@@ -51,7 +51,9 @@ def _ensure_released_workflows(actor=None):
 
 
 def _production_queryset():
-    return ProductionOrder.objects.select_related("po", "po__supplier", "plan", "cogs_finalization").prefetch_related(
+    return ProductionOrder.objects.select_related(
+        "po", "po__supplier", "po__parent_plan", "po__ppic_production_plan", "plan", "cogs_finalization"
+    ).prefetch_related(
         "stages",
         "trials",
         "po__lines__sku__product_variant__product",
@@ -164,13 +166,14 @@ def _export_monitoring(rows, qc_follow_up_rows):
     append_table(
         sheet,
         (
-            "Purchase Order", "Vendor", "PO Qty", "Passed Process", "Next Process", "Material",
-            "Trial", "Cut Qty", "Make Qty", "Trim Qty", "QC Inspected", "QC Passed",
+            "Purchase Order", "Production Method", "Vendor", "PO Qty", "Passed Process", "Next Process", "Material",
+            "Trial", "Cut Qty", "Additional Process Qty", "Make Qty", "Trim Qty", "QC Inspected", "QC Passed",
             "Inbound", "Delivering", "Ready to Deliver", "Target", "Risk",
         ),
         (
             (
-                row["production_order"].po.po_number,
+                row["production_order"].po.production_reference,
+                row["production_method_display"],
                 row["production_order"].po.supplier.name,
                 row["ordered_qty"],
                 row["passed_process_label"],
@@ -181,6 +184,7 @@ def _export_monitoring(rows, qc_follow_up_rows):
                     if row["trial"] else ""
                 ),
                 row["cmt_quantities"][ProductionStage.Stage.CUT]["completed_qty"],
+                row["cmt_quantities"][ProductionStage.Stage.ADDITIONAL_PROCESS]["completed_qty"],
                 row["cmt_quantities"][ProductionStage.Stage.MAKE]["completed_qty"],
                 row["cmt_quantities"][ProductionStage.Stage.TRIM]["completed_qty"],
                 row["inspected_qty"],
@@ -193,7 +197,7 @@ def _export_monitoring(rows, qc_follow_up_rows):
             )
             for row in rows
         ),
-        number_formats={column: "#,##0" for column in range(3, 16) if column not in (4, 5, 6, 7)},
+        number_formats={column: "#,##0" for column in range(4, 18) if column not in (5, 6, 7, 8)},
     )
     follow_up_sheet = workbook.create_sheet("QC Follow Up")
     next_steps = {
@@ -207,7 +211,7 @@ def _export_monitoring(rows, qc_follow_up_rows):
         ("PO", "Vendor", "SKU", "Product", "Qty", "Status", "Langkah Berikutnya"),
         (
             (
-                item.po_line.po.po_number,
+                item.po_line.po.production_reference,
                 item.po_line.po.supplier.name,
                 item.po_line.sku.sku,
                 item.po_line.sku.product_variant.product.name,
@@ -235,7 +239,7 @@ def _export_planning(rows):
                 plan = None
             lines = list(row.po.lines.all())
             yield (
-                row.po.po_number,
+                row.po.production_reference,
                 row.po.supplier.name,
                 row.po.need_month,
                 len(lines),
@@ -305,7 +309,7 @@ def monitoring(request):
         rows = [
             row
             for row in rows
-            if query_lower in (row["production_order"].po.po_number or "").lower()
+            if query_lower in row["production_order"].po.production_reference.lower()
             or query_lower in row["production_order"].po.supplier.name.lower()
         ]
     if stage:
@@ -465,6 +469,7 @@ def activity(request):
             follow_up_form = ReQCForm(
                 request.POST or None,
                 max_qty=selected_follow_up.open_qty,
+                production_order=selected,
                 prefix="follow_up",
             )
 
@@ -516,6 +521,7 @@ def activity(request):
             activity_type = values.get("activity_type")
             if activity_type in {
                 ProductionActivity.ActivityType.CUT,
+                ProductionActivity.ActivityType.ADDITIONAL_PROCESS,
                 ProductionActivity.ActivityType.MAKE,
                 ProductionActivity.ActivityType.TRIM,
             }:
@@ -645,7 +651,11 @@ def activity_correction(request, activity_id):
                 "failed_disposition": effective.after_values.get("failed_disposition", ""),
             }
         )
-    form = ProductionCorrectionForm(request.POST or None, initial=initial)
+    form = ProductionCorrectionForm(
+        request.POST or None,
+        initial=initial,
+        production_order=original.production_order,
+    )
     if request.method == "POST" and form.is_valid():
         try:
             correct_production_activity(activity=original, actor=request.user, **form.cleaned_data)
@@ -730,27 +740,91 @@ def detail(request, production_id):
         audit_rows = [
             row for row in audit_rows if row["activity_label"] == selected_audit_activity
         ]
-    stage_numbers = {
-        ProductionStage.Stage.CUT: "03",
-        ProductionStage.Stage.MAKE: "04",
-        ProductionStage.Stage.TRIM: "05",
+    controls = snapshot["process_controls"]
+    plan = snapshot["plan"]
+    process_specs = (
+        (
+            "MATERIAL_PURCHASE",
+            "Pembelian Material",
+            getattr(plan, "target_material_purchase_date", None),
+            None,
+        ),
+        ("TRIAL", "Trial Production", getattr(plan, "target_trial_date", None), None),
+        (
+            ProductionStage.Stage.CUT,
+            "Cut · Potong",
+            getattr(plan, "target_cut_start_date", None),
+            getattr(plan, "target_cut_end_date", None),
+        ),
+        (
+            ProductionStage.Stage.ADDITIONAL_PROCESS,
+            getattr(plan, "additional_process_name", "") or "Additional Process",
+            getattr(plan, "target_additional_process_start_date", None),
+            getattr(plan, "target_additional_process_end_date", None),
+        ),
+        (
+            ProductionStage.Stage.MAKE,
+            "Make · Jahit",
+            getattr(plan, "target_make_start_date", None),
+            getattr(plan, "target_make_end_date", None),
+        ),
+        (
+            ProductionStage.Stage.TRIM,
+            "Trim · Finishing",
+            getattr(plan, "target_trim_start_date", None),
+            getattr(plan, "target_trim_end_date", None),
+        ),
+        (
+            "QC",
+            "Quality Control",
+            getattr(plan, "target_qc_start_date", None),
+            getattr(plan, "target_qc_end_date", None),
+        ),
+        ("INBOUND", "Target Inbound", getattr(plan, "target_inbound_date", None), None),
+    )
+    controlled_processes = [spec for spec in process_specs if controls[spec[0]]]
+    process_step_numbers = {
+        code: f"{position:02d}"
+        for position, (code, _label, _target_start, _target_end) in enumerate(
+            controlled_processes,
+            start=1,
+        )
     }
+    roadmap_entries = [
+        {
+            "code": code,
+            "label": label,
+            "target_start": target_start,
+            "target_end": target_end,
+            "step_number": process_step_numbers[code],
+        }
+        for code, label, target_start, target_end in controlled_processes
+    ]
     return render(
         request,
         "production/detail.html",
         {
             "production_order": production_order,
             "snapshot": snapshot,
+            "roadmap_entries": roadmap_entries,
+            "process_step_numbers": process_step_numbers,
+            "costing_step_number": f"{len(controlled_processes) + 1:02d}",
             "stage_entries": [
                 {
                     "stage": stages[code],
+                    "label": (
+                        getattr(plan, "additional_process_name", "") or "Additional Process"
+                        if code == ProductionStage.Stage.ADDITIONAL_PROCESS
+                        else stages[code].get_stage_display()
+                    ),
                     "quantity": snapshot["cmt_quantities"].get(code),
-                    "step_number": stage_numbers[code],
+                    "step_number": process_step_numbers[code],
                     "timing": snapshot["timing"].get(code),
                     "detail": process_details[code],
                     "detail_id": f"process-detail-{code.lower()}",
                 }
                 for code in CMT_STAGES
+                if controls[code]
             ],
             "qc_detail": process_details["QC"],
             "qc_follow_up_rows": _qc_follow_up_queryset().filter(po_line__po=production_order.po),

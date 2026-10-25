@@ -13,6 +13,7 @@ from inventory.models import (
     FIFOAllocation,
     FIFOOpeningSnapshot,
     FIFOLayer,
+    InboundDiscrepancy,
     InboundReceipt,
     InventoryException,
     InventoryMovement,
@@ -22,6 +23,7 @@ from inventory.models import (
     QCInspection,
 )
 from inventory.notifications import resolve_fifo_short_notification, sync_fifo_short_notification
+from master_data.models import Warehouse
 from purchasing.models import PurchaseOrder
 
 
@@ -43,6 +45,7 @@ def ensure_qc_follow_up(inspection):
     status_map = {
         QCInspection.Disposition.REWORK: QCFollowUp.Status.AWAITING_REWORK,
         QCInspection.Disposition.REJECTED: QCFollowUp.Status.REJECTED,
+        QCInspection.Disposition.VENDOR_REJECTED: QCFollowUp.Status.VENDOR_REJECTED,
         QCInspection.Disposition.ACCEPTED_EXCEPTION: QCFollowUp.Status.ACCEPTED_EXCEPTION,
     }
     follow_up, created = QCFollowUp.objects.get_or_create(
@@ -97,7 +100,9 @@ def complete_qc_rework(*, follow_up, activity_date, notes, actor):
 
 @transaction.atomic
 def record_re_qc(*, follow_up, activity_date, qty_passed, failed_disposition, notes, actor):
-    follow_up = QCFollowUp.objects.select_for_update().select_related("po_line__sku").get(pk=follow_up.pk)
+    follow_up = QCFollowUp.objects.select_for_update().select_related(
+        "po_line__sku", "po_line__po__ppic_production_plan"
+    ).get(pk=follow_up.pk)
     if follow_up.status != QCFollowUp.Status.READY_RE_QC:
         raise ValidationError("Re-QC hanya dapat dicatat setelah Rework Selesai.")
     inspected = Decimal(follow_up.open_qty)
@@ -105,11 +110,15 @@ def record_re_qc(*, follow_up, activity_date, qty_passed, failed_disposition, no
     if passed != passed.to_integral_value() or passed < 0 or passed > inspected:
         raise ValidationError(f"Qty Lolos Re-QC harus antara 0 dan {inspected:.0f} pcs.")
     failed = inspected - passed
-    if failed > 0 and failed_disposition not in {
+    allowed_dispositions = {
         QCInspection.Disposition.REWORK,
         QCInspection.Disposition.REJECTED,
-    }:
-        raise ValidationError("Barang gagal Re-QC wajib diputuskan Rework atau Rejected.")
+    }
+    ppic_plan = getattr(follow_up.po_line.po, "ppic_production_plan", None)
+    if ppic_plan and ppic_plan.production_method == "FPP":
+        allowed_dispositions.add(QCInspection.Disposition.VENDOR_REJECTED)
+    if failed > 0 and failed_disposition not in allowed_dispositions:
+        raise ValidationError("Tindak lanjut barang gagal Re-QC tidak valid untuk metode produksi ini.")
     before = {"status": follow_up.status, "open_qty": str(follow_up.open_qty)}
     follow_up.resolved_passed_qty += passed
     follow_up.open_qty = failed
@@ -118,6 +127,8 @@ def record_re_qc(*, follow_up, activity_date, qty_passed, failed_disposition, no
         failed_disposition = ""
     elif failed_disposition == QCInspection.Disposition.REWORK:
         follow_up.status = QCFollowUp.Status.AWAITING_REWORK
+    elif failed_disposition == QCInspection.Disposition.VENDOR_REJECTED:
+        follow_up.status = QCFollowUp.Status.VENDOR_REJECTED
     else:
         follow_up.status = QCFollowUp.Status.REJECTED
     follow_up.save(update_fields=("resolved_passed_qty", "open_qty", "status", "updated_at"))
@@ -671,7 +682,11 @@ def record_inbound(
             delivery_activity.inbound_receipts.aggregate(total=Sum("received_qty"))["total"]
             or Decimal("0")
         )
-        if received_for_delivery + received_qty > Decimal(effective.quantity or 0):
+        discrepancy_for_delivery = (
+            delivery_activity.inbound_discrepancies.aggregate(total=Sum("quantity"))["total"]
+            or Decimal("0")
+        )
+        if received_for_delivery + discrepancy_for_delivery + received_qty > Decimal(effective.quantity or 0):
             raise ValidationError("Qty diterima tidak boleh melebihi sisa Qty Delivering.")
     passed = qc_approved_qty(po_line)
     already_received = (
@@ -740,6 +755,165 @@ def record_inbound(
         after_values={"movement_key": movement_key, "quantity": str(received_qty)},
     )
     return receipt, movement
+
+
+@transaction.atomic
+def reconcile_delivery_inbound(
+    *,
+    delivery_activity,
+    inbound_date,
+    received_qty,
+    shortage_qty=0,
+    lost_qty=0,
+    damaged_qty=0,
+    not_sellable_qty=0,
+    warehouse,
+    reference,
+    actor,
+    notes="",
+):
+    """Reconcile one delivery remainder into sellable stock and final exception quantities."""
+    from production.models import ProductionActivity
+
+    delivery_activity = ProductionActivity.objects.select_for_update().get(pk=delivery_activity.pk)
+    if (
+        delivery_activity.activity_type != ProductionActivity.ActivityType.WAREHOUSE_DELIVERY
+        or delivery_activity.entry_kind != ProductionActivity.EntryKind.ACTIVITY
+        or not delivery_activity.po_line_id
+    ):
+        raise ValidationError("Pengiriman ini bukan QC Passed delivery yang dapat diterima.")
+    if inbound_date < delivery_activity.activity_date:
+        raise ValidationError(
+            f"Tanggal Diterima minimal {delivery_activity.activity_date:%d/%m/%Y}, sama dengan Tanggal Kirim."
+        )
+
+    quantity_by_type = {
+        InboundDiscrepancy.Type.SHORTAGE: Decimal(shortage_qty or 0),
+        InboundDiscrepancy.Type.LOST: Decimal(lost_qty or 0),
+        InboundDiscrepancy.Type.DAMAGED: Decimal(damaged_qty or 0),
+        InboundDiscrepancy.Type.NOT_SELLABLE: Decimal(not_sellable_qty or 0),
+    }
+    sellable_qty = Decimal(received_qty or 0)
+    all_quantities = [sellable_qty, *quantity_by_type.values()]
+    if any(quantity < 0 or quantity != quantity.to_integral_value() for quantity in all_quantities):
+        raise ValidationError("Seluruh quantity inbound harus berupa bilangan bulat non-negatif.")
+
+    effective = (
+        delivery_activity.correction_entries.filter(
+            entry_kind=ProductionActivity.EntryKind.CORRECTION
+        ).order_by("-occurred_at").first()
+        or delivery_activity
+    )
+    shipped = Decimal(effective.quantity or 0)
+    previously_received = (
+        delivery_activity.inbound_receipts.aggregate(total=Sum("received_qty"))["total"]
+        or Decimal("0")
+    )
+    previously_discrepant = (
+        delivery_activity.inbound_discrepancies.aggregate(total=Sum("quantity"))["total"]
+        or Decimal("0")
+    )
+    remaining = max(shipped - previously_received - previously_discrepant, Decimal("0"))
+    accounted_now = sellable_qty + sum(quantity_by_type.values(), Decimal("0"))
+    if accounted_now != remaining:
+        raise ValidationError(
+            f"Total Sellable + Exception harus sama dengan sisa Qty Delivering ({remaining:.0f} pcs)."
+        )
+    if sum(quantity_by_type.values(), Decimal("0")) and not (notes or "").strip():
+        raise ValidationError("Catatan wajib diisi bila ada inbound exception.")
+
+    receipt = movement = None
+    if sellable_qty:
+        receipt, movement = record_inbound(
+            po_line=delivery_activity.po_line,
+            delivery_activity=delivery_activity,
+            inbound_date=inbound_date,
+            received_qty=sellable_qty,
+            warehouse=warehouse,
+            reference=reference,
+            actor=actor,
+            notes=notes,
+        )
+
+    reject_warehouse = None
+    if quantity_by_type[InboundDiscrepancy.Type.DAMAGED] or quantity_by_type[InboundDiscrepancy.Type.NOT_SELLABLE]:
+        reject_warehouse = Warehouse.objects.filter(code="REJECT", is_active=True).first()
+        if reject_warehouse is None:
+            raise ValidationError("Reject Warehouse aktif belum tersedia.")
+
+    discrepancies = []
+    for discrepancy_type, quantity in quantity_by_type.items():
+        if not quantity:
+            continue
+        physical = discrepancy_type in {
+            InboundDiscrepancy.Type.DAMAGED,
+            InboundDiscrepancy.Type.NOT_SELLABLE,
+        }
+        rejected_movement = None
+        if physical:
+            rejected_movement = InventoryMovement.objects.create(
+                movement_key=(
+                    f"INBOUND-EXCEPTION|{delivery_activity.id}|{discrepancy_type}"
+                ),
+                movement_date=inbound_date,
+                movement_type=InventoryMovement.MovementType.REJECTED_IN,
+                direction=InventoryMovement.Direction.IN,
+                sku=delivery_activity.po_line.sku,
+                warehouse=reject_warehouse,
+                quantity=quantity,
+                allocated_cost=Decimal("0"),
+                source_reference=delivery_activity.delivery_order.number,
+                reason=(
+                    f"{InboundDiscrepancy.Type(discrepancy_type).label} saat Warehouse Inbound; "
+                    "non-sellable dan tanpa FIFO."
+                ),
+                evidence_reference=delivery_activity.delivery_order.number,
+                posted_by=actor,
+            )
+        discrepancy = InboundDiscrepancy(
+            delivery_activity=delivery_activity,
+            po_line=delivery_activity.po_line,
+            inbound_date=inbound_date,
+            discrepancy_type=discrepancy_type,
+            quantity=quantity,
+            warehouse=reject_warehouse if physical else None,
+            movement=rejected_movement,
+            notes=(notes or "").strip(),
+            recorded_by=actor,
+        )
+        discrepancy.full_clean()
+        discrepancy.save()
+        discrepancies.append(discrepancy)
+
+    loss_journal = None
+    if discrepancies:
+        from finance.services import create_inbound_loss_journal_draft
+
+        loss_journal = create_inbound_loss_journal_draft(
+            discrepancies=discrepancies,
+            actor=actor,
+        )
+
+    record_audit(
+        actor=actor,
+        action="inbound_delivery_reconciled",
+        entity_type="production.productionactivity",
+        entity_id=delivery_activity.id,
+        after_values={
+            "delivery_order": delivery_activity.delivery_order.number,
+            "sku": delivery_activity.po_line.sku.sku,
+            "sellable_received": str(sellable_qty),
+            **{
+                discrepancy_type.lower(): str(quantity)
+                for discrepancy_type, quantity in quantity_by_type.items()
+            },
+            "inbound_date": str(inbound_date),
+            "warehouse": warehouse.name,
+            "loss_journal": loss_journal.number if loss_journal else "",
+            "notes": (notes or "").strip(),
+        },
+    )
+    return receipt, movement, discrepancies
 
 
 @transaction.atomic

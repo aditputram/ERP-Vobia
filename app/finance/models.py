@@ -222,3 +222,27 @@ class SalesReturnJournalAllocation(models.Model):
 
     def __str__(self):
         return f"{self.entry.number} · {self.return_receipt_id}"
+
+
+class InboundLossJournalAllocation(models.Model):
+    """Guards one inbound exception from being expensed more than once."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    entry = models.ForeignKey(
+        JournalEntry,
+        on_delete=models.PROTECT,
+        related_name="inbound_loss_allocations",
+    )
+    discrepancy = models.OneToOneField(
+        "inventory.InboundDiscrepancy",
+        on_delete=models.PROTECT,
+        related_name="finance_journal_allocation",
+    )
+    loss_amount = models.DecimalField(max_digits=22, decimal_places=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("entry__entry_date", "discrepancy__inbound_date")
+
+    def __str__(self):
+        return f"{self.entry.number} · {self.discrepancy_id}"

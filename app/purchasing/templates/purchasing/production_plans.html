@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Production Plan · Vobia ERP{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><p class="eyebrow">PPIC · PRODUCTION PLAN</p><h1>Production Plan</h1><p>Review metode produksi, timeline, dan planned COGS sebelum Draft PO dibuat.</p></div>
+  <div class="header-actions"><a class="primary-button" href="{% url 'purchasing:requirements' %}">Buat dari Requirement</a></div>
+</header>
+
+<section class="panel">
+  <div class="panel-header"><div><p class="eyebrow">PLAN LIBRARY</p><h2>Draft dan plan yang sudah menjadi PO</h2></div><span class="pill">{{ plans|length }} plan</span></div>
+  {% if plans %}
+  <div class="table-wrap"><table><thead><tr><th>Dibuat</th><th>Need Month</th><th>Product</th><th>Method</th><th>Vendor</th><th>Qty</th><th>Planned COGS / Unit</th><th>Status</th><th>Action</th></tr></thead><tbody>
+  {% for plan in plans %}{% with first_line=plan.lines.all.0 %}<tr>
+    <td>{{ plan.created_at|date:"d M Y H:i" }}</td>
+    <td><strong>{{ plan.need_month|date:"F Y" }}</strong></td>
+    <td>{% if first_line %}{{ first_line.requirement.sku.product_variant.product.name }}{% else %}—{% endif %}</td>
+    <td>{{ plan.get_production_method_display }}</td><td>{{ plan.supplier.name|default:"—" }}</td>
+    <td>{{ plan.total_qty|floatformat:"0g" }}</td><td>Rp {{ plan.planned_unit_cogs|floatformat:"0g" }}</td>
+    <td><span class="status-badge {% if plan.status == 'GENERATED' %}ready{% else %}parsing{% endif %}">{{ plan.get_status_display }}</span></td>
+    <td><a class="row-link" href="{% url 'purchasing:production_plan_detail' plan.id %}">Buka Plan</a>{% if plan.purchase_order_id %} · <a class="row-link" href="{% url 'purchasing:po_detail' plan.purchase_order_id %}">Buka PO</a>{% endif %}</td>
+  </tr>{% endwith %}{% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty-state">Belum ada Production Plan. Pilih requirement untuk memulai review.</div>{% endif %}
+</section>
+{% endblock %}

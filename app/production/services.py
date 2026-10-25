@@ -8,7 +8,7 @@ from django.db.models import Max, Sum
 from django.utils import timezone
 
 from audit.services import record_audit
-from inventory.models import FIFOLayer, QCFollowUp
+from inventory.models import FIFOLayer, InboundDiscrepancy, QCFollowUp
 from inventory.services.fifo import qc_approved_qty
 from master_data.models import SKUValueHistory
 from purchasing.models import PurchaseOrder
@@ -27,15 +27,101 @@ from .models import (
 STAGE_SEQUENCE = (
     ProductionStage.Stage.MATERIAL_PURCHASE,
     ProductionStage.Stage.CUT,
+    ProductionStage.Stage.ADDITIONAL_PROCESS,
     ProductionStage.Stage.MAKE,
     ProductionStage.Stage.TRIM,
 )
 CMT_STAGES = (
     ProductionStage.Stage.CUT,
+    ProductionStage.Stage.ADDITIONAL_PROCESS,
     ProductionStage.Stage.MAKE,
     ProductionStage.Stage.TRIM,
 )
 COGS_QUANT = Decimal("0.0001")
+PLAN_FIELDS = (
+    "target_material_purchase_date",
+    "target_trial_date",
+    "target_cut_start_date",
+    "target_cut_end_date",
+    "additional_process_name",
+    "target_additional_process_start_date",
+    "target_additional_process_end_date",
+    "target_make_start_date",
+    "target_make_end_date",
+    "target_trim_start_date",
+    "target_trim_end_date",
+    "target_qc_start_date",
+    "target_qc_end_date",
+    "target_inbound_date",
+    "notes",
+)
+
+
+def _process_controls(production_order):
+    ppic_plan = getattr(production_order.po, "ppic_production_plan", None)
+    if not ppic_plan:
+        return {
+            "MATERIAL_PURCHASE": True,
+            "TRIAL": True,
+            "CUT": True,
+            "ADDITIONAL_PROCESS": False,
+            "MAKE": True,
+            "TRIM": True,
+            "QC": True,
+            "INBOUND": True,
+        }
+    return {
+        "MATERIAL_PURCHASE": ppic_plan.control_material_purchase,
+        "TRIAL": ppic_plan.control_trial,
+        "CUT": ppic_plan.control_cut,
+        "ADDITIONAL_PROCESS": ppic_plan.control_additional_process,
+        "MAKE": ppic_plan.control_make,
+        "TRIM": ppic_plan.control_trim,
+        "QC": ppic_plan.control_qc,
+        "INBOUND": ppic_plan.control_inbound,
+    }
+
+
+def _additional_process_name(production_order):
+    ppic_plan = getattr(production_order.po, "ppic_production_plan", None)
+    if ppic_plan and ppic_plan.additional_process_name:
+        return ppic_plan.additional_process_name
+    try:
+        return production_order.plan.additional_process_name or "Additional Process"
+    except ProductionPlan.DoesNotExist:
+        return "Additional Process"
+
+
+def _cmt_stage_label(production_order, stage_code):
+    if stage_code == ProductionStage.Stage.ADDITIONAL_PROCESS:
+        return _additional_process_name(production_order)
+    return {
+        ProductionStage.Stage.CUT: "Cut · Potong",
+        ProductionStage.Stage.MAKE: "Make · Jahit",
+        ProductionStage.Stage.TRIM: "Trim · Finishing",
+    }[stage_code]
+
+
+def _cmt_completed_label(production_order, stage_code):
+    if stage_code == ProductionStage.Stage.ADDITIONAL_PROCESS:
+        return f"Qty sudah di-{_additional_process_name(production_order)}"
+    return {
+        ProductionStage.Stage.CUT: "Qty sudah di-Cut",
+        ProductionStage.Stage.MAKE: "Qty sudah di-Make",
+        ProductionStage.Stage.TRIM: "Qty sudah di-Trim",
+    }[stage_code]
+
+
+def _cmt_target_dates(plan, stage_code):
+    return {
+        ProductionStage.Stage.CUT: (plan.target_cut_start_date, plan.target_cut_end_date),
+        ProductionStage.Stage.ADDITIONAL_PROCESS: (
+            plan.target_additional_process_start_date,
+            plan.target_additional_process_end_date,
+        ),
+        ProductionStage.Stage.MAKE: (plan.target_make_start_date, plan.target_make_end_date),
+        ProductionStage.Stage.TRIM: (plan.target_trim_start_date, plan.target_trim_end_date),
+    }[stage_code]
 
 
 def _timing_status(*, target_start, target_end, actual_start, actual_end):
@@ -185,23 +271,25 @@ def ensure_production_order(po, actor=None):
             description="Production monitoring dibuat dari PO Released.",
             after={"po_number": po.po_number},
         )
+    ppic_plan = getattr(po, "ppic_production_plan", None)
+    if ppic_plan and not hasattr(production_order, "plan"):
+        plan = ProductionPlan.objects.create(
+            production_order=production_order,
+            status=ProductionPlan.Status.ACTIVE,
+            created_by=ppic_plan.created_by,
+            activated_by=actor or ppic_plan.created_by,
+            activated_at=timezone.now(),
+            **{name: getattr(ppic_plan, name) for name in PLAN_FIELDS},
+        )
+        _activity(
+            production_order=production_order,
+            actor=actor,
+            action="production_plan_activated_from_ppic",
+            stage="PLAN",
+            description="Production Plan PPIC otomatis diaktifkan saat PO Released.",
+            after={"ppic_plan_id": str(ppic_plan.id), "plan_id": str(plan.id)},
+        )
     return production_order
-
-
-PLAN_FIELDS = (
-    "target_material_purchase_date",
-    "target_trial_date",
-    "target_cut_start_date",
-    "target_cut_end_date",
-    "target_make_start_date",
-    "target_make_end_date",
-    "target_trim_start_date",
-    "target_trim_end_date",
-    "target_qc_start_date",
-    "target_qc_end_date",
-    "target_inbound_date",
-    "notes",
-)
 
 
 def _plan_values(plan):
@@ -273,6 +361,10 @@ def save_production_plan(*, production_order, values, activate, actor, change_re
             None,
         ),
         ProductionStage.Stage.CUT: (plan.target_cut_start_date, plan.target_cut_end_date),
+        ProductionStage.Stage.ADDITIONAL_PROCESS: (
+            plan.target_additional_process_start_date,
+            plan.target_additional_process_end_date,
+        ),
         ProductionStage.Stage.MAKE: (plan.target_make_start_date, plan.target_make_end_date),
         ProductionStage.Stage.TRIM: (plan.target_trim_start_date, plan.target_trim_end_date),
     }
@@ -342,14 +434,17 @@ def _require_complete(stages, stage, message):
         raise ValidationError(message)
 
 
-def _cmt_available_qty(stages, stage_code, ordered_qty):
-    if stage_code == ProductionStage.Stage.CUT:
-        return ordered_qty
-    if stage_code == ProductionStage.Stage.MAKE:
-        return stages[ProductionStage.Stage.CUT].completed_qty
-    if stage_code == ProductionStage.Stage.TRIM:
-        return stages[ProductionStage.Stage.MAKE].completed_qty
-    return Decimal("0")
+def _controlled_cmt_stages(production_order):
+    controls = _process_controls(production_order)
+    return tuple(stage for stage in CMT_STAGES if controls[stage])
+
+
+def _cmt_available_qty(production_order, stages, stage_code, ordered_qty):
+    controlled = _controlled_cmt_stages(production_order)
+    if stage_code not in controlled:
+        return Decimal("0")
+    position = controlled.index(stage_code)
+    return ordered_qty if position == 0 else stages[controlled[position - 1]].completed_qty
 
 
 def _effective_cmt_line_qty(production_order, activity_type, po_line):
@@ -372,13 +467,13 @@ def _effective_cmt_line_qty(production_order, activity_type, po_line):
 
 
 def _cmt_line_limit(production_order, activity_type, po_line):
-    if activity_type == ProductionStage.Stage.CUT:
+    controlled = _controlled_cmt_stages(production_order)
+    if activity_type not in controlled:
+        return Decimal("0")
+    position = controlled.index(activity_type)
+    if position == 0:
         return None
-    if activity_type == ProductionStage.Stage.MAKE:
-        return _effective_cmt_line_qty(production_order, ProductionStage.Stage.CUT, po_line)
-    if activity_type == ProductionStage.Stage.TRIM:
-        return _effective_cmt_line_qty(production_order, ProductionStage.Stage.MAKE, po_line)
-    return Decimal("0")
+    return _effective_cmt_line_qty(production_order, controlled[position - 1], po_line)
 
 
 def cmt_line_availability(production_order, po_line):
@@ -394,20 +489,21 @@ def cmt_line_availability(production_order, po_line):
 
 
 def qc_line_availability(production_order, po_line):
-    """Return Trim output, inspected quantity, and remaining QC for one PO line."""
-    trim_qty = _effective_cmt_line_qty(
-        production_order,
-        ProductionStage.Stage.TRIM,
-        po_line,
+    """Return controlled production output, inspected quantity, and remaining QC."""
+    controlled = _controlled_cmt_stages(production_order)
+    output_qty = (
+        _effective_cmt_line_qty(production_order, controlled[-1], po_line)
+        if controlled
+        else po_line.ordered_qty
     )
     inspected_qty = po_line.qc_passed_before_cutover_qty + sum(
         (row.qty_inspected for row in po_line.qc_inspections.all()),
         Decimal("0"),
     )
     return {
-        "trim_qty": trim_qty,
+        "trim_qty": output_qty,
         "inspected_qty": inspected_qty,
-        "remaining_qty": max(trim_qty - inspected_qty, Decimal("0")),
+        "remaining_qty": max(output_qty - inspected_qty, Decimal("0")),
     }
 
 
@@ -432,7 +528,7 @@ def rejected_delivery_line_availability(production_order, po_line):
 def next_delivery_order_number(delivery_date):
     issue_month = delivery_date.replace(day=1)
     sequence = (
-        ProductionDeliveryOrder.objects.filter(issue_month=issue_month).aggregate(max_sequence=Max("sequence"))[
+        ProductionDeliveryOrder.objects.filter(issue_month__year=delivery_date.year).aggregate(max_sequence=Max("sequence"))[
             "max_sequence"
         ]
         or 0
@@ -469,6 +565,7 @@ def production_process_details(production_order):
                 "product_name": product.name,
                 "size": line.sku.size or "—",
                 ProductionStage.Stage.CUT: Decimal("0"),
+                ProductionStage.Stage.ADDITIONAL_PROCESS: Decimal("0"),
                 ProductionStage.Stage.MAKE: Decimal("0"),
                 ProductionStage.Stage.TRIM: Decimal("0"),
                 "QC": Decimal("0"),
@@ -489,6 +586,7 @@ def production_process_details(production_order):
     )
     labels = {
         ProductionStage.Stage.CUT: "Qty Cut",
+        ProductionStage.Stage.ADDITIONAL_PROCESS: f"Qty {_additional_process_name(production_order)}",
         ProductionStage.Stage.MAKE: "Qty Make",
         ProductionStage.Stage.TRIM: "Qty Trim",
         "QC": "Qty QC Passed",
@@ -536,38 +634,45 @@ def update_stage(
     if stage is None:
         raise ValidationError("Tahap Production tidak valid.")
     is_cmt = stage_code in CMT_STAGES
+    controls = _process_controls(production_order)
     ordered_qty = production_order.po.lines.aggregate(total=Sum("ordered_qty"))["total"] or Decimal("0")
     if is_cmt:
+        stage_label = _cmt_stage_label(production_order, stage_code)
+        if not controls[stage_code]:
+            raise ValidationError(f"{stage_label} tidak dikontrol pada Production Plan ini.")
         completed_qty = Decimal(completed_qty if completed_qty is not None else stage.completed_qty)
         if completed_qty < 0:
             raise ValidationError("Qty selesai tidak boleh negatif.")
         if completed_qty != completed_qty.to_integral_value():
             raise ValidationError("Qty Production harus berupa bilangan bulat.")
-        available_qty = _cmt_available_qty(stages, stage_code, ordered_qty)
+        available_qty = _cmt_available_qty(production_order, stages, stage_code, ordered_qty)
         has_started = bool(completed_qty > 0 or is_blocked or actual_start_date)
-        if has_started and stage_code == ProductionStage.Stage.CUT:
-            _require_complete(
-                stages,
-                ProductionStage.Stage.MATERIAL_PURCHASE,
-                "Cut baru dapat berjalan setelah Pembelian Material selesai.",
-            )
-            if not stages[ProductionStage.Stage.MATERIAL_PURCHASE].material_arrival_date:
-                raise ValidationError("Cut menunggu tanggal material datang di tempat produksi.")
-            if not trial_is_approved(production_order):
-                raise ValidationError("Cut baru dapat berjalan setelah Trial Produksi di-approve.")
-        elif has_started and stage_code == ProductionStage.Stage.MAKE and available_qty <= 0:
-            raise ValidationError("Make/Jahit baru dapat berjalan setelah ada Qty yang sudah di-Cut.")
-        elif has_started and stage_code == ProductionStage.Stage.TRIM and available_qty <= 0:
-            raise ValidationError("Trim/Finishing baru dapat berjalan setelah ada Qty yang sudah di-Make.")
-        if stage_code != ProductionStage.Stage.CUT and completed_qty > available_qty:
-            upstream_label = {
-                ProductionStage.Stage.MAKE: "Qty sudah di-Cut",
-                ProductionStage.Stage.TRIM: "Qty sudah di-Make",
-            }[stage_code]
+        controlled_cmt = _controlled_cmt_stages(production_order)
+        position = controlled_cmt.index(stage_code)
+        if has_started and position == 0:
+            if controls["MATERIAL_PURCHASE"]:
+                _require_complete(
+                    stages,
+                    ProductionStage.Stage.MATERIAL_PURCHASE,
+                    f"{stage_label} baru dapat berjalan setelah Pembelian Material selesai.",
+                )
+                if not stages[ProductionStage.Stage.MATERIAL_PURCHASE].material_arrival_date:
+                    raise ValidationError(
+                        f"{stage_label} menunggu tanggal material datang di tempat produksi."
+                    )
+            if controls["TRIAL"] and not trial_is_approved(production_order):
+                raise ValidationError(
+                    f"{stage_label} baru dapat berjalan setelah Trial Produksi di-approve."
+                )
+        elif has_started and available_qty <= 0:
+            upstream = _cmt_stage_label(production_order, controlled_cmt[position - 1])
+            raise ValidationError(f"{stage_label} baru dapat berjalan setelah ada Qty {upstream}.")
+        if position > 0 and completed_qty > available_qty:
+            upstream_label = _cmt_completed_label(production_order, controlled_cmt[position - 1])
             raise ValidationError(
-                f"{stage.get_stage_display()} tidak boleh melebihi {upstream_label} ({available_qty:.0f} pcs)."
+                f"{stage_label} tidak boleh melebihi {upstream_label} ({available_qty:.0f} pcs)."
             )
-        completion_qty = ordered_qty if stage_code == ProductionStage.Stage.CUT else available_qty
+        completion_qty = ordered_qty if position == 0 else available_qty
         if completed_qty >= completion_qty and completion_qty > 0:
             status = ProductionStage.Status.COMPLETE
             progress_percent = 100
@@ -660,15 +765,16 @@ def update_stage(
 @transaction.atomic
 def start_trial(*, production_order, target_trial_date, actor):
     production_order = ProductionOrder.objects.select_for_update().select_related("po").get(pk=production_order.pk)
-    stages = _stage_map(production_order)
-    _require_complete(
-        stages,
-        ProductionStage.Stage.MATERIAL_PURCHASE,
-        "Trial Produksi baru dapat dimulai setelah Pembelian Material selesai.",
-    )
-    material_stage = stages[ProductionStage.Stage.MATERIAL_PURCHASE]
-    if not material_stage.material_arrival_date:
-        raise ValidationError("Trial Produksi menunggu tanggal material datang di tempat produksi.")
+    if _process_controls(production_order)["MATERIAL_PURCHASE"]:
+        stages = _stage_map(production_order)
+        _require_complete(
+            stages,
+            ProductionStage.Stage.MATERIAL_PURCHASE,
+            "Trial Produksi baru dapat dimulai setelah Pembelian Material selesai.",
+        )
+        material_stage = stages[ProductionStage.Stage.MATERIAL_PURCHASE]
+        if not material_stage.material_arrival_date:
+            raise ValidationError("Trial Produksi menunggu tanggal material datang di tempat produksi.")
     if not target_trial_date:
         raise ValidationError("Target tanggal Trial Production wajib diisi.")
     current = latest_trial(production_order)
@@ -815,52 +921,52 @@ def eligible_activity_choices(production_order):
         return []
     if plan.status != ProductionPlan.Status.ACTIVE:
         return []
+    controls = _process_controls(production_order)
     stages = _stage_map(production_order)
     material = stages[ProductionStage.Stage.MATERIAL_PURCHASE]
     choices = []
-    if not material.actual_start_date:
-        choices.append((ProductionActivity.ActivityType.MATERIAL_PURCHASE, "Pembelian Material"))
-        return choices
-    if not material.material_arrival_date:
-        choices.append((ProductionActivity.ActivityType.MATERIAL_ARRIVAL, "Material Tiba di Tempat Produksi"))
-        return choices
+    if controls["MATERIAL_PURCHASE"]:
+        if not material.actual_start_date:
+            choices.append((ProductionActivity.ActivityType.MATERIAL_PURCHASE, "Pembelian Material"))
+            return choices
+        if not material.material_arrival_date:
+            choices.append((ProductionActivity.ActivityType.MATERIAL_ARRIVAL, "Material Tiba di Tempat Produksi"))
+            return choices
 
     trial = latest_trial(production_order)
-    if trial is None or trial.status in {
-        ProductionTrial.Status.REVISION_REQUIRED,
-        ProductionTrial.Status.IN_PROGRESS,
-    }:
-        choices.append((ProductionActivity.ActivityType.TRIAL_SUBMIT, "Submit Trial Production"))
-        return choices
-    if trial.status == ProductionTrial.Status.WAITING_APPROVAL:
-        return [
-            (ProductionActivity.ActivityType.TRIAL_APPROVE, "Approve Trial Production"),
-            (ProductionActivity.ActivityType.TRIAL_REVISION, "Revision Required Trial Production"),
-        ]
-    if trial.status != ProductionTrial.Status.APPROVED:
-        return choices
+    if controls["TRIAL"]:
+        if trial is None or trial.status in {
+            ProductionTrial.Status.REVISION_REQUIRED,
+            ProductionTrial.Status.IN_PROGRESS,
+        }:
+            choices.append((ProductionActivity.ActivityType.TRIAL_SUBMIT, "Submit Trial Production"))
+            return choices
+        if trial.status == ProductionTrial.Status.WAITING_APPROVAL:
+            return [
+                (ProductionActivity.ActivityType.TRIAL_APPROVE, "Approve Trial Production"),
+                (ProductionActivity.ActivityType.TRIAL_REVISION, "Revision Required Trial Production"),
+            ]
+        if trial.status != ProductionTrial.Status.APPROVED:
+            return choices
 
     if not is_finalized:
         snapshot = production_snapshot(production_order)
-        labels = {
-            ProductionStage.Stage.CUT: "Cut · Potong",
-            ProductionStage.Stage.MAKE: "Make · Jahit",
-            ProductionStage.Stage.TRIM: "Trim · Finishing",
-        }
-        for stage_code in CMT_STAGES:
+        controlled_cmt = _controlled_cmt_stages(production_order)
+        for stage_code in controlled_cmt:
             remaining = snapshot["cmt_quantities"][stage_code]["remaining_qty"]
-            if stage_code == ProductionStage.Stage.CUT:
-                choices.append((stage_code, f"{labels[stage_code]} · tidak dibatasi Qty PO"))
+            label = _cmt_stage_label(production_order, stage_code)
+            if stage_code == controlled_cmt[0]:
+                choices.append((stage_code, f"{label} · tidak dibatasi Qty PO"))
             elif remaining > 0:
-                choices.append((stage_code, f"{labels[stage_code]} · maksimal {remaining:.0f} pcs"))
-        if snapshot["remaining_qc_qty"] > 0:
+                choices.append((stage_code, f"{label} · maksimal {remaining:.0f} pcs"))
+        if controls["QC"] and snapshot["remaining_qc_qty"] > 0:
             choices.append(
                 (
                     ProductionActivity.ActivityType.QC,
                     f"Quality Control · maksimal {snapshot['remaining_qc_qty']:.0f} pcs output Trim",
                 )
             )
-        if snapshot["ready_to_deliver_qty"] > 0:
+        if controls["INBOUND"] and snapshot["ready_to_deliver_qty"] > 0:
             choices.append(
                 (
                     ProductionActivity.ActivityType.WAREHOUSE_DELIVERY,
@@ -976,11 +1082,13 @@ def submit_production_activity(
         completed_for_line = _effective_cmt_line_qty(production_order, activity_type, po_line)
         line_limit = _cmt_line_limit(production_order, activity_type, po_line)
         if line_limit is not None and completed_for_line + quantity > line_limit:
-            upstream_label = {
-                ProductionStage.Stage.CUT: "total PO Qty Parent SKU",
-                ProductionStage.Stage.MAKE: "Qty Cut",
-                ProductionStage.Stage.TRIM: "Qty Make",
-            }[activity_type]
+            controlled_cmt = _controlled_cmt_stages(production_order)
+            position = controlled_cmt.index(activity_type)
+            upstream_label = (
+                "total PO Qty Parent SKU"
+                if position == 0
+                else f"Qty {_cmt_stage_label(production_order, controlled_cmt[position - 1])}"
+            )
             raise ValidationError(
                 f"Qty {dict(ProductionActivity.ActivityType.choices)[activity_type]} SKU "
                 f"{po_line.sku.sku} tidak boleh melebihi {upstream_label} "
@@ -988,20 +1096,13 @@ def submit_production_activity(
             )
         stage = stages[activity_type]
         new_completed = stage.completed_qty + quantity
-        target_dates = {
-            ProductionStage.Stage.CUT: (plan.target_cut_start_date, plan.target_cut_end_date),
-            ProductionStage.Stage.MAKE: (plan.target_make_start_date, plan.target_make_end_date),
-            ProductionStage.Stage.TRIM: (plan.target_trim_start_date, plan.target_trim_end_date),
-        }
-        target_start, target_end = target_dates[activity_type]
-        completion_qty = (
-            before_snapshot["ordered_qty"]
-            if activity_type == ProductionStage.Stage.CUT
-            else stages[
-                ProductionStage.Stage.CUT
-                if activity_type == ProductionStage.Stage.MAKE
-                else ProductionStage.Stage.MAKE
-            ].completed_qty
+        ordered_qty = production_order.po.lines.aggregate(total=Sum("ordered_qty"))["total"] or Decimal("0")
+        target_start, target_end = _cmt_target_dates(plan, activity_type)
+        completion_qty = _cmt_available_qty(
+            production_order,
+            stages,
+            activity_type,
+            ordered_qty,
         )
         updated = update_stage(
             production_order=production_order,
@@ -1024,7 +1125,8 @@ def submit_production_activity(
             }
         )
         description = (
-            f"{updated.get_stage_display()} SKU {po_line.sku.sku} {quantity:.0f} pcs dicatat; "
+            f"{_cmt_stage_label(production_order, activity_type)} SKU {po_line.sku.sku} "
+            f"{quantity:.0f} pcs dicatat; "
             f"total selesai menjadi {updated.completed_qty:.0f} pcs."
         )
     elif activity_type == ProductionActivity.ActivityType.QC:
@@ -1135,7 +1237,7 @@ def submit_cmt_activity_batch(
 ):
     """Submit one atomic CMT entry batch while keeping one auditable row per SKU."""
     if activity_type not in CMT_STAGES:
-        raise ValidationError("Batch Qty per SKU hanya berlaku untuk Cut, Make, dan Trim.")
+        raise ValidationError("Batch Qty per SKU hanya berlaku untuk proses produksi bertahap.")
     line_quantities = [(line, Decimal(qty)) for line, qty in line_quantities if Decimal(qty or 0) > 0]
     if not line_quantities:
         raise ValidationError("Isi minimal satu Qty Production per SKU.")
@@ -1326,6 +1428,13 @@ def correct_production_activity(
         delta = new_entry_qty - old_entry_qty
         stages = _stage_map(production_order)
         stage = stages[activity.activity_type]
+        controlled_cmt = _controlled_cmt_stages(production_order)
+        stage_position = controlled_cmt.index(activity.activity_type)
+        downstream_type = (
+            controlled_cmt[stage_position + 1]
+            if stage_position + 1 < len(controlled_cmt)
+            else None
+        )
         new_completed = stage.completed_qty + delta
         if new_completed < 0:
             raise ValidationError("Koreksi menghasilkan Qty selesai negatif.")
@@ -1348,10 +1457,6 @@ def correct_production_activity(
                     f"Koreksi Qty {activity.po_line.sku.sku} harus berada pada rentang "
                     f"0–{line_limit:.0f} pcs sesuai output tahap sebelumnya."
                 )
-            downstream_type = {
-                ProductionStage.Stage.CUT: ProductionStage.Stage.MAKE,
-                ProductionStage.Stage.MAKE: ProductionStage.Stage.TRIM,
-            }.get(activity.activity_type)
             if downstream_type:
                 downstream_line_qty = _effective_cmt_line_qty(
                     production_order,
@@ -1363,32 +1468,20 @@ def correct_production_activity(
                         f"Koreksi {activity.po_line.sku.sku} tidak boleh lebih kecil dari output "
                         f"tahap berikutnya ({downstream_line_qty:.0f} pcs)."
                     )
-        if activity.activity_type == ProductionStage.Stage.CUT:
-            downstream = stages[ProductionStage.Stage.MAKE].completed_qty
+        if downstream_type:
+            downstream = stages[downstream_type].completed_qty
             if new_completed < downstream:
                 raise ValidationError(
-                    f"Total Cut setelah koreksi tidak boleh lebih kecil dari Qty Make ({downstream:.0f} pcs)."
+                    f"Total {_cmt_stage_label(production_order, activity.activity_type)} setelah koreksi "
+                    f"tidak boleh lebih kecil dari Qty {_cmt_stage_label(production_order, downstream_type)} "
+                    f"({downstream:.0f} pcs)."
                 )
-        if activity.activity_type == ProductionStage.Stage.MAKE:
-            downstream = stages[ProductionStage.Stage.TRIM].completed_qty
-            if new_completed < downstream:
-                raise ValidationError(
-                    f"Total Make setelah koreksi tidak boleh lebih kecil dari Qty Trim ({downstream:.0f} pcs)."
-                )
-        target_dates = {
-            ProductionStage.Stage.CUT: (plan.target_cut_start_date, plan.target_cut_end_date),
-            ProductionStage.Stage.MAKE: (plan.target_make_start_date, plan.target_make_end_date),
-            ProductionStage.Stage.TRIM: (plan.target_trim_start_date, plan.target_trim_end_date),
-        }
-        target_start, target_end = target_dates[activity.activity_type]
-        completion_qty = (
-            production_snapshot(production_order)["ordered_qty"]
-            if activity.activity_type == ProductionStage.Stage.CUT
-            else stages[
-                ProductionStage.Stage.CUT
-                if activity.activity_type == ProductionStage.Stage.MAKE
-                else ProductionStage.Stage.MAKE
-            ].completed_qty
+        target_start, target_end = _cmt_target_dates(plan, activity.activity_type)
+        completion_qty = _cmt_available_qty(
+            production_order,
+            stages,
+            activity.activity_type,
+            production_snapshot(production_order)["ordered_qty"],
         )
         update_stage(
             production_order=production_order,
@@ -1559,6 +1652,8 @@ def production_snapshot(production_order):
     stages = _stage_map(production_order)
     trial = latest_trial(production_order)
     po = production_order.po
+    ppic_plan = getattr(po, "ppic_production_plan", None)
+    controls = _process_controls(production_order)
     lines = list(po.lines.all())
     ordered = sum((line.ordered_qty for line in lines), Decimal("0"))
     inspected = sum(
@@ -1599,6 +1694,15 @@ def production_snapshot(production_order):
         ),
         Decimal("0"),
     )
+    inbound_discrepancy = sum(
+        (
+            line.inbound_discrepancies.aggregate(total=Sum("quantity"))["total"]
+            or Decimal("0")
+            for line in lines
+        ),
+        Decimal("0"),
+    )
+    inbound_accounted = received + inbound_discrepancy
     shipped = sum(
         (
             _effective_cmt_line_qty(
@@ -1620,14 +1724,20 @@ def production_snapshot(production_order):
         ),
         Decimal("0"),
     )
-    legacy_received = received - linked_received
-    delivering = max(shipped - linked_received, Decimal("0"))
-    ready_to_deliver = max(passed - shipped - legacy_received, Decimal("0"))
-    trim_complete = bool(
-        stages.get(ProductionStage.Stage.TRIM)
-        and stages[ProductionStage.Stage.TRIM].status == ProductionStage.Status.COMPLETE
-        and stages[ProductionStage.Stage.TRIM].completed_qty > 0
+    linked_discrepancy = sum(
+        (
+            line.inbound_discrepancies.filter(delivery_activity__isnull=False).aggregate(total=Sum("quantity"))[
+                "total"
+            ]
+            or Decimal("0")
+            for line in lines
+        ),
+        Decimal("0"),
     )
+    legacy_received = received - linked_received
+    delivering = max(shipped - linked_received - linked_discrepancy, Decimal("0"))
+    ready_to_deliver = max(passed - shipped - legacy_received, Decimal("0"))
+    controlled_cmt = _controlled_cmt_stages(production_order)
     trim_completed_qty = (
         stages[ProductionStage.Stage.TRIM].completed_qty
         if stages.get(ProductionStage.Stage.TRIM)
@@ -1637,35 +1747,54 @@ def production_snapshot(production_order):
     for stage_code in CMT_STAGES:
         stage_row = stages.get(stage_code)
         completed_qty = stage_row.completed_qty if stage_row else Decimal("0")
-        available_qty = _cmt_available_qty(stages, stage_code, ordered) if stage_row else Decimal("0")
+        available_qty = (
+            _cmt_available_qty(production_order, stages, stage_code, ordered)
+            if stage_row
+            else Decimal("0")
+        )
+        is_controlled = stage_code in controlled_cmt
         cmt_quantities[stage_code] = {
             "available_qty": available_qty,
             "completed_qty": completed_qty,
-            "remaining_qty": max(available_qty - completed_qty, Decimal("0")),
-            "waiting_upstream_qty": max(ordered - available_qty, Decimal("0")),
+            "remaining_qty": max(available_qty - completed_qty, Decimal("0")) if is_controlled else Decimal("0"),
+            "waiting_upstream_qty": max(ordered - available_qty, Decimal("0")) if is_controlled else Decimal("0"),
         }
     cut_completed_qty = cmt_quantities[ProductionStage.Stage.CUT]["completed_qty"]
     make_completed_qty = cmt_quantities[ProductionStage.Stage.MAKE]["completed_qty"]
-    has_cmt_progress = cut_completed_qty > 0 or make_completed_qty > 0 or trim_completed_qty > 0
-    if has_cmt_progress and cut_completed_qty < ordered:
-        current_code, current_label = "CUT", "Cut · Potong"
-    elif has_cmt_progress and make_completed_qty < cut_completed_qty:
-        current_code, current_label = "MAKE", "Make · Jahit"
-    elif has_cmt_progress and trim_completed_qty < make_completed_qty:
-        current_code, current_label = "TRIM", "Trim · Finishing"
+    output_qty = stages[controlled_cmt[-1]].completed_qty if controlled_cmt else ordered
+    output_complete = bool(
+        not controlled_cmt
+        or (
+            stages[controlled_cmt[-1]].status == ProductionStage.Status.COMPLETE
+            and output_qty > 0
+        )
+    )
+    cmt_labels = {
+        stage_code: _cmt_stage_label(production_order, stage_code)
+        for stage_code in CMT_STAGES
+    }
+    cmt_next_labels = {**cmt_labels, ProductionStage.Stage.CUT: "Cut - Potong"}
+    has_cmt_progress = any(stages[stage].completed_qty > 0 for stage in controlled_cmt)
+    pending_cmt = next(
+        (
+            stage
+            for stage in controlled_cmt
+            if stages[stage].completed_qty
+            < _cmt_available_qty(production_order, stages, stage, ordered)
+        ),
+        None,
+    )
+    if has_cmt_progress and pending_cmt:
+        current_code, current_label = pending_cmt, cmt_labels[pending_cmt]
     elif inspected > 0:
-        if trim_complete and inspected >= trim_completed_qty:
+        if output_complete and inspected >= output_qty:
             current_code, current_label = "QC_COMPLETE", "QC Complete"
         else:
             current_code, current_label = "QC_IN_PROGRESS", "QC In Progress"
-    elif trim_complete:
+    elif output_complete and controls["QC"]:
         current_code, current_label = "READY_FOR_QC", "Ready for QC"
-    elif stages.get(ProductionStage.Stage.TRIM) and stages[ProductionStage.Stage.TRIM].status != ProductionStage.Status.NOT_STARTED:
-        current_code, current_label = "TRIM", "Trim · Finishing"
-    elif stages.get(ProductionStage.Stage.MAKE) and stages[ProductionStage.Stage.MAKE].status != ProductionStage.Status.NOT_STARTED:
-        current_code, current_label = "MAKE", "Make · Jahit"
-    elif stages.get(ProductionStage.Stage.CUT) and stages[ProductionStage.Stage.CUT].status != ProductionStage.Status.NOT_STARTED:
-        current_code, current_label = "CUT", "Cut · Potong"
+    elif has_cmt_progress and controlled_cmt:
+        current_code, current_label = controlled_cmt[-1], cmt_labels[controlled_cmt[-1]]
     elif trial:
         current_code, current_label = "TRIAL", {
             ProductionTrial.Status.IN_PROGRESS: "Trial Production In Progress",
@@ -1674,7 +1803,27 @@ def production_snapshot(production_order):
             ProductionTrial.Status.REVISION_REQUIRED: "Trial Production Revision Required",
         }[trial.status]
     else:
-        current_code, current_label = "MATERIAL_PURCHASE", "Waiting Material Purchase"
+        current_code, current_label = next(
+            (
+                (code, label)
+                for code, label, enabled in (
+                    ("MATERIAL_PURCHASE", "Waiting Material Purchase", controls["MATERIAL_PURCHASE"]),
+                    ("TRIAL", "Trial Production", controls["TRIAL"]),
+                    ("CUT", "Cut · Potong", controls["CUT"]),
+                    (
+                        "ADDITIONAL_PROCESS",
+                        _additional_process_name(production_order),
+                        controls["ADDITIONAL_PROCESS"],
+                    ),
+                    ("MAKE", "Make · Jahit", controls["MAKE"]),
+                    ("TRIM", "Trim · Finishing", controls["TRIM"]),
+                    ("READY_FOR_QC", "Ready for QC", controls["QC"]),
+                    ("QC_COMPLETE", "Inbound Warehouse", controls["INBOUND"]),
+                )
+                if enabled
+            ),
+            ("MATERIAL_PURCHASE", "Waiting Material Purchase"),
+        )
 
     try:
         plan = production_order.plan
@@ -1683,45 +1832,52 @@ def production_snapshot(production_order):
 
     material_stage = stages.get(ProductionStage.Stage.MATERIAL_PURCHASE)
     material_status_display = (
-        "Material telah diproses"
+        "Not Controlled"
+        if not controls["MATERIAL_PURCHASE"]
+        else "Material telah diproses"
         if cut_completed_qty > 0
         else material_stage.operational_status_display
     )
-    inbound_complete = bool(trim_complete and inspected >= trim_completed_qty and passed > 0 and received >= passed)
-    qc_complete = bool(trim_complete and trim_completed_qty > 0 and inspected >= trim_completed_qty)
+    inbound_complete = bool(
+        output_complete and inspected >= output_qty and passed > 0 and inbound_accounted >= passed
+    )
+    qc_complete = bool(output_complete and output_qty > 0 and inspected >= output_qty)
 
-    if has_cmt_progress and cut_completed_qty < ordered:
-        passed_process_label, next_process_label = "Trial Production Approved", "Cut - Potong"
-    elif has_cmt_progress and make_completed_qty < cut_completed_qty:
-        passed_process_label, next_process_label = "Cut - Potong", "Make · Jahit"
-    elif has_cmt_progress and trim_completed_qty < make_completed_qty:
-        passed_process_label, next_process_label = "Make · Jahit", "Trim · Finishing"
+    if has_cmt_progress and pending_cmt:
+        position = controlled_cmt.index(pending_cmt)
+        passed_process_label = (
+            "Trial Production Approved"
+            if position == 0 and controls["TRIAL"]
+            else "Production Plan Active"
+            if position == 0
+            else cmt_next_labels[controlled_cmt[position - 1]]
+        )
+        next_process_label = cmt_next_labels[pending_cmt]
     elif inbound_complete:
         passed_process_label, next_process_label = "Inbound Warehouse", "Completed"
     elif delivering > 0:
         passed_process_label, next_process_label = "Deliver to Warehouse", "Warehouse Receive"
     elif qc_complete:
         passed_process_label, next_process_label = "Quality Control", "Deliver to Warehouse"
-    elif trim_complete:
-        passed_process_label, next_process_label = "Trim · Finishing", "Quality Control"
-    elif ordered > 0 and make_completed_qty >= ordered:
-        passed_process_label, next_process_label = "Make · Jahit", "Trim · Finishing"
-    elif ordered > 0 and cut_completed_qty >= ordered:
-        passed_process_label, next_process_label = "Cut - Potong", "Make · Jahit"
+    elif output_complete and controlled_cmt:
+        passed_process_label = cmt_labels[controlled_cmt[-1]]
+        next_process_label = "Quality Control" if controls["QC"] else "Deliver to Warehouse"
     elif trial and trial.status == ProductionTrial.Status.APPROVED:
-        passed_process_label, next_process_label = "Trial Production Approved", "Cut - Potong"
+        passed_process_label = "Trial Production Approved"
+        next_process_label = cmt_next_labels[controlled_cmt[0]] if controlled_cmt else "Quality Control"
     elif material_stage and material_stage.material_arrival_date:
         passed_process_label, next_process_label = "Material Ready", "Trial Production"
     elif material_stage and material_stage.actual_start_date:
         passed_process_label, next_process_label = "Pembelian Material", "Material Arrival"
     elif plan and plan.status == ProductionPlan.Status.ACTIVE:
-        passed_process_label, next_process_label = "Production Plan Active", "Pembelian Material"
+        passed_process_label, next_process_label = "Production Plan Active", current_label
     else:
         passed_process_label, next_process_label = "Belum ada", "Production Plan"
     plan_targets = {
         "MATERIAL_PURCHASE": getattr(plan, "target_material_purchase_date", None),
         "TRIAL": getattr(plan, "target_trial_date", None),
         "CUT": getattr(plan, "target_cut_end_date", None),
+        "ADDITIONAL_PROCESS": getattr(plan, "target_additional_process_end_date", None),
         "MAKE": getattr(plan, "target_make_end_date", None),
         "TRIM": getattr(plan, "target_trim_end_date", None),
         "READY_FOR_QC": getattr(plan, "target_qc_end_date", None),
@@ -1736,14 +1892,13 @@ def production_snapshot(production_order):
         ),
         po.required_arrival,
     )
-    is_late = bool(target and target < timezone.localdate() and received < ordered)
+    is_late = bool(target and target < timezone.localdate() and inbound_accounted < ordered)
     timing = {}
     if plan:
         cmt_actual_dates = _effective_cmt_dates(production_order, ordered)
         cmt_target_fields = {
-            ProductionStage.Stage.CUT: (plan.target_cut_start_date, plan.target_cut_end_date),
-            ProductionStage.Stage.MAKE: (plan.target_make_start_date, plan.target_make_end_date),
-            ProductionStage.Stage.TRIM: (plan.target_trim_start_date, plan.target_trim_end_date),
+            stage_code: _cmt_target_dates(plan, stage_code)
+            for stage_code in CMT_STAGES
         }
         for stage_code, (target_start, target_end) in cmt_target_fields.items():
             timing[stage_code] = _timing_row(
@@ -1760,7 +1915,7 @@ def production_snapshot(production_order):
         qc_actual_start = _local_calendar_date(qc_rows[0].inspected_at) if qc_rows else None
         qc_actual_end = _cumulative_completion_date(
             qc_rows,
-            required_qty=trim_completed_qty,
+            required_qty=output_qty,
             opening_qty=sum((line.qc_passed_before_cutover_qty for line in lines), Decimal("0")),
             quantity_getter=lambda row: row.qty_inspected,
             date_getter=lambda row: _local_calendar_date(row.inspected_at),
@@ -1773,17 +1928,22 @@ def production_snapshot(production_order):
         )
 
         inbound_rows = sorted(
-            [receipt for line in lines for receipt in line.inbound_receipts.all()],
-            key=lambda row: row.inbound_date,
+            [
+                *((receipt.inbound_date, receipt.received_qty) for line in lines for receipt in line.inbound_receipts.all()),
+                *((row.inbound_date, row.quantity) for line in lines for row in line.inbound_discrepancies.all()),
+            ],
+            key=lambda row: row[0],
         )
-        inbound_actual_start = inbound_rows[0].inbound_date if inbound_rows else None
-        inbound_actual_end = _cumulative_completion_date(
-            inbound_rows,
-            required_qty=passed,
-            opening_qty=sum((line.received_before_cutover_qty for line in lines), Decimal("0")),
-            quantity_getter=lambda row: row.received_qty,
-            date_getter=lambda row: row.inbound_date,
+        inbound_actual_start = inbound_rows[0][0] if inbound_rows else None
+        cumulative_inbound = sum(
+            (line.received_before_cutover_qty for line in lines), Decimal("0")
         )
+        inbound_actual_end = None
+        for inbound_event_date, inbound_event_qty in inbound_rows:
+            cumulative_inbound += inbound_event_qty
+            if cumulative_inbound >= passed:
+                inbound_actual_end = inbound_event_date
+                break
         timing["INBOUND"] = _timing_row(
             target_start=plan.target_inbound_date,
             target_end=plan.target_inbound_date,
@@ -1792,16 +1952,21 @@ def production_snapshot(production_order):
         )
     return {
         "production_order": production_order,
+        "production_method": ppic_plan.production_method if ppic_plan else "—",
+        "production_method_display": ppic_plan.get_production_method_display() if ppic_plan else "Belum ditentukan",
+        "additional_process_name": _additional_process_name(production_order),
         "stages": stages,
         "trial": trial,
         "ordered_qty": ordered,
         "inspected_qty": inspected,
-        "remaining_qc_qty": max(trim_completed_qty - inspected, Decimal("0")),
+        "remaining_qc_qty": max(output_qty - inspected, Decimal("0")),
         "passed_qty": passed,
         "rework_re_qc_qty": rework_re_qc_qty,
         "rejected_qty": rejected_qty,
         "received_qty": received,
-        "ready_inbound_qty": max(passed - received, Decimal("0")),
+        "inbound_discrepancy_qty": inbound_discrepancy,
+        "inbound_accounted_qty": inbound_accounted,
+        "ready_inbound_qty": max(passed - inbound_accounted, Decimal("0")),
         "ready_to_deliver_qty": ready_to_deliver,
         "delivering_qty": delivering,
         "shipped_qty": shipped,
@@ -1813,10 +1978,11 @@ def production_snapshot(production_order):
         "next_process_label": next_process_label,
         "target_date": target,
         "is_late": is_late,
-        "qc_open": trim_completed_qty > inspected,
+        "qc_open": output_qty > inspected,
         "trim_completed_qty": trim_completed_qty,
         "plan": plan,
         "plan_status": plan.status if plan else "UNPLANNED",
+        "process_controls": controls,
         "cmt_quantities": cmt_quantities,
         "timing": timing,
     }
@@ -1831,13 +1997,17 @@ def production_cogs_finalization_card(production_order, actor=None):
         decimal_fields = (
             "ordered_qty",
             "sellable_qty",
+            "inbound_discrepancy_qty",
             "rejected_qty",
+            "vendor_rejected_qty",
             "shortage_qty",
             "excess_qty",
             "initial_unit_cogs",
             "final_unit_cogs",
             "unit_cogs_increase",
             "original_total_cost",
+            "inbound_loss_amount",
+            "capitalizable_cost",
         )
         rows = []
         for snapshot_row in approved.line_snapshot:
@@ -1853,7 +2023,9 @@ def production_cogs_finalization_card(production_order, actor=None):
                 {"ordered": Decimal("0"), "output": Decimal("0")},
             )
             parent["ordered"] += row["ordered_qty"]
-            parent["output"] += row["sellable_qty"] + row["rejected_qty"]
+            parent["output"] += (
+                row["sellable_qty"] + row["rejected_qty"] + row["vendor_rejected_qty"]
+            )
         return {
             "rows": rows,
             "approved": approved,
@@ -1864,7 +2036,13 @@ def production_cogs_finalization_card(production_order, actor=None):
             "blockers": [],
             "total_ordered_qty": sum((row["ordered_qty"] for row in rows), Decimal("0")),
             "total_sellable_qty": sum((row["sellable_qty"] for row in rows), Decimal("0")),
+            "total_inbound_discrepancy_qty": sum(
+                (row["inbound_discrepancy_qty"] for row in rows), Decimal("0")
+            ),
             "total_rejected_qty": sum((row["rejected_qty"] for row in rows), Decimal("0")),
+            "total_vendor_rejected_qty": sum(
+                (row["vendor_rejected_qty"] for row in rows), Decimal("0")
+            ),
             "total_shortage_qty": sum(
                 (max(parent["ordered"] - parent["output"], Decimal("0")) for parent in approved_parents.values()),
                 Decimal("0"),
@@ -1874,6 +2052,10 @@ def production_cogs_finalization_card(production_order, actor=None):
                 Decimal("0"),
             ),
             "total_po_cost": approved.total_po_cost,
+            "total_inbound_loss_amount": sum(
+                (row["inbound_loss_amount"] for row in rows), Decimal("0")
+            ),
+            "total_inventory_cost": approved.total_final_cost,
         }
 
     snapshot = production_snapshot(production_order)
@@ -1892,17 +2074,20 @@ def production_cogs_finalization_card(production_order, actor=None):
         blockers.append(f"Masih ada {unresolved} tindak lanjut QC yang belum final.")
     if snapshot["ready_to_deliver_qty"] > 0 or snapshot["delivering_qty"] > 0:
         blockers.append("Seluruh QC Passed wajib selesai dikirim dan diterima Warehouse.")
-    if snapshot["received_qty"] != snapshot["passed_qty"]:
-        blockers.append("Qty Inbound harus sama dengan Qty QC Passed.")
+    if snapshot["inbound_accounted_qty"] != snapshot["passed_qty"]:
+        blockers.append("Qty Sellable Received + Inbound Exception harus sama dengan Qty QC Passed.")
 
     rows = []
     parent_groups = {}
     for line in production_order.po.lines.select_related(
         "sku__product_variant__product__status"
-    ).prefetch_related("inbound_receipts", "qc_follow_ups", "fifo_layers"):
+    ).prefetch_related("inbound_receipts", "inbound_discrepancies", "qc_follow_ups", "fifo_layers"):
         ordered_qty = Decimal(line.ordered_qty)
         sellable_qty = line.received_before_cutover_qty + sum(
             (receipt.received_qty for receipt in line.inbound_receipts.all()), Decimal("0")
+        )
+        inbound_discrepancy_qty = sum(
+            (row.quantity for row in line.inbound_discrepancies.all()), Decimal("0")
         )
         rejected_qty = sum(
             (
@@ -1912,11 +2097,21 @@ def production_cogs_finalization_card(production_order, actor=None):
             ),
             Decimal("0"),
         )
-        output_qty = sellable_qty + rejected_qty
+        vendor_rejected_qty = sum(
+            (
+                follow_up.open_qty
+                for follow_up in line.qc_follow_ups.all()
+                if follow_up.status == QCFollowUp.Status.VENDOR_REJECTED
+            ),
+            Decimal("0"),
+        )
+        output_qty = sellable_qty + rejected_qty + vendor_rejected_qty
         shortage_qty = max(ordered_qty - output_qty, Decimal("0"))
         excess_qty = max(output_qty - ordered_qty, Decimal("0"))
         initial_unit_cogs = Decimal(line.cogs_snapshot or 0)
-        original_total_cost = ordered_qty * initial_unit_cogs
+        original_total_cost = max(ordered_qty - vendor_rejected_qty, Decimal("0")) * initial_unit_cogs
+        inbound_loss_amount = inbound_discrepancy_qty * initial_unit_cogs
+        capitalizable_cost = max(original_total_cost - inbound_loss_amount, Decimal("0"))
         product = line.sku.product_variant.product
         if line.cogs_snapshot is None:
             blockers.append(f"COGS snapshot {line.sku.sku} belum tersedia.")
@@ -1931,27 +2126,39 @@ def production_cogs_finalization_card(production_order, actor=None):
             "size": line.sku.size or "—",
             "ordered_qty": ordered_qty,
             "sellable_qty": sellable_qty,
+            "inbound_discrepancy_qty": inbound_discrepancy_qty,
             "rejected_qty": rejected_qty,
+            "vendor_rejected_qty": vendor_rejected_qty,
             "shortage_qty": shortage_qty,
             "excess_qty": excess_qty,
             "initial_unit_cogs": initial_unit_cogs,
             "original_total_cost": original_total_cost,
+            "inbound_loss_amount": inbound_loss_amount,
+            "capitalizable_cost": capitalizable_cost,
         }
         rows.append(row)
         group = parent_groups.setdefault(
             row["parent_id"],
-            {"rows": [], "ordered": Decimal("0"), "sellable": Decimal("0"), "rejected": Decimal("0"), "cost": Decimal("0")},
+            {
+                "rows": [],
+                "ordered": Decimal("0"),
+                "sellable": Decimal("0"),
+                "rejected": Decimal("0"),
+                "vendor_rejected": Decimal("0"),
+                "cost": Decimal("0"),
+            },
         )
         group["rows"].append(row)
         group["ordered"] += ordered_qty
         group["sellable"] += sellable_qty
         group["rejected"] += rejected_qty
-        group["cost"] += original_total_cost
+        group["vendor_rejected"] += vendor_rejected_qty
+        group["cost"] += capitalizable_cost
 
     total_shortage_qty = Decimal("0")
     total_excess_qty = Decimal("0")
     for group in parent_groups.values():
-        output_qty = group["sellable"] + group["rejected"]
+        output_qty = group["sellable"] + group["rejected"] + group["vendor_rejected"]
         total_shortage_qty += max(group["ordered"] - output_qty, Decimal("0"))
         total_excess_qty += max(output_qty - group["ordered"], Decimal("0"))
         if group["sellable"] <= 0:
@@ -1979,10 +2186,20 @@ def production_cogs_finalization_card(production_order, actor=None):
         "blockers": blockers,
         "total_ordered_qty": sum((row["ordered_qty"] for row in rows), Decimal("0")),
         "total_sellable_qty": sum((row["sellable_qty"] for row in rows), Decimal("0")),
+        "total_inbound_discrepancy_qty": sum(
+            (row["inbound_discrepancy_qty"] for row in rows), Decimal("0")
+        ),
         "total_rejected_qty": sum((row["rejected_qty"] for row in rows), Decimal("0")),
+        "total_vendor_rejected_qty": sum(
+            (row["vendor_rejected_qty"] for row in rows), Decimal("0")
+        ),
         "total_shortage_qty": total_shortage_qty,
         "total_excess_qty": total_excess_qty,
         "total_po_cost": sum((row["original_total_cost"] for row in rows), Decimal("0")),
+        "total_inbound_loss_amount": sum(
+            (row["inbound_loss_amount"] for row in rows), Decimal("0")
+        ),
+        "total_inventory_cost": sum((row["capitalizable_cost"] for row in rows), Decimal("0")),
     }
 
 
@@ -2010,7 +2227,7 @@ def approve_production_cogs_finalization(*, production_order, actor):
         production_order=production_order,
         line_snapshot=line_snapshot,
         total_po_cost=card["total_po_cost"],
-        total_final_cost=card["total_po_cost"],
+        total_final_cost=card["total_inventory_cost"],
         approved_by=actor,
     )
 
@@ -2036,7 +2253,9 @@ def approve_production_cogs_finalization(*, production_order, actor):
             raise ValidationError(f"FIFO {row['sku']} sudah terpakai Sales Out.")
 
         updated_movements = parent_movements.setdefault(row["parent_id"], [])
-        parent_costs[row["parent_id"]] = parent_costs.get(row["parent_id"], Decimal("0")) + row["original_total_cost"]
+        parent_costs[row["parent_id"]] = (
+            parent_costs.get(row["parent_id"], Decimal("0")) + row["capitalizable_cost"]
+        )
         for layer in layers:
             layer.unit_cost = row["final_unit_cogs"]
             layer.save(update_fields=("unit_cost",))
@@ -2082,7 +2301,8 @@ def approve_production_cogs_finalization(*, production_order, actor):
         description=(
             f"Finalisasi Quantity & COGS di-approve. Final sellable "
             f"{card['total_sellable_qty']:.0f} pcs; rejected {card['total_rejected_qty']:.0f} pcs; "
-            f"total biaya PO Rp {card['total_po_cost']:.0f}."
+            f"biaya persediaan Rp {card['total_inventory_cost']:.0f}; "
+            f"kerugian inbound Rp {card['total_inbound_loss_amount']:.0f}."
         ),
         after_values={
             "finalization_id": str(finalization.id),
@@ -2090,6 +2310,8 @@ def approve_production_cogs_finalization(*, production_order, actor):
             "rejected_qty": str(card["total_rejected_qty"]),
             "shortage_qty": str(card["total_shortage_qty"]),
             "total_po_cost": str(card["total_po_cost"]),
+            "total_inventory_cost": str(card["total_inventory_cost"]),
+            "total_inbound_loss_amount": str(card["total_inbound_loss_amount"]),
         },
         actor=actor,
     )
@@ -2103,6 +2325,8 @@ def approve_production_cogs_finalization(*, production_order, actor):
             "po_number": production_order.po.po_number,
             "line_snapshot": line_snapshot,
             "total_po_cost": str(card["total_po_cost"]),
+            "total_inventory_cost": str(card["total_inventory_cost"]),
+            "total_inbound_loss_amount": str(card["total_inbound_loss_amount"]),
         },
     )
     return finalization

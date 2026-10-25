@@ -17,16 +17,30 @@ from inventory.models import FIFOLayer, InventoryMovement, QCInspection
 from master_data.models import Category, Product, ProductStatus, ProductVariant, SKU, Supplier
 from merchandising.models import IncomingPlan, ProjectionScenario, SalesProjection
 from merchandising.services.workflows import approve_incoming_plan, approve_sales_projection, create_incoming_plan
-from production.models import ProductionCogsFinalization
-from production.services import ensure_production_order
+from production.models import ProductionActivity, ProductionCogsFinalization, ProductionPlan, ProductionStage
+from production.services import (
+    eligible_activity_choices,
+    ensure_production_order,
+    submit_cmt_activity_batch,
+    submit_production_activity,
+)
 
-from .models import PPICRequirement, POWIPImportBatch, PurchaseOrder
+from .models import (
+    PPICProductionMaterial,
+    PPICProductionPlan,
+    PPICRequirement,
+    POWIPImportBatch,
+    PurchaseOrder,
+)
 from .services.wip_import import approve_po_wip_import, create_po_wip_import
 from .services.workflows import (
+    cancel_po,
     create_draft_po,
     delete_unused_supplier,
+    generate_po_from_production_plan,
     release_po,
     revise_legacy_wip_supplier,
+    save_ppic_production_plan,
     sync_ppic_requirement,
 )
 
@@ -85,7 +99,7 @@ class PurchasingWorkflowTests(TestCase):
         self.assertEqual(po_response.status_code, 200)
         po_workbook = load_workbook(BytesIO(po_response.content), read_only=True)
         self.assertEqual(po_workbook.sheetnames, ["Purchase Order"])
-        self.assertEqual(po_workbook["Purchase Order"]["A1"].value, "No. PO")
+        self.assertEqual(po_workbook["Purchase Order"]["A1"].value, "No. PPO")
         self.assertEqual(po_workbook["Purchase Order"].max_row, 2)
 
     def test_only_approved_incoming_syncs_and_keeps_revision_history(self):
@@ -171,8 +185,19 @@ class PurchasingWorkflowTests(TestCase):
         )
         with patch("purchasing.services.workflows.timezone.now", return_value=september_release):
             third = release_po(third.id, self.user)
-        self.assertEqual(third.po_number, "PO-VOB-09/26-001")
+        self.assertEqual(third.po_number, "PO-VOB-09/26-003")
         self.assertEqual(third.issue_month, date(2026, 9, 1))
+
+        january_release = timezone.make_aware(datetime(2027, 1, 2, 10, 0))
+        fourth = create_draft_po(
+            supplier=self.supplier,
+            need_month=date(2027, 1, 1),
+            actor=self.user,
+            manual_lines=[(self.sku, 1)],
+        )
+        with patch("purchasing.services.workflows.timezone.now", return_value=january_release):
+            fourth = release_po(fourth.id, self.user)
+        self.assertEqual(fourth.po_number, "PO-VOB-01/27-001")
 
     def test_cannot_order_above_remaining_requirement(self):
         plan = self._approved_incoming(100)
@@ -186,56 +211,686 @@ class PurchasingWorkflowTests(TestCase):
             )
         self.assertEqual(PPICRequirement.objects.count(), 1)
 
-    def test_ppic_page_reviews_without_write_then_creates_draft_after_confirmation(self):
+    def test_po_generator_hides_requirements_without_saved_production_plan(self):
         plan = self._approved_incoming(100)
         requirement = PPICRequirement.objects.get(incoming_plan=plan)
         self.client.force_login(self.user)
-        review_response = self.client.get(
-            reverse("purchasing:generator"),
-            {"month": "2026-09", "review": "1"},
-        )
-        self.assertEqual(review_response.status_code, 200)
-        self.assertContains(review_response, "REVIEW RESULT · BELUM TERSIMPAN")
-        self.assertContains(review_response, requirement.sku.sku)
+        response = self.client.get(reverse("purchasing:generator"), {"month": "2026-09"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["plans"], [])
+        self.assertContains(response, "Requirement yang belum dibuatkan Production Plan tidak dapat langsung menjadi PO")
+        self.assertNotContains(response, requirement.sku.sku)
         self.assertEqual(PurchaseOrder.objects.count(), 0)
 
-        create_response = self.client.post(
-            reverse("purchasing:generator"),
-            {
-                "form_name": "generator_create",
-                "month": "2026-09",
-                "supplier": str(self.supplier.id),
-                "arrival_2026_09": "2026-09-20",
-                "notes": "UAT flow",
-                f"cogs_{requirement.id}": "115000",
+    def test_cmt_production_plan_builds_cost_and_generates_draft_po(self):
+        incoming = self._approved_incoming(100)
+        requirement = PPICRequirement.objects.get(incoming_plan=incoming)
+        plan = save_ppic_production_plan(
+            actor=self.user,
+            requirements=[requirement],
+            quantities={str(requirement.id): "100"},
+            values={
+                "production_method": PPICProductionPlan.ProductionMethod.CMT,
+                "supplier": self.supplier,
+                "target_material_purchase_date": date(2026, 8, 10),
+                "target_cut_start_date": date(2026, 8, 15),
+                "target_cut_end_date": date(2026, 8, 16),
+                "target_make_start_date": date(2026, 8, 17),
+                "target_make_end_date": date(2026, 8, 25),
+                "target_trim_start_date": date(2026, 8, 26),
+                "target_trim_end_date": date(2026, 8, 28),
+                "target_qc_start_date": date(2026, 8, 29),
+                "target_qc_end_date": date(2026, 8, 30),
+                "target_inbound_date": date(2026, 9, 1),
+                "notes": "CMT test",
             },
+            materials=[{
+                "product": self.sku.product_variant.product,
+                "supplier": self.supplier,
+                "material_name": "Fabric",
+                "quantity": Decimal("200"),
+                "unit": "meter",
+                "unit_price": Decimal("5000"),
+            }],
+            process_costs=[{
+                "product": self.sku.product_variant.product,
+                "cmt_supplier": self.supplier,
+                "cmt_unit_cost": Decimal("40000"),
+                "additional_process_unit_cost": Decimal("0"),
+            }],
         )
-        self.assertEqual(create_response.status_code, 302)
-        po = PurchaseOrder.objects.get()
+
+        self.assertEqual(plan.material_cost, Decimal("1000000"))
+        self.assertEqual(plan.planned_total_cost, Decimal("5000000"))
+        self.assertEqual(plan.planned_unit_cogs, Decimal("50000"))
+        self.assertEqual(plan.lines.get().unit_cogs, Decimal("50000"))
+        self.assertEqual(plan.materials.get().product, self.sku.product_variant.product)
+        po = generate_po_from_production_plan(plan.id, self.user)
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, PPICProductionPlan.Status.GENERATED)
+        self.assertEqual(plan.purchase_order_id, po.id)
         self.assertEqual(po.status, PurchaseOrder.Status.DRAFT)
-        self.assertEqual(po.required_arrival, date(2026, 9, 20))
-        self.assertEqual(po.lines.get().ordered_qty, Decimal("100"))
-        self.assertEqual(po.lines.get().cogs_snapshot, Decimal("115000"))
-
-        second_review = self.client.get(
-            reverse("purchasing:generator"),
-            {"month": "2026-09", "review": "1"},
+        self.assertEqual(po.child_code, "B")
+        self.assertEqual(po.order_type, PurchaseOrder.OrderType.CMT)
+        self.assertEqual(po.required_arrival, date(2026, 9, 1))
+        self.assertEqual(po.lines.get().cogs_snapshot, Decimal("50000"))
+        children = list(plan.child_purchase_orders.order_by("child_code"))
+        self.assertEqual(
+            [(child.child_code, child.order_type) for child in children],
+            [
+                ("A", PurchaseOrder.OrderType.MAIN_MATERIAL),
+                ("B", PurchaseOrder.OrderType.CMT),
+            ],
         )
-        self.assertEqual(second_review.context["generator"]["candidates"], [])
+        self.assertEqual(children[0].items.get().description, "Fabric")
 
+        self.client.force_login(self.user)
         delete_response = self.client.post(reverse("purchasing:po_delete_draft", args=[po.id]))
         self.assertEqual(delete_response.status_code, 302)
-        self.assertEqual(PurchaseOrder.objects.count(), 0)
-        restored_review = self.client.get(
-            reverse("purchasing:generator"),
-            {"month": "2026-09", "review": "1"},
-        )
-        self.assertEqual(
-            [row.id for row in restored_review.context["generator"]["candidates"]],
-            [requirement.id],
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, PPICProductionPlan.Status.DRAFT)
+        self.assertIsNone(plan.purchase_order_id)
+
+    def test_cmt_fractional_cost_is_saved_as_whole_rupiah_and_generates_po(self):
+        incoming = self._approved_incoming(100)
+        requirement = PPICRequirement.objects.get(incoming_plan=incoming)
+        plan = save_ppic_production_plan(
+            actor=self.user,
+            requirements=[requirement],
+            quantities={str(requirement.id): "100"},
+            values={
+                "production_method": PPICProductionPlan.ProductionMethod.CMT,
+                "supplier": self.supplier,
+                "control_material_purchase": False,
+                "control_trial": False,
+                "control_cut": False,
+                "control_additional_process": False,
+                "control_make": False,
+                "control_trim": False,
+                "control_qc": False,
+                "control_inbound": True,
+                "target_inbound_date": date(2026, 9, 1),
+            },
+            materials=[{
+                "product": self.sku.product_variant.product,
+                "supplier": self.supplier,
+                "material_name": "Fabric",
+                "quantity": Decimal("1"),
+                "unit": "meter",
+                "unit_price": Decimal("3350"),
+            }],
         )
 
-    def test_po_generator_filters_exact_candidates_and_creates_one_po_per_need_month(self):
+        self.assertEqual(plan.lines.get().unit_cogs, Decimal("34"))
+        self.assertEqual(generate_po_from_production_plan(plan.id, self.user).lines.get().cogs_snapshot, Decimal("34"))
+
+    def test_same_material_is_combined_in_supplier_po(self):
+        first_requirement = PPICRequirement.objects.get(incoming_plan=self._approved_incoming(100))
+        second_product = Product.objects.create(
+            code="P-2",
+            name="Second Product",
+            status=self.sku.product_variant.product.status,
+            category=self.sku.product_variant.product.category,
+        )
+        second_sku = SKU.objects.create(
+            sku="SKU-2",
+            product_variant=ProductVariant.objects.create(product=second_product, name="Blue"),
+            current_retail_price=Decimal("200000"),
+            current_master_cogs=Decimal("100000"),
+        )
+        second_projection = SalesProjection.objects.create(
+            scenario=self.scenario,
+            month=date(2026, 9, 1),
+            sku=second_sku,
+            system_recommendation=Decimal("50"),
+        )
+        approve_sales_projection(second_projection.id, 50, self.user)
+        second_incoming = create_incoming_plan(second_projection.id, 0)
+        approve_incoming_plan(second_incoming.id, 50, self.user)
+        second_requirement = PPICRequirement.objects.get(incoming_plan=second_incoming)
+        plan = save_ppic_production_plan(
+            actor=self.user,
+            requirements=[first_requirement, second_requirement],
+            quantities={str(first_requirement.id): "100", str(second_requirement.id): "50"},
+            values={
+                "production_method": PPICProductionPlan.ProductionMethod.CMT,
+                "supplier": self.supplier,
+                "control_material_purchase": True,
+                "control_trial": False,
+                "control_cut": False,
+                "control_additional_process": False,
+                "control_make": False,
+                "control_trim": False,
+                "control_qc": False,
+                "control_inbound": True,
+                "target_material_purchase_date": date(2026, 8, 10),
+                "target_inbound_date": date(2026, 9, 1),
+            },
+            materials=[
+                {
+                    "product": self.sku.product_variant.product,
+                    "supplier": self.supplier,
+                    "material_name": "Stripe Blue",
+                    "quantity": Decimal("180"),
+                    "unit": "Yard",
+                    "unit_price": Decimal("19000"),
+                },
+                {
+                    "product": second_product,
+                    "supplier": self.supplier,
+                    "material_name": "Stripe Blue",
+                    "quantity": Decimal("200"),
+                    "unit": "Yard",
+                    "unit_price": Decimal("19000"),
+                },
+            ],
+        )
+
+        po = generate_po_from_production_plan(plan.id, self.user)
+        item = po.items.get()
+        self.assertEqual(item.description, "Stripe Blue")
+        self.assertEqual(item.quantity, Decimal("380"))
+        self.assertIsNone(item.product)
+        self.assertEqual(item.total_cost, Decimal("7220000"))
+        self.client.force_login(self.user)
+        detail = self.client.get(reverse("purchasing:po_detail", args=[po.id]))
+        printed = self.client.get(reverse("purchasing:po_print", args=[po.id]))
+        self.assertContains(detail, "Product, Second Product")
+        self.assertContains(printed, "Product, Second Product")
+        self.assertNotContains(detail, "Multiple Products")
+
+    def test_custom_additional_process_is_costed_and_monitored_after_cut(self):
+        incoming = self._approved_incoming(100)
+        requirement = PPICRequirement.objects.get(incoming_plan=incoming)
+        plan = save_ppic_production_plan(
+            actor=self.user,
+            requirements=[requirement],
+            quantities={str(requirement.id): "100"},
+            values={
+                "production_method": PPICProductionPlan.ProductionMethod.CMT,
+                "supplier": self.supplier,
+                "control_material_purchase": False,
+                "control_trial": False,
+                "control_cut": True,
+                "control_additional_process": True,
+                "control_make": True,
+                "control_trim": False,
+                "control_qc": False,
+                "control_inbound": False,
+                "target_cut_start_date": date(2026, 8, 10),
+                "target_cut_end_date": date(2026, 8, 11),
+                "additional_process_name": "Bordir",
+                "target_additional_process_start_date": date(2026, 8, 12),
+                "target_additional_process_end_date": date(2026, 8, 13),
+                "target_make_start_date": date(2026, 8, 14),
+                "target_make_end_date": date(2026, 8, 20),
+            },
+            materials=[{
+                "product": self.sku.product_variant.product,
+                "supplier": self.supplier,
+                "material_name": "Fabric",
+                "quantity": Decimal("100"),
+                "unit": "meter",
+                "unit_price": Decimal("5000"),
+            }, {
+                "product": self.sku.product_variant.product,
+                "supplier": self.supplier,
+                "material_type": PPICProductionMaterial.MaterialType.SUPPORTING,
+                "material_name": "Label",
+                "quantity": Decimal("100"),
+                "unit": "pcs",
+                "unit_price": Decimal("0"),
+            }],
+            process_costs=[{
+                "product": self.sku.product_variant.product,
+                "cmt_supplier": self.supplier,
+                "cmt_unit_cost": Decimal("4000"),
+                "additional_process_name": "Bordir",
+                "additional_process_supplier": self.supplier,
+                "additional_process_unit_cost": Decimal("2000"),
+            }],
+        )
+
+        self.assertEqual(plan.planned_total_cost, Decimal("1100000"))
+        self.assertEqual(plan.planned_unit_cogs, Decimal("11000"))
+        po = release_po(generate_po_from_production_plan(plan.id, self.user).id, self.user)
+        plan.refresh_from_db()
+        children = list(plan.child_purchase_orders.order_by("child_code"))
+        self.assertEqual(
+            [(child.child_code, child.order_type) for child in children],
+            [
+                ("A", PurchaseOrder.OrderType.MAIN_MATERIAL),
+                ("B", PurchaseOrder.OrderType.CMT),
+                ("C", PurchaseOrder.OrderType.ADDITIONAL_PROCESS),
+                ("D", PurchaseOrder.OrderType.SUPPORTING_MATERIAL),
+            ],
+        )
+        self.assertTrue(plan.ppo_number.startswith("PPO-VOB-"))
+        self.assertEqual(
+            [child.po_number[-1] for child in children],
+            ["A", "B", "C", "D"],
+        )
+        self.assertTrue(all(child.status == PurchaseOrder.Status.RELEASED for child in children))
+        production_order = po.production_order
+        monitoring_plan = production_order.plan
+        self.assertEqual(monitoring_plan.additional_process_name, "Bordir")
+        self.assertEqual(monitoring_plan.target_additional_process_start_date, date(2026, 8, 12))
+
+        self.client.force_login(self.user)
+        detail = self.client.get(reverse("production:detail", args=[production_order.id]))
+        self.assertContains(detail, plan.ppo_number)
+        self.assertContains(detail, "Bordir")
+        self.assertContains(detail, 'data-process-code="ADDITIONAL_PROCESS"')
+        self.assertContains(detail, 'data-process-card="ADDITIONAL_PROCESS"')
+
+        choices = dict(eligible_activity_choices(production_order))
+        self.assertIn(ProductionActivity.ActivityType.CUT, choices)
+        submit_cmt_activity_batch(
+            production_order=production_order,
+            activity_type=ProductionActivity.ActivityType.CUT,
+            activity_date=date(2026, 8, 11),
+            line_quantities=((po.lines.get(), 100),),
+            actor=self.user,
+        )
+        choices = dict(eligible_activity_choices(production_order))
+        self.assertIn(ProductionActivity.ActivityType.ADDITIONAL_PROCESS, choices)
+        self.assertIn("Bordir", choices[ProductionActivity.ActivityType.ADDITIONAL_PROCESS])
+        submit_cmt_activity_batch(
+            production_order=production_order,
+            activity_type=ProductionActivity.ActivityType.ADDITIONAL_PROCESS,
+            activity_date=date(2026, 8, 13),
+            line_quantities=((po.lines.get(), 100),),
+            actor=self.user,
+        )
+        self.assertIn(
+            ProductionActivity.ActivityType.MAKE,
+            dict(eligible_activity_choices(production_order)),
+        )
+        cancel_po(po.id, self.user, "PPO cancellation test")
+        self.assertFalse(
+            plan.child_purchase_orders.exclude(status=PurchaseOrder.Status.CANCELLED).exists()
+        )
+
+    def test_fpp_production_plan_uses_vendor_unit_price(self):
+        incoming = self._approved_incoming(100)
+        requirement = PPICRequirement.objects.get(incoming_plan=incoming)
+        plan = save_ppic_production_plan(
+            actor=self.user,
+            requirements=[requirement],
+            quantities={str(requirement.id): "100"},
+            unit_cogs={str(requirement.id): "125,000"},
+            values={
+                "production_method": PPICProductionPlan.ProductionMethod.FPP,
+                "supplier": self.supplier,
+                "control_material_purchase": False,
+                "control_trial": True,
+                "control_cut": False,
+                "control_make": True,
+                "control_trim": True,
+                "control_qc": False,
+                "control_inbound": False,
+                "target_trial_date": date(2026, 8, 16),
+                "target_make_start_date": date(2026, 8, 17),
+                "target_make_end_date": date(2026, 8, 25),
+                "target_trim_start_date": date(2026, 8, 26),
+                "target_trim_end_date": date(2026, 8, 28),
+                "notes": "FPP test",
+            },
+            materials=[],
+        )
+
+        self.assertEqual(plan.planned_unit_cogs, Decimal("125000"))
+        self.assertEqual(plan.lines.get().unit_cogs, Decimal("125000"))
+        po = generate_po_from_production_plan(plan.id, self.user)
+        self.assertEqual(po.lines.get().cogs_snapshot, Decimal("125000"))
+        self.assertIsNone(po.required_arrival)
+        self.assertEqual(po.parent_plan_id, plan.id)
+        self.assertEqual(po.child_code, "")
+        self.assertEqual(plan.child_purchase_orders.count(), 1)
+
+        po = release_po(po.id, self.user)
+        plan.refresh_from_db()
+        self.assertEqual(
+            po.po_number.removeprefix("PO-"),
+            plan.ppo_number.removeprefix("PPO-"),
+        )
+        self.assertEqual(po.sequence, plan.ppo_sequence)
+        monitoring_plan = po.production_order.plan
+        self.assertEqual(monitoring_plan.status, ProductionPlan.Status.ACTIVE)
+        self.assertEqual(monitoring_plan.target_make_start_date, date(2026, 8, 17))
+        self.assertEqual(monitoring_plan.target_trim_end_date, date(2026, 8, 28))
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("production:monitoring"))
+        self.assertContains(response, po.po_number)
+        self.assertContains(response, "FPP · Full Package Production")
+        monitoring_row = next(
+            row for row in response.context["rows"] if row["production_order"].po_id == po.id
+        )
+        self.assertEqual(monitoring_row["current_code"], "TRIAL")
+        self.assertEqual(monitoring_row["next_process_label"], "Trial Production")
+        self.assertEqual(monitoring_row["material_status_display"], "Not Controlled")
+
+        detail_response = self.client.get(reverse("production:detail", args=[po.production_order.id]))
+        self.assertContains(detail_response, 'data-metric-card="production-method"')
+        self.assertContains(detail_response, "FPP · Full Package Production")
+        self.assertNotContains(detail_response, 'data-process-card="MATERIAL_PURCHASE"')
+        self.assertNotContains(detail_response, 'data-process-card="CUT"')
+        self.assertNotContains(detail_response, 'data-process-card="QC"')
+        self.assertNotContains(detail_response, 'data-process-card="INBOUND"')
+        self.assertContains(detail_response, 'data-process-card="TRIAL"')
+        self.assertContains(detail_response, 'data-process-card="MAKE"')
+        self.assertContains(detail_response, 'data-process-card="TRIM"')
+        self.assertContains(detail_response, 'data-process-code="TRIAL"')
+        self.assertContains(detail_response, 'data-process-code="MAKE"')
+        self.assertContains(detail_response, 'data-process-code="TRIM"')
+
+        choices = dict(eligible_activity_choices(po.production_order))
+        self.assertNotIn(ProductionActivity.ActivityType.MATERIAL_PURCHASE, choices)
+        self.assertEqual(
+            choices,
+            {ProductionActivity.ActivityType.TRIAL_SUBMIT: "Submit Trial Production"},
+        )
+        submit_production_activity(
+            production_order=po.production_order,
+            activity_type=ProductionActivity.ActivityType.TRIAL_SUBMIT,
+            activity_date=date(2026, 8, 16),
+            actor=self.user,
+        )
+        submit_production_activity(
+            production_order=po.production_order,
+            activity_type=ProductionActivity.ActivityType.TRIAL_APPROVE,
+            activity_date=date(2026, 8, 16),
+            actor=self.user,
+        )
+        choices = dict(eligible_activity_choices(po.production_order))
+        self.assertIn(ProductionActivity.ActivityType.MAKE, choices)
+        self.assertNotIn(ProductionActivity.ActivityType.CUT, choices)
+        submit_cmt_activity_batch(
+            production_order=po.production_order,
+            activity_type=ProductionActivity.ActivityType.MAKE,
+            activity_date=date(2026, 8, 17),
+            line_quantities=[(po.lines.get(), 100)],
+            actor=self.user,
+        )
+        self.assertEqual(
+            po.production_order.stages.get(stage=ProductionStage.Stage.MAKE).status,
+            ProductionStage.Status.COMPLETE,
+        )
+
+    def test_requirement_review_opens_production_plan_without_creating_po(self):
+        incoming = self._approved_incoming(100)
+        requirement = PPICRequirement.objects.get(incoming_plan=incoming)
+        second_product = Product.objects.create(
+            code="P-2",
+            name="Second Product",
+            status=self.sku.product_variant.product.status,
+            category=self.sku.product_variant.product.category,
+        )
+        second_sku = SKU.objects.create(
+            sku="SKU-2",
+            product_variant=ProductVariant.objects.create(product=second_product, name="Navy"),
+            current_retail_price=Decimal("200000"),
+            current_master_cogs=Decimal("100000"),
+        )
+        second_projection = SalesProjection.objects.create(
+            scenario=self.scenario,
+            month=date(2026, 9, 1),
+            sku=second_sku,
+            system_recommendation=Decimal("50"),
+        )
+        approve_sales_projection(second_projection.id, 50, self.user)
+        second_incoming = create_incoming_plan(second_projection.id, 0)
+        approve_incoming_plan(second_incoming.id, 50, self.user)
+        second_requirement = PPICRequirement.objects.get(incoming_plan=second_incoming)
+        third_product = Product.objects.create(
+            code="P-3",
+            name="Addable Product",
+            status=self.sku.product_variant.product.status,
+            category=self.sku.product_variant.product.category,
+        )
+        third_sku = SKU.objects.create(
+            sku="SKU-3",
+            product_variant=ProductVariant.objects.create(product=third_product, name="Black"),
+            current_retail_price=Decimal("150000"),
+            current_master_cogs=Decimal("75000"),
+        )
+        third_projection = SalesProjection.objects.create(
+            scenario=self.scenario,
+            month=date(2026, 9, 1),
+            sku=third_sku,
+            system_recommendation=Decimal("30"),
+        )
+        approve_sales_projection(third_projection.id, 30, self.user)
+        third_incoming = create_incoming_plan(third_projection.id, 0)
+        approve_incoming_plan(third_incoming.id, 30, self.user)
+        third_requirement = PPICRequirement.objects.get(incoming_plan=third_incoming)
+        self.client.force_login(self.user)
+
+        review_response = self.client.post(
+            reverse("purchasing:production_plan_create"),
+            {"action": "review", "requirement": [str(requirement.id), str(second_requirement.id)]},
+        )
+        self.assertRedirects(review_response, reverse("purchasing:production_plan_create"))
+        response = self.client.get(reverse("purchasing:production_plan_create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Buat Production Plan")
+        self.assertContains(response, "CMT · Cut, Make, Trim")
+        self.assertContains(response, "COGS / Qty")
+        self.assertContains(response, "Total COGS")
+        self.assertContains(response, "2 Products Selected")
+        self.assertContains(response, "Product Name")
+        self.assertContains(response, "Product / Parent SKU")
+        self.assertContains(response, 'name="material_product"')
+        self.assertContains(response, "CMT Cost / Qty")
+        self.assertContains(response, "Biaya Additional Process per Product")
+        self.assertContains(response, "Vendor CMT")
+        self.assertContains(response, "Supplier")
+        self.assertContains(response, "Material Type")
+        self.assertContains(response, "Supporting Material")
+        self.assertContains(response, "Bordir / Sablon")
+        self.assertContains(response, 'name="cmt_cost_product"')
+        self.assertContains(response, 'name="additional_cost_product"')
+        self.assertContains(response, "data-remove-requirement")
+        self.assertContains(response, "+ Add Product")
+        self.assertContains(response, 'data-add-product-template')
+        self.assertContains(response, "Addable Product")
+        self.assertContains(response, "Second Product")
+        self.assertContains(response, "data-draft-storage-key")
+        self.assertContains(response, "sessionStorage")
+        self.assertNotContains(response, ">Variant<")
+        self.assertNotContains(response, ">Generate Draft PO</button>")
+        self.assertEqual(PPICProductionPlan.objects.count(), 0)
+        self.assertEqual(PurchaseOrder.objects.count(), 0)
+
+        plan = save_ppic_production_plan(
+            actor=self.user,
+            requirements=[requirement, second_requirement],
+            quantities={str(requirement.id): "100", str(second_requirement.id): "50"},
+            values={
+                "production_method": PPICProductionPlan.ProductionMethod.CMT,
+                "supplier": self.supplier,
+            },
+            materials=[
+                {
+                    "product": self.sku.product_variant.product,
+                    "material_name": "Main fabric",
+                    "quantity": Decimal("100"),
+                    "unit": "meter",
+                    "unit_price": Decimal("5000"),
+                },
+                {
+                    "product": second_product,
+                    "material_name": "Second fabric",
+                    "quantity": Decimal("50"),
+                    "unit": "meter",
+                    "unit_price": Decimal("6000"),
+                },
+            ],
+            process_costs=[
+                {
+                    "product": self.sku.product_variant.product,
+                    "cmt_unit_cost": Decimal("1000"),
+                    "additional_process_unit_cost": Decimal("0"),
+                },
+                {
+                    "product": second_product,
+                    "cmt_unit_cost": Decimal("2000"),
+                    "additional_process_unit_cost": Decimal("0"),
+                },
+            ],
+        )
+        self.assertEqual(plan.lines.count(), 2)
+        self.assertSetEqual(
+            set(plan.materials.values_list("product_id", flat=True)),
+            {self.sku.product_variant.product_id, second_product.id},
+        )
+        self.assertEqual(plan.lines.get(requirement=requirement).unit_cogs, Decimal("6000.0000"))
+        self.assertEqual(plan.lines.get(requirement=second_requirement).unit_cogs, Decimal("8000.0000"))
+
+        response = self.client.post(
+            reverse("purchasing:production_plan_detail", args=[plan.id]),
+            {
+                "action": "save",
+                "requirement": [str(requirement.id), str(third_requirement.id)],
+                "production_method": PPICProductionPlan.ProductionMethod.CMT,
+                "supplier": str(self.supplier.id),
+                "control_material_purchase": "on",
+                "control_additional_process": "on",
+                "additional_process_name": "Bordir",
+                f"quantity_{requirement.id}": "100",
+                f"unit_cogs_{requirement.id}": "0",
+                f"quantity_{third_requirement.id}": "30",
+                f"unit_cogs_{third_requirement.id}": "0",
+                "material_product": [str(self.sku.product_variant.product_id)],
+                "material_name": ["Main fabric"],
+                "material_quantity": ["100"],
+                "material_unit": ["meter"],
+                "material_unit_price": ["5000"],
+                "material_supplier": [str(self.supplier.id)],
+                "material_type": ["SUPPORTING"],
+                "cmt_cost_product": [
+                    str(self.sku.product_variant.product_id),
+                    str(third_product.id),
+                ],
+                "cmt_unit_cost": ["1,000", "2,000"],
+                "cmt_supplier": [str(self.supplier.id), str(self.supplier.id)],
+                "additional_cost_product": [str(self.sku.product_variant.product_id)],
+                "additional_process_cost_name": ["Bordir"],
+                "additional_process_supplier": [str(self.supplier.id)],
+                "additional_process_unit_cost": ["500"],
+            },
+        )
+        self.assertRedirects(response, reverse("purchasing:production_plan_detail", args=[plan.id]))
+        self.assertEqual(plan.lines.count(), 2)
+        self.assertFalse(plan.lines.filter(requirement=second_requirement).exists())
+        self.assertEqual(plan.lines.get(requirement=third_requirement).quantity, Decimal("30"))
+        self.assertEqual(
+            plan.lines.get(requirement=requirement).unit_cogs,
+            Decimal("6500.0000"),
+        )
+        self.assertEqual(
+            plan.lines.get(requirement=third_requirement).unit_cogs,
+            Decimal("2000.0000"),
+        )
+        self.assertEqual(plan.materials.get().supplier, self.supplier)
+        self.assertEqual(plan.materials.get().material_type, "SUPPORTING")
+        first_product_cost = plan.process_costs.get(product=self.sku.product_variant.product)
+        self.assertEqual(first_product_cost.cmt_supplier, self.supplier)
+        self.assertEqual(first_product_cost.additional_process_name, "Bordir")
+        self.assertEqual(first_product_cost.additional_process_supplier, self.supplier)
+        requirement_response = self.client.get(reverse("purchasing:requirements"))
+        returned_requirement = next(
+            row for row in requirement_response.context["requirements"] if row.id == second_requirement.id
+        )
+        self.assertEqual(returned_requirement.available_for_plan_qty, Decimal("50"))
+
+    def test_fpp_draft_can_be_saved_before_cogs_and_process_dates_are_complete(self):
+        incoming = self._approved_incoming(100)
+        requirement = PPICRequirement.objects.get(incoming_plan=incoming)
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("purchasing:production_plan_create"),
+            {
+                "action": "save",
+                "requirement": str(requirement.id),
+                "production_method": PPICProductionPlan.ProductionMethod.FPP,
+                "control_make": "on",
+                "control_trim": "on",
+                f"quantity_{requirement.id}": "100",
+                f"unit_cogs_{requirement.id}": "",
+            },
+        )
+
+        plan = PPICProductionPlan.objects.get()
+        self.assertRedirects(response, reverse("purchasing:production_plan_detail", args=[plan.id]))
+        self.assertEqual(plan.need_month, requirement.need_month)
+        self.assertEqual(plan.lines.get().unit_cogs, Decimal("0"))
+        with self.assertRaisesMessage(ValidationError, "COGS per quantity FPP wajib diisi"):
+            generate_po_from_production_plan(plan.id, self.user)
+
+    def test_failed_generate_keeps_submitted_process_dates(self):
+        incoming = self._approved_incoming(100)
+        requirement = PPICRequirement.objects.get(incoming_plan=incoming)
+        plan = save_ppic_production_plan(
+            actor=self.user,
+            requirements=[requirement],
+            quantities={str(requirement.id): "100"},
+            unit_cogs={str(requirement.id): "125000"},
+            values={
+                "production_method": PPICProductionPlan.ProductionMethod.FPP,
+                "supplier": self.supplier,
+                "control_material_purchase": False,
+                "control_trial": True,
+                "control_cut": False,
+                "control_make": True,
+                "control_trim": True,
+                "control_qc": True,
+                "control_inbound": True,
+            },
+            materials=[],
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("purchasing:production_plan_detail", args=[plan.id]),
+            {
+                "action": "generate",
+                "requirement": [str(requirement.id)],
+                "production_method": PPICProductionPlan.ProductionMethod.FPP,
+                "supplier": str(self.supplier.id),
+                "control_trial": "on",
+                "control_make": "on",
+                "control_trim": "on",
+                "control_qc": "on",
+                "control_inbound": "on",
+                "target_make_start_date": "2026-08-17",
+                "target_make_end_date": "2026-08-25",
+                "target_trim_start_date": "2026-08-26",
+                "target_trim_end_date": "2026-08-28",
+                "target_qc_start_date": "2026-08-29",
+                "target_qc_end_date": "2026-08-30",
+                "target_inbound_date": "2026-09-01",
+                f"quantity_{requirement.id}": "100",
+                f"unit_cogs_{requirement.id}": "125000",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Target Trial Production wajib diisi.")
+        self.assertContains(response, 'value="2026-08-17"')
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, PPICProductionPlan.Status.DRAFT)
+        self.assertEqual(plan.target_make_start_date, date(2026, 8, 17))
+        self.assertEqual(plan.target_trim_end_date, date(2026, 8, 28))
+        self.assertEqual(plan.target_qc_end_date, date(2026, 8, 30))
+        self.assertEqual(plan.target_inbound_date, date(2026, 9, 1))
+        self.assertIsNone(plan.purchase_order_id)
+
+    def test_po_generator_lists_saved_draft_plans_and_honors_month_filter(self):
         first_plan = self._approved_incoming(100)
         first = PPICRequirement.objects.get(incoming_plan=first_plan)
         second_scenario = ProjectionScenario.objects.create(
@@ -255,140 +910,61 @@ class PurchasingWorkflowTests(TestCase):
         approve_incoming_plan(second_plan.id, 40, self.user)
         second = PPICRequirement.objects.get(incoming_plan=second_plan)
 
-        self.client.force_login(self.user)
-        params = {
-            "month": ["2026-09", "2026-10"],
-            "status": str(self.sku.product_variant.product.status_id),
-            "category": str(self.sku.product_variant.product.category_id),
-            "product": str(self.sku.product_variant.product_id),
-            "size": "—",
-            "review": "1",
-        }
-        response = self.client.get(reverse("purchasing:generator"), params)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            {row.id for row in response.context["generator"]["candidates"]},
-            {first.id, second.id},
+        september_production_plan = save_ppic_production_plan(
+            actor=self.user,
+            requirements=[first],
+            quantities={str(first.id): "100"},
+            unit_cogs={str(first.id): "115000"},
+            values={
+                "production_method": PPICProductionPlan.ProductionMethod.FPP,
+                "supplier": self.supplier,
+                "control_material_purchase": False,
+                "control_trial": False,
+                "control_cut": False,
+                "control_make": True,
+                "control_trim": False,
+                "control_qc": False,
+                "control_inbound": False,
+                "target_make_start_date": date(2026, 8, 17),
+                "target_make_end_date": date(2026, 8, 25),
+            },
+            materials=[],
         )
+        october_production_plan = save_ppic_production_plan(
+            actor=self.user,
+            requirements=[second],
+            quantities={str(second.id): "40"},
+            unit_cogs={str(second.id): "125000"},
+            values={
+                "production_method": PPICProductionPlan.ProductionMethod.FPP,
+                "supplier": self.supplier,
+                "control_material_purchase": False,
+                "control_trial": False,
+                "control_cut": False,
+                "control_make": True,
+                "control_trim": False,
+                "control_qc": False,
+                "control_inbound": False,
+                "target_make_start_date": date(2026, 9, 17),
+                "target_make_end_date": date(2026, 9, 25),
+            },
+            materials=[],
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("purchasing:generator"), {"month": "2026-09"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["plans"], [september_production_plan])
+        self.assertEqual(response.context["selected_month"], "2026-09")
+        self.assertContains(response, "Review &amp; Generate PO")
         self.assertEqual(PurchaseOrder.objects.count(), 0)
 
-        create_response = self.client.post(
-            reverse("purchasing:generator"),
-            {
-                "form_name": "generator_create",
-                "month": ["2026-09", "2026-10"],
-                "status": str(self.sku.product_variant.product.status_id),
-                "category": str(self.sku.product_variant.product.category_id),
-                "product": str(self.sku.product_variant.product_id),
-                "size": "—",
-                "supplier": str(self.supplier.id),
-                "arrival_2026_09": "2026-09-20",
-                "arrival_2026_10": "2026-10-20",
-                f"cogs_{first.id}": "115000",
-                f"cogs_{second.id}": "125000",
-            },
-        )
-        self.assertEqual(create_response.status_code, 302)
-        self.assertEqual(PurchaseOrder.objects.count(), 2)
-        self.assertEqual(
-            set(PurchaseOrder.objects.values_list("need_month", flat=True)),
-            {date(2026, 9, 1), date(2026, 10, 1)},
-        )
-        self.assertEqual(
-            set(PurchaseOrder.objects.values_list("lines__ordered_qty", flat=True)),
-            {Decimal("100"), Decimal("40")},
-        )
-        self.assertEqual(
-            set(PurchaseOrder.objects.values_list("lines__cogs_snapshot", flat=True)),
-            {Decimal("115000"), Decimal("125000")},
-        )
+        po = generate_po_from_production_plan(september_production_plan.id, self.user)
+        all_plans = self.client.get(reverse("purchasing:generator"))
+        self.assertEqual(all_plans.context["plans"], [october_production_plan])
 
-    def test_po_generator_options_cascade_by_month_and_exclude_drafted_need_keys(self):
-        september_plan = self._approved_incoming(100)
-        september_requirement = PPICRequirement.objects.get(incoming_plan=september_plan)
-
-        october_status = ProductStatus.objects.create(code="ESSENTIAL", name="Essential+")
-        october_category = Category.objects.create(code="KNITWEAR", name="Knitwear")
-        october_product = Product.objects.create(
-            code="P-2",
-            name="October Product",
-            status=october_status,
-            category=october_category,
-        )
-        october_variant = ProductVariant.objects.create(
-            product=october_product,
-            name="Navy",
-            color="Navy",
-        )
-        october_sku = SKU.objects.create(
-            sku="SKU-OCT",
-            product_variant=october_variant,
-            current_retail_price=Decimal("300000"),
-            current_master_cogs=Decimal("150000"),
-        )
-        october_scenario = ProjectionScenario.objects.create(
-            name="October 2026",
-            start_month=date(2026, 10, 1),
-            end_month=date(2026, 10, 1),
-            created_by=self.user,
-        )
-        october_projection = SalesProjection.objects.create(
-            scenario=october_scenario,
-            month=date(2026, 10, 1),
-            sku=october_sku,
-            system_recommendation=Decimal("40"),
-        )
-        approve_sales_projection(october_projection.id, 40, self.user)
-        october_plan = create_incoming_plan(october_projection.id, 0)
-        approve_incoming_plan(october_plan.id, 40, self.user)
-
-        self.client.force_login(self.user)
-        september_response = self.client.get(
-            reverse("purchasing:generator"),
-            {"month": "2026-09"},
-        )
-        generator = september_response.context["generator"]
-        self.assertEqual(
-            {option["value"] for option in generator["status_options"]},
-            {str(self.sku.product_variant.product.status_id)},
-        )
-        self.assertEqual(
-            {option["value"] for option in generator["category_options"]},
-            {str(self.sku.product_variant.product.category_id)},
-        )
-        self.assertEqual(
-            {option["value"] for option in generator["product_options"]},
-            {str(self.sku.product_variant.product_id)},
-        )
-        self.assertNotIn(
-            str(october_product.id),
-            {option["value"] for option in generator["product_options"]},
-        )
-
-        create_draft_po(
-            supplier=self.supplier,
-            need_month=date(2026, 9, 1),
-            required_arrival=date(2026, 9, 20),
-            actor=self.user,
-            requirement_quantities={september_requirement.id: september_requirement.approved_qty},
-        )
-        stale_response = self.client.get(
-            reverse("purchasing:generator"),
-            {
-                "month": "2026-09",
-                "status": str(self.sku.product_variant.product.status_id),
-                "category": str(self.sku.product_variant.product.category_id),
-                "product": str(self.sku.product_variant.product_id),
-            },
-        )
-        stale_generator = stale_response.context["generator"]
-        self.assertNotIn("2026-09", {option["value"] for option in stale_generator["month_options"]})
-        self.assertEqual(stale_generator["selected"]["months"], [])
-        self.assertNotIn(
-            str(self.sku.product_variant.product_id),
-            {option["value"] for option in stale_generator["product_options"]},
-        )
-        self.assertEqual(stale_generator["candidates"], [PPICRequirement.objects.get(incoming_plan=october_plan)])
+        self.client.post(reverse("purchasing:po_delete_draft", args=[po.id]))
+        restored = self.client.get(reverse("purchasing:generator"), {"month": "2026-09"})
+        self.assertEqual(restored.context["plans"], [september_production_plan])
 
     def test_tracking_page_is_available_without_test_sheet_data(self):
         self.client.force_login(self.user)
@@ -396,13 +972,14 @@ class PurchasingWorkflowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Belum ada PO aktual")
 
-    def test_ppic_navigation_is_split_into_four_business_pages(self):
+    def test_ppic_navigation_includes_pre_po_production_plan(self):
         self.client.force_login(self.user)
         session = self.client.session
         session["active_module"] = "operation"
         session.save()
         expected = {
             "purchasing:requirements": "PPIC Requirement",
+            "purchasing:production_plans": "Production Plan",
             "purchasing:generator": "Create dan Print Purchase Order",
             "purchasing:purchase_orders": "Daftar dan Tracking Purchase Order",
             "purchasing:vendors": "Daftar Vendor",
@@ -413,6 +990,7 @@ class PurchasingWorkflowTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertContains(response, heading)
                 self.assertContains(response, "Requirement")
+                self.assertContains(response, "Production Plan")
                 self.assertContains(response, "PO Generator")
                 self.assertContains(response, "Purchase Order")
                 self.assertContains(response, "Daftar Vendor")
@@ -559,6 +1137,7 @@ class PurchasingWorkflowTests(TestCase):
         self.assertEqual(fully_allocated_only.context["requirements"][0].sku_id, self.sku.id)
 
     def test_purchase_order_list_can_search_and_filter(self):
+        product = self.sku.product_variant.product
         po = create_draft_po(
             supplier=self.supplier,
             need_month=date(2026, 9, 1),
@@ -566,6 +1145,23 @@ class PurchasingWorkflowTests(TestCase):
             manual_lines=[(self.sku, 10)],
         )
         po = release_po(po.id, self.user)
+        second_product = Product.objects.create(
+            code="P-PO-2",
+            name="Other Product",
+            status=product.status,
+            category=product.category,
+        )
+        second_sku = SKU.objects.create(
+            sku="SKU-PO-2",
+            product_variant=ProductVariant.objects.create(product=second_product, name="Navy"),
+            current_master_cogs=Decimal("90000"),
+        )
+        create_draft_po(
+            supplier=self.supplier,
+            need_month=date(2026, 9, 1),
+            actor=self.user,
+            manual_lines=[(second_sku, 5)],
+        )
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("purchasing:purchase_orders"), {"q": po.po_number})
@@ -576,6 +1172,24 @@ class PurchasingWorkflowTests(TestCase):
 
         response = self.client.get(reverse("purchasing:purchase_orders"), {"q": "NOT-FOUND"})
         self.assertEqual(len(response.context["rows"]), 0)
+
+        response = self.client.get(
+            reverse("purchasing:purchase_orders"),
+            {"product": str(product.id)},
+        )
+        self.assertEqual(len(response.context["rows"]), 1)
+        self.assertEqual(response.context["rows"][0]["po"].id, po.id)
+        self.assertEqual(response.context["selected"]["products"], [str(product.id)])
+        self.assertEqual(
+            {item.id for item in response.context["product_options"]},
+            {product.id, second_product.id},
+        )
+
+        response = self.client.get(
+            reverse("purchasing:purchase_orders"),
+            {"product": [str(product.id), str(second_product.id)]},
+        )
+        self.assertEqual(len(response.context["rows"]), 2)
 
         response = self.client.get(
             reverse("purchasing:purchase_orders"),

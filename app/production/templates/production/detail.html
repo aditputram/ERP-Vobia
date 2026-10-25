@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}{{ production_order.po.po_number }} · Production Monitoring{% endblock %}
+{% block title %}{{ production_order.po.production_reference }} · Production Monitoring{% endblock %}
 {% block content %}
 <header class="page-header">
   <div>
     <p class="eyebrow">PRODUCTION · READ ONLY MONITORING</p>
-    <h1>{{ production_order.po.po_number }}</h1>
+    <h1>{{ production_order.po.production_reference }}</h1>
     <p>{{ production_order.po.supplier.name }} · {{ snapshot.ordered_qty|floatformat:"0g" }} pcs · Need Month {{ production_order.po.need_month|date:"F Y" }}</p>
   </div>
   <div class="header-actions">
@@ -17,7 +17,8 @@
 <section class="notice warning-notice"><strong>PO ini belum memiliki Production Plan Active.</strong> Isi dan aktifkan seluruh target di Production Plan agar PO masuk Monitoring.</section>
 {% endif %}
 
-<section class="metric-grid six">
+<section class="metric-grid seven">
+  <article class="metric-card" data-metric-card="production-method"><span>Production Method</span><strong>{{ snapshot.production_method }}</strong><small>{{ snapshot.production_method_display }}</small></article>
   <article class="metric-card"><span>Passed Process</span><strong class="metric-text">{{ snapshot.passed_process_label }}</strong><small>{% if snapshot.is_late %}Target terlewati{% else %}tahap terakhir selesai{% endif %}</small></article>
   <article class="metric-card"><span>Next Process</span><strong class="metric-text">{{ snapshot.next_process_label }}</strong><small>mengikuti progres Activity</small></article>
   <article class="metric-card"><span>PO Qty</span><strong>{{ snapshot.ordered_qty|floatformat:"0g" }}</strong><small>pcs</small></article>
@@ -28,48 +29,49 @@
 
 <section class="panel section-gap">
   <div class="panel-header"><div><p class="eyebrow">PRODUCTION PLAN</p><h2>Target dan alur kerja</h2></div><span class="status-badge {% if snapshot.plan_status == 'ACTIVE' %}ready{% endif %}">{{ snapshot.plan_status }}</span></div>
-  <ol class="production-roadmap production-roadmap-seven">
-    <li><span>01</span><div><strong>Pembelian Material</strong><small>{{ snapshot.plan.target_material_purchase_date|date:"d M Y"|default:"Belum direncanakan" }}</small></div></li>
-    <li><span>02</span><div><strong>Trial Production</strong><small>{{ snapshot.plan.target_trial_date|date:"d M Y"|default:"Belum direncanakan" }}</small></div></li>
-    <li><span>03</span><div><strong>Cut · Potong</strong><small>{{ snapshot.plan.target_cut_start_date|date:"d M"|default:"—" }} – {{ snapshot.plan.target_cut_end_date|date:"d M Y"|default:"—" }}</small></div></li>
-    <li><span>04</span><div><strong>Make · Jahit</strong><small>{{ snapshot.plan.target_make_start_date|date:"d M"|default:"—" }} – {{ snapshot.plan.target_make_end_date|date:"d M Y"|default:"—" }}</small></div></li>
-    <li><span>05</span><div><strong>Trim · Finishing</strong><small>{{ snapshot.plan.target_trim_start_date|date:"d M"|default:"—" }} – {{ snapshot.plan.target_trim_end_date|date:"d M Y"|default:"—" }}</small></div></li>
-    <li><span>06</span><div><strong>Quality Control</strong><small>{{ snapshot.plan.target_qc_start_date|date:"d M"|default:"—" }} – {{ snapshot.plan.target_qc_end_date|date:"d M Y"|default:"—" }}</small></div></li>
-    <li><span>07</span><div><strong>Target Inbound</strong><small>{{ snapshot.plan.target_inbound_date|date:"d M Y"|default:"Belum direncanakan" }}</small></div></li>
+  <ol class="production-roadmap" style="grid-template-columns: repeat({{ roadmap_entries|length }}, minmax(0, 1fr));">
+    {% for entry in roadmap_entries %}
+    <li data-process-code="{{ entry.code }}"><span>{{ entry.step_number }}</span><div><strong>{{ entry.label }}</strong><small>{% if entry.target_end %}{{ entry.target_start|date:"d M"|default:"—" }} – {{ entry.target_end|date:"d M Y"|default:"—" }}{% else %}{{ entry.target_start|date:"d M Y"|default:"Belum direncanakan" }}{% endif %}</small></div></li>
+    {% endfor %}
   </ol>
 </section>
 
 <section class="section-gap">
   <div class="panel-header"><div><p class="eyebrow">LIVE PROGRESS</p><h2>Status berdasarkan Activity yang sudah disubmit</h2></div><span class="pill">Tidak dapat diedit di halaman ini</span></div>
   <div class="production-monitor-card-grid">
-    <article class="panel production-read-card">
-      <p class="eyebrow">01 · MATERIAL</p><h2>{{ snapshot.material_status_display }}</h2>
+    {% if snapshot.process_controls.MATERIAL_PURCHASE %}
+    <article class="panel production-read-card" data-process-card="MATERIAL_PURCHASE">
+      <p class="eyebrow">{{ process_step_numbers.MATERIAL_PURCHASE }} · MATERIAL</p><h2>{{ snapshot.material_status_display }}</h2>
       <dl class="compact-definition-list"><div><dt>Aktual pembelian</dt><dd>{{ snapshot.stages.MATERIAL_PURCHASE.actual_start_date|date:"d M Y"|default:"—" }}</dd></div><div><dt>Material tiba</dt><dd>{{ snapshot.stages.MATERIAL_PURCHASE.material_arrival_date|date:"d M Y"|default:"—" }}</dd></div></dl>
     </article>
-    <article class="panel production-read-card">
-      <p class="eyebrow">02 · TRIAL</p><h2>{% if latest_trial %}R{{ latest_trial.revision }} · {{ latest_trial.get_status_display }}{% else %}Belum dimulai{% endif %}</h2>
+    {% endif %}
+    {% if snapshot.process_controls.TRIAL %}
+    <article class="panel production-read-card" data-process-card="TRIAL">
+      <p class="eyebrow">{{ process_step_numbers.TRIAL }} · TRIAL</p><h2>{% if latest_trial %}R{{ latest_trial.revision }} · {{ latest_trial.get_status_display }}{% else %}Belum dimulai{% endif %}</h2>
       <dl class="compact-definition-list"><div><dt>Tanggal trial</dt><dd>{{ latest_trial.trial_date|date:"d M Y"|default:"—" }}</dd></div><div><dt>Keputusan</dt><dd>{{ latest_trial.decided_at|date:"d M Y H:i"|default:"—" }}</dd></div></dl>
     </article>
+    {% endif %}
     {% for entry in stage_entries %}
-    <article class="panel production-read-card">
+    <article class="panel production-read-card" data-process-card="{{ entry.stage.stage }}">
       <p class="eyebrow">{{ entry.step_number }} · CMT</p>
-      <div class="panel-header"><h2>{{ entry.stage.get_stage_display }}</h2><span class="status-badge {{ entry.timing.status_class }}">{{ entry.timing.status }}</span></div>
+      <div class="panel-header"><h2>{{ entry.label }}</h2><span class="status-badge {{ entry.timing.status_class }}">{{ entry.timing.status }}</span></div>
       <div class="production-progress"><span style="width: {{ entry.stage.progress_percent }}%"></span></div>
       <div class="cmt-mini-grid"><div><span>Tersedia</span><strong>{{ entry.quantity.available_qty|floatformat:"0g" }}</strong></div><div><span>Selesai</span><strong>{{ entry.quantity.completed_qty|floatformat:"0g" }}</strong></div><div><span>Sisa</span><strong>{{ entry.quantity.remaining_qty|floatformat:"0g" }}</strong></div></div>
       <dl class="compact-definition-list"><div><dt>Target mulai</dt><dd>{{ entry.timing.target_start|date:"d M Y"|default:"—" }}</dd></div><div><dt>Target selesai</dt><dd>{{ entry.timing.target_end|date:"d M Y"|default:"—" }}</dd></div><div><dt>Aktual mulai</dt><dd>{{ entry.timing.actual_start|date:"d M Y"|default:"—" }}</dd></div><div><dt>Aktual selesai</dt><dd>{{ entry.timing.actual_end|date:"d M Y"|default:"—" }}</dd></div></dl>
       {% include "production/_process_detail.html" with detail=entry.detail detail_id=entry.detail_id %}
     </article>
     {% endfor %}
-    <article class="panel production-read-card">
-      <p class="eyebrow">06 · QUALITY CONTROL</p>
+    {% if snapshot.process_controls.QC %}
+    <article class="panel production-read-card" data-process-card="QC">
+      <p class="eyebrow">{{ process_step_numbers.QC }} · QUALITY CONTROL</p>
       <div class="panel-header"><h2>{% if snapshot.qc_open %}Terbuka untuk output Trim{% elif snapshot.inspected_qty > 0 %}Selesai untuk output tersedia{% else %}Menunggu output Trim{% endif %}</h2><span class="status-badge {{ snapshot.timing.QC.status_class }}">{{ snapshot.timing.QC.status }}</span></div>
       <div class="cmt-mini-grid"><div><span>Trim</span><strong>{{ snapshot.trim_completed_qty|floatformat:"0g" }}</strong></div><div><span>Inspected</span><strong>{{ snapshot.inspected_qty|floatformat:"0g" }}</strong></div><div><span>Sisa QC</span><strong>{{ snapshot.remaining_qc_qty|floatformat:"0g" }}</strong></div></div>
-      <dl class="compact-definition-list"><div><dt>Qty QC Passed</dt><dd>{{ snapshot.passed_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Qty Rework &amp; Re-QC</dt><dd>{{ snapshot.rework_re_qc_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Qty Rejected</dt><dd>{{ snapshot.rejected_qty|floatformat:"0g" }} pcs</dd></div></dl>
+      <dl class="compact-definition-list"><div><dt>Qty QC Passed</dt><dd>{{ snapshot.passed_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Qty Rework &amp; Re-QC</dt><dd>{{ snapshot.rework_re_qc_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Qty Rejected</dt><dd>{{ snapshot.rejected_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Rejected / Not Received</dt><dd>{{ cogs_finalization.total_vendor_rejected_qty|floatformat:"0g" }} pcs</dd></div></dl>
       <dl class="compact-definition-list"><div><dt>Target mulai</dt><dd>{{ snapshot.timing.QC.target_start|date:"d M Y"|default:"—" }}</dd></div><div><dt>Target selesai</dt><dd>{{ snapshot.timing.QC.target_end|date:"d M Y"|default:"—" }}</dd></div><div><dt>Aktual mulai</dt><dd>{{ snapshot.timing.QC.actual_start|date:"d M Y"|default:"—" }}</dd></div><div><dt>Aktual selesai</dt><dd>{{ snapshot.timing.QC.actual_end|date:"d M Y"|default:"—" }}</dd></div></dl>
       {% include "production/_process_detail.html" with detail=qc_detail detail_id="process-detail-qc" %}
     </article>
-    <article class="panel production-read-card" id="qc-follow-up">
-      <p class="eyebrow">06B · QC FOLLOW-UP</p>
+    <article class="panel production-read-card" id="qc-follow-up" data-process-card="QC_FOLLOW_UP">
+      <p class="eyebrow">{{ process_step_numbers.QC }}B · QC FOLLOW-UP</p>
       <div class="panel-header"><h2>Rework dan Re-QC</h2><span class="pill">{{ qc_follow_up_rows.count }} record</span></div>
       <p class="muted">Monitoring saja. Pencatatan tetap melalui Production Activity.</p>
       <div class="table-wrap"><table><thead><tr><th>SKU</th><th>Qty</th><th>Status</th><th></th></tr></thead><tbody>
@@ -77,22 +79,25 @@
         {% empty %}<tr><td colspan="4"><div class="empty-state compact-empty">Belum ada barang yang memerlukan tindak lanjut QC.</div></td></tr>{% endfor %}
       </tbody></table></div>
     </article>
-    <article class="panel production-read-card">
-      <p class="eyebrow">07 · WAREHOUSE HANDOFF</p>
+    {% endif %}
+    {% if snapshot.process_controls.INBOUND %}
+    <article class="panel production-read-card" data-process-card="INBOUND">
+      <p class="eyebrow">{{ process_step_numbers.INBOUND }} · WAREHOUSE HANDOFF</p>
       <div class="panel-header"><h2>{{ snapshot.ready_to_deliver_qty|floatformat:"0g" }} pcs Siap Dikirim</h2><span class="status-badge {{ snapshot.timing.INBOUND.status_class }}">{{ snapshot.timing.INBOUND.status }}</span></div>
-      <dl class="compact-definition-list"><div><dt>QC Passed</dt><dd>{{ snapshot.passed_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Delivering</dt><dd>{{ snapshot.delivering_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Inbound</dt><dd>{{ snapshot.received_qty|floatformat:"0g" }} pcs</dd></div></dl>
+      <dl class="compact-definition-list"><div><dt>QC Passed</dt><dd>{{ snapshot.passed_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Delivering</dt><dd>{{ snapshot.delivering_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Sellable Inbound</dt><dd>{{ snapshot.received_qty|floatformat:"0g" }} pcs</dd></div><div><dt>Inbound Exception</dt><dd>{{ snapshot.inbound_discrepancy_qty|floatformat:"0g" }} pcs</dd></div></dl>
       <dl class="compact-definition-list"><div><dt>Target inbound</dt><dd>{{ snapshot.timing.INBOUND.target_start|date:"d M Y"|default:"—" }}</dd></div><div><dt>Aktual inbound</dt><dd>{{ snapshot.timing.INBOUND.actual_start|date:"d M Y"|default:"—" }}</dd></div></dl>
       {% include "production/_process_detail.html" with detail=inbound_detail detail_id="process-detail-inbound" %}
     </article>
+    {% endif %}
   </div>
 </section>
 
 <section class="panel section-gap" id="cogs-finalization">
-  <div class="panel-header"><div><p class="eyebrow">08 · COSTING GATE</p><h2>Finalisasi Quantity &amp; COGS</h2></div><span class="status-badge {{ cogs_finalization.status_class }}">{{ cogs_finalization.status }}</span></div>
-  <p class="muted">Selisih cutting dan reject dibebankan ke Parent SKU, lalu total biaya Parent SKU dibagi rata ke seluruh unit sellable di dalamnya. COGS snapshot PO tetap tersimpan sebagai nilai awal.</p>
-  <div class="cmt-mini-grid section-gap"><div><span>PO Qty</span><strong>{{ cogs_finalization.total_ordered_qty|floatformat:"0g" }}</strong></div><div><span>Final Sellable</span><strong>{{ cogs_finalization.total_sellable_qty|floatformat:"0g" }}</strong></div><div><span>Rejected</span><strong>{{ cogs_finalization.total_rejected_qty|floatformat:"0g" }}</strong></div><div><span>Cutting Shortage</span><strong>{{ cogs_finalization.total_shortage_qty|floatformat:"0g" }}</strong></div><div><span>Cutting Excess</span><strong>{{ cogs_finalization.total_excess_qty|floatformat:"0g" }}</strong></div></div>
-  <div class="table-wrap section-gap"><table><thead><tr><th>Parent SKU</th><th>SKU</th><th>Product</th><th>Size</th><th>PO Qty</th><th>Final Sellable</th><th>Rejected</th><th>Shortage</th><th>Excess</th><th>COGS Awal</th><th>COGS Final</th><th>Selisih</th></tr></thead><tbody>
-    {% for row in cogs_finalization.rows %}<tr><td><span class="sku-tag">{{ row.parent_sku }}</span></td><td><span class="sku-tag">{{ row.sku }}</span></td><td>{{ row.product_name }}</td><td>{{ row.size }}</td><td>{{ row.ordered_qty|floatformat:"0g" }}</td><td><strong>{{ row.sellable_qty|floatformat:"0g" }}</strong></td><td>{{ row.rejected_qty|floatformat:"0g" }}</td><td>{{ row.shortage_qty|floatformat:"0g" }}</td><td>{{ row.excess_qty|floatformat:"0g" }}</td><td>Rp {{ row.initial_unit_cogs|floatformat:"0g" }}</td><td><strong>Rp {{ row.final_unit_cogs|floatformat:"0g" }}</strong></td><td>{% if row.unit_cogs_increase > 0 %}+{% endif %}Rp {{ row.unit_cogs_increase|floatformat:"0g" }}</td></tr>{% endfor %}
+  <div class="panel-header"><div><p class="eyebrow">{{ costing_step_number }} · COSTING GATE</p><h2>Finalisasi Quantity &amp; COGS</h2></div><span class="status-badge {{ cogs_finalization.status_class }}">{{ cogs_finalization.status }}</span></div>
+  <p class="muted">Inbound Exception ditanggung VOBIA dan otomatis dicatat sebagai Beban Penyesuaian Persediaan, sehingga nilainya tidak menaikkan COGS unit sellable. Khusus FPP, Rejected / Not Received dari QC tidak masuk Warehouse dan nilainya mengurangi total biaya PO.</p>
+  <div class="cmt-mini-grid section-gap"><div><span>PO Qty</span><strong>{{ cogs_finalization.total_ordered_qty|floatformat:"0g" }}</strong></div><div><span>Final Sellable</span><strong>{{ cogs_finalization.total_sellable_qty|floatformat:"0g" }}</strong></div><div><span>Inbound Exception</span><strong>{{ cogs_finalization.total_inbound_discrepancy_qty|floatformat:"0g" }}</strong></div><div><span>Loss Expense</span><strong>Rp {{ cogs_finalization.total_inbound_loss_amount|floatformat:"0g" }}</strong></div><div><span>Inventory Cost</span><strong>Rp {{ cogs_finalization.total_inventory_cost|floatformat:"0g" }}</strong></div><div><span>Rejected</span><strong>{{ cogs_finalization.total_rejected_qty|floatformat:"0g" }}</strong></div><div><span>Rejected / Not Received</span><strong>{{ cogs_finalization.total_vendor_rejected_qty|floatformat:"0g" }}</strong></div><div><span>Shortage</span><strong>{{ cogs_finalization.total_shortage_qty|floatformat:"0g" }}</strong></div><div><span>Excess</span><strong>{{ cogs_finalization.total_excess_qty|floatformat:"0g" }}</strong></div></div>
+  <div class="table-wrap section-gap"><table><thead><tr><th>Parent SKU</th><th>SKU</th><th>Product</th><th>Size</th><th>PO Qty</th><th>Final Sellable</th><th>Inbound Exception</th><th>Loss Expense</th><th>Rejected</th><th>Rejected / Not Received</th><th>Shortage</th><th>Excess</th><th>COGS Awal</th><th>COGS Final</th><th>Selisih</th></tr></thead><tbody>
+    {% for row in cogs_finalization.rows %}<tr><td><span class="sku-tag">{{ row.parent_sku }}</span></td><td><span class="sku-tag">{{ row.sku }}</span></td><td>{{ row.product_name }}</td><td>{{ row.size }}</td><td>{{ row.ordered_qty|floatformat:"0g" }}</td><td><strong>{{ row.sellable_qty|floatformat:"0g" }}</strong></td><td>{{ row.inbound_discrepancy_qty|floatformat:"0g" }}</td><td>Rp {{ row.inbound_loss_amount|floatformat:"0g" }}</td><td>{{ row.rejected_qty|floatformat:"0g" }}</td><td>{{ row.vendor_rejected_qty|floatformat:"0g" }}</td><td>{{ row.shortage_qty|floatformat:"0g" }}</td><td>{{ row.excess_qty|floatformat:"0g" }}</td><td>Rp {{ row.initial_unit_cogs|floatformat:"0g" }}</td><td><strong>Rp {{ row.final_unit_cogs|floatformat:"0g" }}</strong></td><td>{% if row.unit_cogs_increase > 0 %}+{% endif %}Rp {{ row.unit_cogs_increase|floatformat:"0g" }}</td></tr>{% endfor %}
   </tbody></table></div>
   <div class="panel-header section-gap"><div><span class="muted">Total biaya PO</span><h2>Rp {{ cogs_finalization.total_po_cost|floatformat:"0g" }}</h2></div><div class="header-actions">
     {% if cogs_finalization.approved %}<span class="pill">Approved by {{ cogs_finalization.approved.approved_by.username }} · {{ cogs_finalization.approved.approved_at|date:"d M Y H:i" }}</span>

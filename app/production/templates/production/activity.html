@@ -2,13 +2,13 @@
 {% block title %}Production Activity · Vobia ERP{% endblock %}
 {% block content %}
 <header class="page-header">
-  <div><p class="eyebrow">PRODUCTION · FIELD ENTRY</p><h1>Production Activity</h1><p>Semua realisasi Material, Trial, Cut, Make, Trim, dan QC dicatat di sini. Submit bersifat append-only.</p></div>
+  <div><p class="eyebrow">PRODUCTION · FIELD ENTRY</p><h1>Production Activity</h1><p>Semua realisasi Material, Trial, Cut, Additional Process, Make, Trim, dan QC dicatat di sini. Submit bersifat append-only.</p></div>
   {% if tab_permissions.operation.production_monitoring %}<div class="header-actions"><a class="secondary-button" href="{% url 'production:monitoring' %}">Buka Monitoring</a></div>{% endif %}
 </header>
 
 <section class="panel">
   <form method="get" class="inventory-filter-grid production-plan-selector" data-preserve-scroll>
-    <label>Purchase Order<select name="production_order" data-auto-submit><option value="">Pilih PO dengan Plan Active...</option>{% for row in active_orders %}<option value="{{ row.id }}" {% if selected.id == row.id %}selected{% endif %}>{{ row.po.po_number }} · {{ row.po.supplier.name }}</option>{% endfor %}</select></label>
+    <label>Production Order<select name="production_order" data-auto-submit><option value="">Pilih PPO / PO dengan Plan Active...</option>{% for row in active_orders %}<option value="{{ row.id }}" {% if selected.id == row.id %}selected{% endif %}>{{ row.po.production_reference }} · {{ row.po.supplier.name }}</option>{% endfor %}</select></label>
     <div class="header-actions">
       <button class="primary-button" type="submit">Buka Activity</button>
       {% if selected %}<a class="secondary-button" href="{% url 'production:activity' %}">Cancel</a>{% endif %}
@@ -18,10 +18,10 @@
 
 {% if selected %}
 <section class="metric-grid six section-gap">
-  <article class="metric-card"><span>Passed Process</span><strong class="metric-text">{{ snapshot.passed_process_label }}</strong><small>{{ selected.po.po_number }}</small></article>
+  <article class="metric-card"><span>Passed Process</span><strong class="metric-text">{{ snapshot.passed_process_label }}</strong><small>{{ selected.po.production_reference }}</small></article>
   <article class="metric-card"><span>Next Process</span><strong class="metric-text">{{ snapshot.next_process_label }}</strong><small>mengikuti progres Activity</small></article>
   <article class="metric-card"><span>PO Qty</span><strong>{{ snapshot.ordered_qty|floatformat:"0g" }}</strong><small>pcs</small></article>
-  <article class="metric-card"><span>Cut / Make / Trim</span><strong class="metric-text">{{ snapshot.stages.CUT.completed_qty|floatformat:"0g" }} / {{ snapshot.stages.MAKE.completed_qty|floatformat:"0g" }} / {{ snapshot.stages.TRIM.completed_qty|floatformat:"0g" }}</strong><small>qty kumulatif</small></article>
+  <article class="metric-card"><span>Cut{% if snapshot.process_controls.ADDITIONAL_PROCESS %} / {{ snapshot.additional_process_name }}{% endif %} / Make / Trim</span><strong class="metric-text">{{ snapshot.stages.CUT.completed_qty|floatformat:"0g" }}{% if snapshot.process_controls.ADDITIONAL_PROCESS %} / {{ snapshot.stages.ADDITIONAL_PROCESS.completed_qty|floatformat:"0g" }}{% endif %} / {{ snapshot.stages.MAKE.completed_qty|floatformat:"0g" }} / {{ snapshot.stages.TRIM.completed_qty|floatformat:"0g" }}</strong><small>qty kumulatif</small></article>
   <article class="metric-card"><span>QC tersedia</span><strong>{{ snapshot.remaining_qc_qty|floatformat:"0g" }}</strong><small>output Trim belum diperiksa</small></article>
   <article class="metric-card"><span>Ready to Deliver</span><strong>{{ snapshot.ready_to_deliver_qty|floatformat:"0g" }}</strong><small>pcs QC Passed belum dikirim</small></article>
 </section>
@@ -30,10 +30,10 @@
   <article class="panel">
     <div class="panel-header"><div><p class="eyebrow">AVAILABLE NEXT ACTIVITY</p><h2>Tahap yang boleh disubmit</h2></div></div>
     <div class="activity-choice-list">{% for value, label in eligible_choices %}<span class="activity-choice">{{ label }}</span>{% empty %}<div class="empty-state compact-empty">Tidak ada Activity lanjutan yang tersedia. Tahap mungkin sudah selesai atau sedang menunggu output sebelumnya.</div>{% endfor %}</div>
-    <p class="muted">QC terbuka segera setelah ada output Trim. Cut, Make, Trim, dan QC dapat berjalan parsial sesuai output tahap sebelumnya.</p>
+    <p class="muted">QC terbuka segera setelah ada output Trim. Setiap proses dapat berjalan parsial sesuai output tahap sebelumnya.</p>
   </article>
   <article class="panel span-two">
-    <div class="panel-header"><div><p class="eyebrow">ENTRY FORM</p><h2>Catat aktivitas {{ selected.po.po_number }}</h2></div><div class="header-actions"><span class="pill" data-delivery-order-preview data-preview-url="{% url 'production:delivery_order_preview' %}" hidden>No. DO · <strong data-delivery-order-number>{{ next_delivery_order_number }}</strong></span><span class="pill">Sekali submit</span></div></div>
+    <div class="panel-header"><div><p class="eyebrow">ENTRY FORM</p><h2>Catat aktivitas {{ selected.po.production_reference }}</h2></div><div class="header-actions"><span class="pill" data-delivery-order-preview data-preview-url="{% url 'production:delivery_order_preview' %}" hidden>No. DO · <strong data-delivery-order-number>{{ next_delivery_order_number }}</strong></span><span class="pill">Sekali submit</span></div></div>
     <form method="post" class="stack-form" data-production-activity-form data-single-submit>{% csrf_token %}
       {{ activity_form.non_field_errors }}
       <div class="production-activity-form-grid">
@@ -51,7 +51,7 @@
                   <td><strong>{{ row.line.sku.product_variant.product.name }}</strong></td>
                   <td><strong>{{ row.line.sku.size|default:"—" }}</strong></td>
                   <td>{{ row.field }}{{ row.field.errors }}</td>
-                  <td><strong class="production-line-static-qty" data-cmt-available data-cut="Tanpa batas" data-make="{{ row.available_make_qty|floatformat:'0g' }}" data-trim="{{ row.available_trim_qty|floatformat:'0g' }}" data-warehouse_delivery="{{ row.available_delivery_qty|floatformat:'0g' }}" data-rejected_warehouse_delivery="{{ row.available_rejected_delivery_qty|floatformat:'0g' }}">Tanpa batas</strong></td>
+                  <td><strong class="production-line-static-qty" data-cmt-available data-cut="Tanpa batas" data-additional_process="{{ row.available_additional_process_qty|floatformat:'0g' }}" data-make="{{ row.available_make_qty|floatformat:'0g' }}" data-trim="{{ row.available_trim_qty|floatformat:'0g' }}" data-warehouse_delivery="{{ row.available_delivery_qty|floatformat:'0g' }}" data-rejected_warehouse_delivery="{{ row.available_rejected_delivery_qty|floatformat:'0g' }}">Tanpa batas</strong></td>
                   <td><strong class="production-line-static-qty">{{ row.line.ordered_qty|floatformat:"0g" }}</strong></td>
                 </tr>
                 {% empty %}<tr><td colspan="6"><div class="empty-state compact-empty">PO ini belum memiliki baris SKU.</div></td></tr>{% endfor %}
@@ -117,9 +117,9 @@
 {% endif %}
 
 <section class="panel section-gap">
-  <div class="panel-header"><div><p class="eyebrow">ACTIVITY LEDGER</p><h2>{% if selected %}Riwayat {{ selected.po.po_number }}{% else %}Aktivitas Production terbaru{% endif %}</h2></div><span class="pill">Append-only</span></div>
+  <div class="panel-header"><div><p class="eyebrow">ACTIVITY LEDGER</p><h2>{% if selected %}Riwayat {{ selected.po.production_reference }}{% else %}Aktivitas Production terbaru{% endif %}</h2></div><span class="pill">Append-only</span></div>
   <div class="table-wrap production-audit-wrap"><table><thead><tr><th>Submitted</th><th>Tanggal Activity</th><th>No. PO</th><th>Jenis</th><th>Activity</th><th>No. DO</th><th>Qty</th><th>SKU</th><th>Catatan</th><th>User</th><th></th></tr></thead><tbody>
-    {% for row in history %}<tr><td>{{ row.occurred_at|date:"d M Y H:i" }}</td><td>{{ row.activity_date|date:"d M Y"|default:"—" }}</td><td>{{ row.production_order.po.po_number }}</td><td><span class="status-badge {% if row.entry_kind == 'CORRECTION' %}blocked{% else %}ready{% endif %}">{{ row.get_entry_kind_display }}</span></td><td>{{ row.get_activity_type_display }}</td><td>{{ row.delivery_order.number|default:"—" }}</td><td>{{ row.quantity|floatformat:"0g"|default:"—" }}</td><td>{{ row.po_line.sku.sku|default:"—" }}</td><td>{{ row.notes|default:row.description }}</td><td>{{ row.actor.username|default:"System" }}</td><td>{% if row.entry_kind == 'ACTIVITY' and row.activity_type != 'TRIAL_APPROVE' and row.activity_type != 'TRIAL_REVISION' %}<a class="row-link" href="{% url 'production:activity_correction' row.id %}">Koreksi →</a>{% endif %}</td></tr>
+    {% for row in history %}<tr><td>{{ row.occurred_at|date:"d M Y H:i" }}</td><td>{{ row.activity_date|date:"d M Y"|default:"—" }}</td><td>{{ row.production_order.po.production_reference }}</td><td><span class="status-badge {% if row.entry_kind == 'CORRECTION' %}blocked{% else %}ready{% endif %}">{{ row.get_entry_kind_display }}</span></td><td>{{ row.get_activity_type_display }}</td><td>{{ row.delivery_order.number|default:"—" }}</td><td>{{ row.quantity|floatformat:"0g"|default:"—" }}</td><td>{{ row.po_line.sku.sku|default:"—" }}</td><td>{{ row.notes|default:row.description }}</td><td>{{ row.actor.username|default:"System" }}</td><td>{% if row.entry_kind == 'ACTIVITY' and row.activity_type != 'TRIAL_APPROVE' and row.activity_type != 'TRIAL_REVISION' %}<a class="row-link" href="{% url 'production:activity_correction' row.id %}">Koreksi →</a>{% endif %}</td></tr>
     {% empty %}<tr><td colspan="11"><div class="empty-state">Belum ada Production Activity.</div></td></tr>{% endfor %}
   </tbody></table></div>
 </section>
@@ -159,9 +159,9 @@
   });
   const refresh = () => {
     const type = select.value;
-    const cmt = ['CUT', 'MAKE', 'TRIM', 'WAREHOUSE_DELIVERY', 'REJECTED_WAREHOUSE_DELIVERY'].includes(type);
+    const cmt = ['CUT', 'ADDITIONAL_PROCESS', 'MAKE', 'TRIM', 'WAREHOUSE_DELIVERY', 'REJECTED_WAREHOUSE_DELIVERY'].includes(type);
     cmtLines.forEach(el => el.hidden = !cmt);
-    if (cmtLabel) cmtLabel.textContent = {CUT: 'Qty Cut', MAKE: 'Qty Make', TRIM: 'Qty Trim', WAREHOUSE_DELIVERY: 'Qty Dikirim', REJECTED_WAREHOUSE_DELIVERY: 'Qty Rejected Dikirim'}[type] || 'Qty Activity';
+    if (cmtLabel) cmtLabel.textContent = {CUT: 'Qty Cut', ADDITIONAL_PROCESS: 'Qty {{ snapshot.additional_process_name|escapejs }}', MAKE: 'Qty Make', TRIM: 'Qty Trim', WAREHOUSE_DELIVERY: 'Qty Dikirim', REJECTED_WAREHOUSE_DELIVERY: 'Qty Rejected Dikirim'}[type] || 'Qty Activity';
     if (cmtAvailableLabel) cmtAvailableLabel.textContent = type === 'CUT' ? 'Sisa Parent SKU' : type === 'REJECTED_WAREHOUSE_DELIVERY' ? 'Rejected Belum Dikirim' : 'Available Qty';
     cmtAvailable.forEach(el => {
       el.textContent = el.dataset[type.toLowerCase()] || '0';

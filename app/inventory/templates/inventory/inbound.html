@@ -4,7 +4,7 @@
 <section class="panel section-gap" id="production-deliveries">
   <div class="panel-header"><div><p class="eyebrow">DELIVERING FROM PRODUCTION</p><h2>Pengiriman menunggu penerimaan</h2></div><div class="header-actions"><span class="pill">{{ delivery_orders|length }} Delivery Order</span>{% if delivery_orders %}<a class="secondary-button compact" href="{% url 'inventory:inbound_pending_report_pdf' %}">Print PDF</a>{% endif %}</div></div>
   <p class="muted">Klik Receive hanya setelah barang fisik diterima. QC Passed menambah stock/FIFO; Rejected Goods hanya tercatat sebagai barang reject di gudang.</p>
-  <div class="table-wrap section-gap"><table class="delivery-order-queue-table"><thead><tr><th>No. DO</th><th>Jenis</th><th>Tanggal Kirim</th><th>PO</th><th>Qty Delivering</th><th>Qty Received</th><th></th></tr></thead><tbody>
+  <div class="table-wrap section-gap"><table class="delivery-order-queue-table"><thead><tr><th>No. DO</th><th>Jenis</th><th>Tanggal Kirim</th><th>PO</th><th>Qty Delivering</th><th>Sellable Received</th><th>Exception</th><th></th></tr></thead><tbody>
     {% for shipment in delivery_orders %}
     <tr id="delivery-order-{{ shipment.delivery_order.id }}">
       <td><strong>{{ shipment.delivery_order.number }}</strong></td>
@@ -13,15 +13,16 @@
       <td>{{ shipment.production_order.po.po_number }}</td>
       <td><strong>{{ shipment.remaining|floatformat:"0g" }} pcs</strong></td>
       <td>{{ shipment.received|floatformat:"0g" }} pcs</td>
+      <td>{{ shipment.discrepancy|floatformat:"0g" }} pcs</td>
       <td><button class="row-link delivery-order-toggle" type="button" data-delivery-order-toggle aria-controls="delivery-order-detail-{{ shipment.delivery_order.id }}" aria-expanded="{% if shipment.open %}true{% else %}false{% endif %}">{% if shipment.open %}Tutup Detail{% else %}View Detail{% endif %}</button></td>
     </tr>
-    <tr class="delivery-order-detail-row" id="delivery-order-detail-{{ shipment.delivery_order.id }}"{% if not shipment.open %} hidden{% endif %}><td colspan="7">
+    <tr class="delivery-order-detail-row" id="delivery-order-detail-{{ shipment.delivery_order.id }}"{% if not shipment.open %} hidden{% endif %}><td colspan="8">
       <div class="delivery-order-detail">
         <div class="panel-header compact"><div><p class="eyebrow">PRODUCTS IN DELIVERY ORDER</p><h3>{{ shipment.production_order.po.supplier.name }} · {{ shipment.actor.username }}</h3></div><span class="pill">{{ shipment.rows|length }} SKU</span></div>
-        <div class="table-wrap"><table class="delivery-order-product-table"><thead><tr><th>SKU</th><th>Jenis</th><th>Product</th><th>Size</th><th>Qty Delivering</th><th>Tanggal Diterima</th><th>Gudang</th><th>No. DO</th><th>Qty Received</th><th>Action</th></tr></thead><tbody>
+        <div class="table-wrap"><table class="delivery-order-product-table"><thead><tr><th>SKU</th><th>Jenis</th><th>Product</th><th>Size</th><th>Qty Delivering</th><th>Tanggal Diterima</th><th>Gudang</th><th>No. DO</th><th>Qty Received (Sellable)</th><th>Action</th></tr></thead><tbody>
           {% for row in shipment.rows %}
           <tr>
-            <td>{% if row.receive_form %}<form id="{{ row.receive_form_id }}" method="post" data-single-submit data-preserve-scroll>{% csrf_token %}<input type="hidden" name="form_name" value="delivery_receive">{{ row.receive_form.delivery_activity }}</form>{% endif %}<span class="sku-tag">{{ row.delivery.po_line.sku.sku }}</span></td>
+            <td>{% if row.receive_form %}<form id="{{ row.receive_form_id }}" method="post" data-single-submit data-preserve-scroll data-expected-qty="{{ row.remaining|floatformat:'0' }}">{% csrf_token %}<input type="hidden" name="form_name" value="delivery_receive">{{ row.receive_form.delivery_activity }}</form>{% endif %}<span class="sku-tag">{{ row.delivery.po_line.sku.sku }}</span></td>
             <td>{{ row.kind_label }}</td>
             <td>{{ row.delivery.po_line.sku.product_variant.product.name }}</td>
             <td>{{ row.delivery.po_line.sku.size|default:"—" }}</td>
@@ -32,26 +33,36 @@
             <td><span class="code-label">{{ shipment.delivery_order.number }}</span></td>
             <td>{{ row.receive_form.received_qty }}</td>
             <td><button class="primary-button compact" type="submit" form="{{ row.receive_form_id }}" data-receive-button disabled>Receive</button></td>
-            {% else %}<td>{{ row.received_date|date:"d M Y"|default:"—" }}</td><td>{{ row.received_warehouse.name|default:"—" }}</td><td><span class="code-label">{{ shipment.delivery_order.number }}</span></td><td>{{ row.received|floatformat:"0g" }} pcs</td><td><button class="secondary-button compact" type="button" disabled>Received</button></td>{% endif %}
+            {% else %}<td>{{ row.received_date|date:"d M Y"|default:"—" }}</td><td>{{ row.received_warehouse.name|default:"—" }}</td><td><span class="code-label">{{ shipment.delivery_order.number }}</span></td><td>{{ row.received|floatformat:"0g" }} pcs{% if row.discrepancy_qty %}<small class="muted">{{ row.discrepancy_summary }}</small>{% endif %}</td><td><button class="secondary-button compact" type="button" disabled>Reconciled</button></td>{% endif %}
           </tr>
+          {% if row.receive_form %}<tr class="delivery-inbound-reconciliation-row"><td colspan="10"><div class="inbound-reconciliation-grid">
+            {% if not row.is_rejected %}
+            <label><span>Shortage</span>{{ row.receive_form.shortage_qty }}</label>
+            <label><span>Lost</span>{{ row.receive_form.lost_qty }}</label>
+            <label><span>Damaged</span>{{ row.receive_form.damaged_qty }}</label>
+            <label><span>Not Sellable</span>{{ row.receive_form.not_sellable_qty }}</label>
+            {% endif %}
+            <label class="inbound-reconciliation-notes"><span>Catatan{% if not row.is_rejected %} exception{% endif %}</span>{{ row.receive_form.notes }}</label>
+          </div>{% if not row.is_rejected %}<p class="muted compact-copy">Total Sellable Received + seluruh Exception harus tepat {{ row.remaining|floatformat:"0g" }} pcs. Hanya Sellable Received yang menambah stok dan FIFO.</p>{% endif %}</td></tr>{% endif %}
           {% if row.receive_form.errors %}<tr class="delivery-receive-error-row"><td colspan="10">{% if row.receive_form.non_field_errors %}<div class="form-alert">{{ row.receive_form.non_field_errors }}</div>{% endif %}{% for field in row.receive_form.visible_fields %}{% if field.errors %}<div class="field-error">{{ field.label }}: {{ field.errors|join:", " }}</div>{% endif %}{% endfor %}</td></tr>{% endif %}
           {% endfor %}
         </tbody></table></div>
       </div>
     </td></tr>
-    {% empty %}<tr><td colspan="7"><div class="empty-state">Belum ada pengiriman dari Production yang menunggu diterima.</div></td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="8"><div class="empty-state">Belum ada pengiriman dari Production yang menunggu diterima.</div></td></tr>{% endfor %}
   </tbody></table></div>
 </section>
 <section class="panel section-gap" id="completed-production-deliveries">
   <div class="panel-header"><div><p class="eyebrow">RECEIVED FROM PRODUCTION</p><h2>Pengiriman sudah diterima</h2></div><div class="header-actions"><span class="pill">{{ completed_delivery_rows|length }} SKU Received</span>{% if completed_delivery_rows %}<a class="secondary-button compact" href="{% url 'inventory:inbound_completed_report_pdf' %}{% if query %}?q={{ query|urlencode }}{% endif %}">Print PDF</a>{% endif %}</div></div>
-  <p class="muted">Setiap baris menampilkan satu SKU yang sudah diterima gudang. Rejected Goods tidak menambah stock/FIFO.</p>
+  <p class="muted">Setiap baris menampilkan satu SKU yang sudah direkonsiliasi gudang. Hanya Sellable Received yang menambah stock/FIFO.</p>
   <form method="get" class="filter-bar section-gap"><label class="filter-field grow"><span>PO / Article / SKU</span><input type="search" name="q" value="{{ query }}" placeholder="Contoh: PO 87 atau Kelabu"></label><button class="primary-button" type="submit">Cari</button>{% if query %}<a class="secondary-button" href="{% url 'inventory:inbound' %}#completed-production-deliveries">Reset</a>{% endif %}</form>
-  <div class="table-wrap section-gap"><table class="delivery-order-queue-table"><thead><tr><th>No. DO</th><th>Jenis</th><th>Tanggal Kirim</th><th>Tanggal Diterima</th><th>PO</th><th>SKU</th><th>Product</th><th>Qty Dikirim</th><th>Qty Received</th><th>Status</th></tr></thead><tbody>
-    {% for row in completed_delivery_rows %}<tr id="delivery-{{ row.delivery.id }}"><td><strong>{{ row.delivery.delivery_order.number }}</strong></td><td>{{ row.kind_label }}</td><td>{{ row.delivery.activity_date|date:"d M Y" }}</td><td>{{ row.received_date|date:"d M Y" }}</td><td>{{ row.delivery.production_order.po.po_number }}</td><td><span class="sku-tag">{{ row.delivery.po_line.sku.sku }}</span></td><td>{{ row.delivery.po_line.sku.product_variant.product.name }}</td><td>{{ row.shipped|floatformat:"0g" }} pcs</td><td><strong>{{ row.received|floatformat:"0g" }} pcs</strong></td><td><span class="pill">Received</span></td></tr>
-    {% empty %}<tr><td colspan="10"><div class="empty-state">Belum ada SKU yang selesai diterima.</div></td></tr>{% endfor %}
+  <div class="table-wrap section-gap"><table class="delivery-order-queue-table"><thead><tr><th>No. DO</th><th>Jenis</th><th>Tanggal Kirim</th><th>Tanggal Diterima</th><th>PO</th><th>SKU</th><th>Product</th><th>Qty Dikirim</th><th>Sellable Received</th><th>Exception</th><th>Status</th></tr></thead><tbody>
+    {% for row in completed_delivery_rows %}<tr id="delivery-{{ row.delivery.id }}"><td><strong>{{ row.delivery.delivery_order.number }}</strong></td><td>{{ row.kind_label }}</td><td>{{ row.delivery.activity_date|date:"d M Y" }}</td><td>{{ row.received_date|date:"d M Y" }}</td><td>{{ row.delivery.production_order.po.po_number }}</td><td><span class="sku-tag">{{ row.delivery.po_line.sku.sku }}</span></td><td>{{ row.delivery.po_line.sku.product_variant.product.name }}</td><td>{{ row.shipped|floatformat:"0g" }} pcs</td><td><strong>{{ row.received|floatformat:"0g" }} pcs</strong></td><td>{{ row.discrepancy_qty|floatformat:"0g" }} pcs{% if row.discrepancy_summary %}<small class="muted">{{ row.discrepancy_summary }}</small>{% endif %}</td><td><span class="pill">{% if row.discrepancy_qty %}Reconciled{% else %}Received{% endif %}</span></td></tr>
+    {% empty %}<tr><td colspan="11"><div class="empty-state">Belum ada SKU yang selesai direkonsiliasi.</div></td></tr>{% endfor %}
   </tbody></table></div>
 </section>
-<section class="dashboard-grid section-gap"><article class="panel"><div class="panel-header"><div><p class="eyebrow">LEGACY PO WIP RECEIPT</p><h2>Catat inbound migrasi lama</h2></div></div><form method="post" class="stack-form">{% csrf_token %}{{ form.as_p }}<button class="primary-button" type="submit">Post Inbound + FIFO</button></form></article><article class="panel span-two"><div class="panel-header"><div><p class="eyebrow">OUTSTANDING PO</p><h2>Siap / menunggu QC</h2></div></div><div class="table-wrap"><table><thead><tr><th>PO</th><th>Source</th><th>SKU</th><th>Ordered</th><th>QC Passed</th><th>Received</th><th>Eligible now</th><th>Outstanding</th></tr></thead><tbody>{% for row in outstanding %}<tr><td><a class="row-link" href="{% url 'purchasing:po_detail' row.line.po.id %}">{{ row.line.po.po_number }}</a></td><td>{{ row.line.po.get_source_display }}</td><td>{{ row.line.sku.sku }}</td><td>{{ row.line.ordered_qty|floatformat:"0g" }}</td><td>{{ row.qc_passed|floatformat:"0g" }}</td><td>{{ row.received|floatformat:"0g" }}</td><td>{{ row.eligible|floatformat:"0g" }}</td><td><strong>{{ row.outstanding|floatformat:"0g" }}</strong></td></tr>{% empty %}<tr><td colspan="8"><div class="empty-state">Belum ada PO Released / PO WIP outstanding.</div></td></tr>{% endfor %}</tbody></table></div></article></section>
+<section class="dashboard-grid section-gap"><article class="panel"><div class="panel-header"><div><p class="eyebrow">LEGACY PO WIP RECEIPT</p><h2>Catat inbound migrasi lama</h2></div></div><form method="post" class="stack-form">{% csrf_token %}{{ form.as_p }}<button class="primary-button" type="submit">Post Inbound + FIFO</button></form></article><article class="panel span-two"><div class="panel-header"><div><p class="eyebrow">OUTSTANDING PO</p><h2>Siap / menunggu QC</h2></div></div><div class="table-wrap"><table><thead><tr><th>PO</th><th>Source</th><th>SKU</th><th>Ordered</th><th>QC Passed</th><th>Sellable Received</th><th>Exception</th><th>Eligible now</th><th>Outstanding</th></tr></thead><tbody>{% for row in outstanding %}<tr><td><a class="row-link" href="{% url 'purchasing:po_detail' row.line.po.id %}">{{ row.line.po.po_number }}</a></td><td>{{ row.line.po.get_source_display }}</td><td>{{ row.line.sku.sku }}</td><td>{{ row.line.ordered_qty|floatformat:"0g" }}</td><td>{{ row.qc_passed|floatformat:"0g" }}</td><td>{{ row.received|floatformat:"0g" }}</td><td>{{ row.discrepancy|floatformat:"0g" }}</td><td>{{ row.eligible|floatformat:"0g" }}</td><td><strong>{{ row.outstanding|floatformat:"0g" }}</strong></td></tr>{% empty %}<tr><td colspan="9"><div class="empty-state">Belum ada PO Released / PO WIP outstanding.</div></td></tr>{% endfor %}</tbody></table></div></article></section>
+<section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">INBOUND EXCEPTION HISTORY</p><h2>Shortage, lost, damaged &amp; not sellable</h2></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>No. DO</th><th>PO</th><th>SKU</th><th>Product</th><th>Type</th><th>Qty</th><th>Loss Expense</th><th>Journal</th><th>Physical Warehouse</th><th>Notes</th><th>Recorded by</th></tr></thead><tbody>{% for row in discrepancies %}<tr><td>{{ row.inbound_date|date:"d M Y" }}</td><td>{{ row.delivery_activity.delivery_order.number }}</td><td>{{ row.po_line.po.po_number }}</td><td><span class="sku-tag">{{ row.po_line.sku.sku }}</span></td><td>{{ row.po_line.sku.product_variant.product.name }}</td><td><span class="status-badge blocked">{{ row.get_discrepancy_type_display }}</span></td><td><strong>{{ row.quantity|floatformat:"0g" }} pcs</strong></td><td>Rp {{ row.loss_amount|floatformat:"0g" }}</td><td>{% if row.finance_journal_allocation %}<a class="row-link" href="{% url 'finance:journal_detail' row.finance_journal_allocation.entry.id %}">{{ row.loss_journal_number }}</a>{% else %}—{% endif %}</td><td>{{ row.warehouse.name|default:"—" }}</td><td>{{ row.notes|default:"—" }}</td><td>{{ row.recorded_by.username }}</td></tr>{% empty %}<tr><td colspan="12"><div class="empty-state">Belum ada inbound exception.</div></td></tr>{% endfor %}</tbody></table></div></section>
 <section class="panel section-gap"><div class="panel-header"><div><p class="eyebrow">INBOUND HISTORY</p><h2>Actual receipts</h2></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>No. DO</th><th>Reference</th><th>PO</th><th>SKU</th><th>Qty</th><th>COGS Snapshot</th><th>Retail Snapshot</th><th>Warehouse</th><th>Recorded by</th></tr></thead><tbody>{% for row in receipts %}<tr><td>{{ row.inbound_date|date:"d M Y" }}</td><td>{{ row.delivery_activity.delivery_order.number|default:"—" }}</td><td><span class="code-label">{{ row.reference }}</span></td><td>{{ row.po_line.po.po_number }}</td><td>{{ row.po_line.sku.sku }}</td><td>{{ row.received_qty|floatformat:"0g" }}</td><td>Rp {{ row.po_line.cogs_snapshot|floatformat:"0g" }}</td><td>Rp {{ row.retail_price_snapshot|floatformat:"0g" }}</td><td>{{ row.warehouse.name }}</td><td>{{ row.recorded_by.username }}</td></tr>{% empty %}<tr><td colspan="10"><div class="empty-state">Belum ada actual inbound.</div></td></tr>{% endfor %}</tbody></table></div></section>
 <script>
 document.querySelectorAll('[data-delivery-order-toggle]').forEach(button => {
@@ -65,16 +76,26 @@ document.querySelectorAll('[data-delivery-order-toggle]').forEach(button => {
 const inboundQtyKey = 'vobia:inventory-inbound:quantities';
 let savedInboundQuantities = {};
 try { savedInboundQuantities = JSON.parse(sessionStorage.getItem(inboundQtyKey) || '{}'); } catch (_) {}
-document.querySelectorAll('.delivery-order-product-table input[name="received_qty"]').forEach(input => {
-  const formId = input.getAttribute('form');
-  const button = document.querySelector(`[data-receive-button][form="${input.getAttribute('form')}"]`);
-  const refresh = () => button.disabled = input.value.trim() === '';
-  if (savedInboundQuantities[formId]) input.value = savedInboundQuantities[formId];
-  input.addEventListener('input', () => {
-    if (input.value) savedInboundQuantities[formId] = input.value;
-    else delete savedInboundQuantities[formId];
-    sessionStorage.setItem(inboundQtyKey, JSON.stringify(savedInboundQuantities));
-    refresh();
+document.querySelectorAll('.delivery-order-product-table form[data-expected-qty]').forEach(form => {
+  const formId = form.id;
+  const inputs = [...document.querySelectorAll(`[data-inbound-qty][form="${formId}"]`)];
+  const button = document.querySelector(`[data-receive-button][form="${formId}"]`);
+  const expected = Number(form.dataset.expectedQty || 0);
+  const refresh = () => {
+    const total = inputs.reduce((sum, input) => sum + Number(input.value || 0), 0);
+    button.disabled = total !== expected;
+  };
+  inputs.forEach(input => {
+    const storageKey = `${formId}:${input.name}`;
+    if (Object.prototype.hasOwnProperty.call(savedInboundQuantities, storageKey)) {
+      input.value = savedInboundQuantities[storageKey];
+    }
+    input.addEventListener('input', () => {
+      if (input.value !== '') savedInboundQuantities[storageKey] = input.value;
+      else delete savedInboundQuantities[storageKey];
+      sessionStorage.setItem(inboundQtyKey, JSON.stringify(savedInboundQuantities));
+      refresh();
+    });
   });
   refresh();
 });

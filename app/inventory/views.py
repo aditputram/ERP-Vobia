@@ -34,6 +34,7 @@ from .models import (
     FIFOLayer,
     FIFOOpeningImportBatch,
     FIFOOpeningImportIssue,
+    InboundDiscrepancy,
     InboundReceipt,
     InventoryException,
     InventoryMovement,
@@ -41,7 +42,7 @@ from .models import (
     QCInspection,
 )
 from .services.aging import po_aging_snapshot, refresh_po_close
-from .services.fifo import CUTOVER_DATE, create_expected_return, inventory_balance, post_adjustment, post_opening, qc_approved_qty, receive_rejected_goods_delivery, record_inbound, record_physical_return, record_qc
+from .services.fifo import CUTOVER_DATE, create_expected_return, inventory_balance, post_adjustment, post_opening, qc_approved_qty, receive_rejected_goods_delivery, reconcile_delivery_inbound, record_inbound, record_physical_return, record_qc
 from .services.opening_import import approve_opening_import, create_opening_import
 from .services.reporting import filtered_skus, inventory_parent_summary_rows, inventory_summary_rows, movement_ledger_rows, parent_movement_ledger_rows
 from production.models import ProductionActivity
@@ -151,13 +152,13 @@ def _export_turnover(rows, *, sku_type):
     return workbook_response(workbook, f"VOBIA-Inventory-Turnover-{timezone.localdate():%Y-%m-%d}.xlsx")
 
 
-def _export_inbound(delivery_orders, completed_delivery_rows, outstanding, receipts):
+def _export_inbound(delivery_orders, completed_delivery_rows, outstanding, receipts, discrepancies):
     workbook = Workbook()
     queue_sheet = workbook.active
     queue_sheet.title = "Delivery Queue"
     append_table(
         queue_sheet,
-        ("No. DO", "Jenis", "Tanggal Kirim", "PO", "Vendor", "Jumlah SKU", "Qty Delivering", "Qty Received", "Remaining"),
+        ("No. DO", "Jenis", "Tanggal Kirim", "PO", "Vendor", "Jumlah SKU", "Qty Delivering", "Sellable Received", "Exception", "Remaining"),
         (
             (
                 shipment["delivery_order"].number,
@@ -168,16 +169,17 @@ def _export_inbound(delivery_orders, completed_delivery_rows, outstanding, recei
                 len(shipment["rows"]),
                 shipment["remaining"],
                 shipment["received"],
+                shipment["discrepancy"],
                 shipment["remaining"],
             )
             for shipment in delivery_orders
         ),
-        number_formats={6: "#,##0", 7: "#,##0", 8: "#,##0", 9: "#,##0"},
+        number_formats={column: "#,##0" for column in range(6, 11)},
     )
     completed_sheet = workbook.create_sheet("Completed Delivery")
     append_table(
         completed_sheet,
-        ("No. DO", "Jenis", "Tanggal Kirim", "Tanggal Diterima", "PO", "Vendor", "SKU", "Product", "Qty Dikirim", "Qty Received", "Status"),
+        ("No. DO", "Jenis", "Tanggal Kirim", "Tanggal Diterima", "PO", "Vendor", "SKU", "Product", "Qty Dikirim", "Sellable Received", "Exception", "Status"),
         (
             (
                 row["delivery"].delivery_order.number,
@@ -190,16 +192,17 @@ def _export_inbound(delivery_orders, completed_delivery_rows, outstanding, recei
                 row["delivery"].po_line.sku.product_variant.product.name,
                 row["shipped"],
                 row["received"],
-                "Received",
+                row["discrepancy_qty"],
+                "Reconciled" if row["discrepancy_qty"] else "Received",
             )
             for row in completed_delivery_rows
         ),
-        number_formats={9: "#,##0", 10: "#,##0"},
+        number_formats={9: "#,##0", 10: "#,##0", 11: "#,##0"},
     )
     outstanding_sheet = workbook.create_sheet("Outstanding PO")
     append_table(
         outstanding_sheet,
-        ("PO", "Source", "SKU", "Product", "Variant", "Size", "Ordered", "QC Passed", "Received", "Eligible Now", "Outstanding"),
+        ("PO", "Source", "SKU", "Product", "Variant", "Size", "Ordered", "QC Passed", "Sellable Received", "Exception", "Eligible Now", "Outstanding"),
         (
             (
                 row["line"].po.po_number,
@@ -211,12 +214,13 @@ def _export_inbound(delivery_orders, completed_delivery_rows, outstanding, recei
                 row["line"].ordered_qty,
                 row["qc_passed"],
                 row["received"],
+                row["discrepancy"],
                 row["eligible"],
                 row["outstanding"],
             )
             for row in outstanding
         ),
-        number_formats={column: "#,##0" for column in range(7, 12)},
+        number_formats={column: "#,##0" for column in range(7, 13)},
     )
     history_sheet = workbook.create_sheet("Inbound History")
     append_table(
@@ -245,6 +249,32 @@ def _export_inbound(delivery_orders, completed_delivery_rows, outstanding, recei
             for row in receipts
         ),
         number_formats={9: "#,##0", 10: "Rp #,##0", 11: "Rp #,##0"},
+    )
+    exception_sheet = workbook.create_sheet("Inbound Exceptions")
+    append_table(
+        exception_sheet,
+        (
+            "Date", "No. DO", "PO", "SKU", "Product", "Type", "Qty",
+            "Loss Amount", "Journal", "Physical Warehouse", "Notes", "Recorded By",
+        ),
+        (
+            (
+                row.inbound_date,
+                row.delivery_activity.delivery_order.number,
+                row.po_line.po.po_number,
+                row.po_line.sku.sku,
+                row.po_line.sku.product_variant.product.name,
+                row.get_discrepancy_type_display(),
+                row.quantity,
+                row.loss_amount,
+                row.loss_journal_number,
+                row.warehouse.name if row.warehouse_id else "—",
+                row.notes,
+                row.recorded_by.username,
+            )
+            for row in discrepancies
+        ),
+        number_formats={7: "#,##0", 8: "Rp #,##0"},
     )
     return workbook_response(workbook, f"VOBIA-Inbound-{timezone.localdate():%Y-%m-%d}.xlsx")
 
@@ -619,6 +649,7 @@ def inbound(request):
     ).prefetch_related(
         "correction_entries",
         "inbound_receipts",
+        "inbound_discrepancies__warehouse",
         "rejected_follow_ups__received_warehouse",
     ).order_by("-activity_date", "-occurred_at")
     for delivery in deliveries:
@@ -626,6 +657,8 @@ def inbound(request):
         shipped = effective.quantity or 0
         is_rejected = delivery.activity_type == ProductionActivity.ActivityType.REJECTED_WAREHOUSE_DELIVERY
         rejected_follow_ups = list(delivery.rejected_follow_ups.all())
+        discrepancies = [] if is_rejected else list(delivery.inbound_discrepancies.all())
+        discrepancy_qty = sum((row.quantity for row in discrepancies), Decimal("0"))
         received = (
             sum(
                 (row.open_qty for row in rejected_follow_ups if row.delivery_status == "INBOUND"),
@@ -634,13 +667,23 @@ def inbound(request):
             if is_rejected
             else sum((receipt.received_qty for receipt in delivery.inbound_receipts.all()), 0)
         )
-        remaining = max(shipped - received, 0)
+        accounted = received + discrepancy_qty
+        remaining = max(shipped - accounted, 0)
         latest_receipt = (
             None
             if is_rejected
             else max(delivery.inbound_receipts.all(), key=lambda receipt: receipt.created_at, default=None)
         )
         rejected_receipt = next((row for row in rejected_follow_ups if row.received_date), None)
+        event_dates = [row.inbound_date for row in discrepancies]
+        if latest_receipt:
+            event_dates.append(latest_receipt.inbound_date)
+        received_date = (
+            rejected_receipt.received_date
+            if rejected_receipt
+            else max(event_dates, default=None)
+        )
+        exception_warehouse = next((row.warehouse for row in discrepancies if row.warehouse_id), None)
         delivery_rows.append(
             {
                 "delivery": delivery,
@@ -648,10 +691,17 @@ def inbound(request):
                 "kind_label": "Rejected Goods" if is_rejected else "QC Passed",
                 "shipped": shipped,
                 "received": received,
+                "discrepancies": discrepancies,
+                "discrepancy_qty": discrepancy_qty,
+                "discrepancy_summary": ", ".join(
+                    f"{row.get_discrepancy_type_display()} {row.quantity:g}"
+                    for row in discrepancies
+                ),
+                "accounted": accounted,
                 "remaining": remaining,
                 "latest_receipt": latest_receipt,
-                "received_date": rejected_receipt.received_date if rejected_receipt else getattr(latest_receipt, "inbound_date", None),
-                "received_warehouse": rejected_receipt.received_warehouse if rejected_receipt else getattr(latest_receipt, "warehouse", None),
+                "received_date": received_date,
+                "received_warehouse": rejected_receipt.received_warehouse if rejected_receipt else getattr(latest_receipt, "warehouse", None) or exception_warehouse,
             }
         )
 
@@ -673,10 +723,15 @@ def inbound(request):
             min_date=selected_delivery["delivery"].activity_date,
             initial={"delivery_activity": selected_delivery["delivery"].id},
             default_warehouse_code="REJECT" if selected_delivery["is_rejected"] else "MAIN",
+            allow_discrepancies=not selected_delivery["is_rejected"],
         )
     if is_delivery_receive and selected_delivery and delivery_form.is_valid():
         values = delivery_form.cleaned_data.copy()
         values.pop("delivery_activity")
+        exception_values = {
+            name: values.pop(name)
+            for name in ("shortage_qty", "lost_qty", "damaged_qty", "not_sellable_qty")
+        }
         try:
             if selected_delivery["is_rejected"]:
                 receive_rejected_goods_delivery(
@@ -690,10 +745,10 @@ def inbound(request):
                     f"{selected_delivery['delivery'].id}/"
                     f"{selected_delivery['delivery'].inbound_receipts.count() + 1:03d}"
                 )
-                record_inbound(
-                    po_line=selected_delivery["delivery"].po_line,
+                reconcile_delivery_inbound(
                     delivery_activity=selected_delivery["delivery"],
                     actor=request.user,
+                    **exception_values,
                     **values,
                 )
         except ValidationError as exc:
@@ -703,7 +758,11 @@ def inbound(request):
                 request,
                 "Rejected Goods diterima tanpa menambah stock/FIFO."
                 if selected_delivery["is_rejected"]
-                else "Pengiriman diterima; Delivering berkurang dan Inbound bertambah.",
+                else (
+                    "Pengiriman direkonsiliasi; hanya Sellable Received menambah stock/FIFO."
+                    if any(exception_values.values())
+                    else "Pengiriman diterima; Delivering berkurang dan Inbound bertambah."
+                ),
             )
             delivery_order_id = selected_delivery["delivery"].delivery_order_id
             return redirect(
@@ -733,6 +792,7 @@ def inbound(request):
                         ),
                     },
                     default_warehouse_code="REJECT" if row["is_rejected"] else "MAIN",
+                    allow_discrepancies=not row["is_rejected"],
                 )
             )
             row["receive_form_id"] = f"delivery-receive-{delivery.id}"
@@ -752,6 +812,8 @@ def inbound(request):
                 "rows": [],
                 "shipped": 0,
                 "received": 0,
+                "discrepancy": 0,
+                "accounted": 0,
                 "remaining": 0,
                 "open": key == open_delivery_order_id,
             },
@@ -760,6 +822,8 @@ def inbound(request):
         group["product_names"].add(delivery.po_line.sku.product_variant.product.name)
         group["shipped"] += row["shipped"]
         group["received"] += row["received"]
+        group["discrepancy"] += row["discrepancy_qty"]
+        group["accounted"] += row["accounted"]
         group["remaining"] += row["remaining"]
         if row["received_date"] and (
             group["received_date"] is None
@@ -772,7 +836,7 @@ def inbound(request):
         group["product_names"] = sorted(group["product_names"], key=str.casefold)
     delivery_orders = [group for group in delivery_order_map.values() if group["remaining"]]
     completed_delivery_rows = [
-        row for row in delivery_rows if not row["remaining"] and row["received"]
+        row for row in delivery_rows if not row["remaining"] and row["accounted"]
     ]
     if query:
         terms = query.casefold().split()
@@ -803,14 +867,16 @@ def inbound(request):
     outstanding = []
     lines = PurchaseOrderLine.objects.filter(po__status=PurchaseOrder.Status.RELEASED).select_related(
         "po", "po__supplier", "sku"
-    ).prefetch_related("qc_inspections", "inbound_receipts")
+    ).prefetch_related("qc_inspections", "inbound_receipts", "inbound_discrepancies")
     for line in lines:
         qc_passed = qc_approved_qty(line)
         received = line.received_before_cutover_qty + sum((row.received_qty for row in line.inbound_receipts.all()), 0)
-        outstanding_qty = max(line.ordered_qty - received, 0)
-        eligible_qty = max(qc_passed - received, 0)
+        discrepancy = sum((row.quantity for row in line.inbound_discrepancies.all()), Decimal("0"))
+        accounted = received + discrepancy
+        outstanding_qty = max(line.ordered_qty - accounted, 0)
+        eligible_qty = max(qc_passed - accounted, 0)
         if outstanding_qty:
-            outstanding.append({"line": line, "qc_passed": qc_passed, "received": received, "outstanding": outstanding_qty, "eligible": eligible_qty})
+            outstanding.append({"line": line, "qc_passed": qc_passed, "received": received, "discrepancy": discrepancy, "outstanding": outstanding_qty, "eligible": eligible_qty})
     receipt_rows = InboundReceipt.objects.select_related(
         "po_line__po",
         "po_line__sku__product_variant__product",
@@ -818,8 +884,15 @@ def inbound(request):
         "recorded_by",
         "delivery_activity__delivery_order",
     ).order_by("-inbound_date", "-created_at")
+    discrepancy_rows = InboundDiscrepancy.objects.select_related(
+        "delivery_activity__delivery_order",
+        "po_line__po",
+        "po_line__sku__product_variant__product",
+        "warehouse",
+        "recorded_by",
+    ).prefetch_related("finance_journal_allocation__entry").order_by("-inbound_date", "-created_at")
     if request.method == "GET" and request.GET.get("export") == "xlsx":
-        return _export_inbound(delivery_orders, completed_delivery_rows, outstanding, receipt_rows)
+        return _export_inbound(delivery_orders, completed_delivery_rows, outstanding, receipt_rows, discrepancy_rows)
     receipts = receipt_rows[:300]
     return render(
         request,
@@ -833,6 +906,7 @@ def inbound(request):
             "delivery_form": delivery_form,
             "outstanding": outstanding,
             "receipts": receipts,
+            "discrepancies": discrepancy_rows[:300],
             "query": query,
         },
     )
@@ -868,14 +942,16 @@ def inbound_po_checklist_pdf(request, po_id):
         po_line__po=po,
         entry_kind=ProductionActivity.EntryKind.ACTIVITY,
         activity_type=ProductionActivity.ActivityType.WAREHOUSE_DELIVERY,
-    ).select_related("po_line__sku__product_variant__product", "delivery_order").prefetch_related("correction_entries", "inbound_receipts").order_by("activity_date", "occurred_at")
+    ).select_related("po_line__sku__product_variant__product", "delivery_order").prefetch_related("correction_entries", "inbound_receipts", "inbound_discrepancies").order_by("activity_date", "occurred_at")
     deliveries = []
     for delivery in activities:
         effective = max(delivery.correction_entries.all(), key=lambda row: row.occurred_at, default=delivery)
         shipped = effective.quantity or 0
         received = sum((receipt.received_qty for receipt in delivery.inbound_receipts.all()), 0)
-        if shipped > received:
-            deliveries.append({"delivery": delivery, "shipped": shipped, "received": received, "remaining": shipped - received})
+        discrepancy = sum((row.quantity for row in delivery.inbound_discrepancies.all()), Decimal("0"))
+        accounted = received + discrepancy
+        if shipped > accounted:
+            deliveries.append({"delivery": delivery, "shipped": shipped, "received": received, "remaining": shipped - accounted})
     if not deliveries:
         raise Http404("PO tidak memiliki pengiriman yang menunggu penerimaan.")
     response = HttpResponse(build_inbound_checklist_pdf(po=po, deliveries=deliveries), content_type="application/pdf")
@@ -889,14 +965,15 @@ def inbound_pending_report_pdf(request):
     activities = ProductionActivity.objects.filter(
         entry_kind=ProductionActivity.EntryKind.ACTIVITY,
         activity_type__in=(ProductionActivity.ActivityType.WAREHOUSE_DELIVERY, ProductionActivity.ActivityType.REJECTED_WAREHOUSE_DELIVERY),
-    ).select_related("production_order__po__supplier", "po_line__sku__product_variant__product", "delivery_order").prefetch_related("correction_entries", "inbound_receipts", "rejected_follow_ups").order_by("activity_date", "occurred_at")
+    ).select_related("production_order__po__supplier", "po_line__sku__product_variant__product", "delivery_order").prefetch_related("correction_entries", "inbound_receipts", "inbound_discrepancies", "rejected_follow_ups").order_by("activity_date", "occurred_at")
     groups = {}
     for delivery in activities:
         effective = max(delivery.correction_entries.all(), key=lambda row: row.occurred_at, default=delivery)
         shipped = effective.quantity or 0
         is_rejected = delivery.activity_type == ProductionActivity.ActivityType.REJECTED_WAREHOUSE_DELIVERY
         received = sum((row.open_qty for row in delivery.rejected_follow_ups.all() if row.delivery_status == "INBOUND"), Decimal("0")) if is_rejected else sum((row.received_qty for row in delivery.inbound_receipts.all()), 0)
-        remaining = max(shipped - received, 0)
+        discrepancy = Decimal("0") if is_rejected else sum((row.quantity for row in delivery.inbound_discrepancies.all()), Decimal("0"))
+        remaining = max(shipped - received - discrepancy, 0)
         if not remaining:
             continue
         group = groups.setdefault(str(delivery.delivery_order_id), {"rows": []})

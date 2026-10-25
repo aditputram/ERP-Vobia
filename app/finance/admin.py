@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Account, JournalEntry, JournalLine, JournalNumberSequence
+from .models import Account, InboundLossJournalAllocation, JournalEntry, JournalLine, JournalNumberSequence
 
 
 class JournalLineInline(admin.TabularInline):
@@ -24,3 +24,4 @@ class JournalEntryAdmin(admin.ModelAdmin):
 
 
 admin.site.register(JournalNumberSequence)
+admin.site.register(InboundLossJournalAllocation)

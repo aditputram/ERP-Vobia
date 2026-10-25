@@ -13,10 +13,17 @@ from audit.models import AuditEvent
 from inventory.models import FIFOLayer, InboundReceipt, InventoryMovement, QCFollowUp, QCInspection
 from inventory.services.fifo import qc_approved_qty, record_inbound, record_qc
 from master_data.models import Category, Product, ProductStatus, ProductVariant, SKU, Supplier, Warehouse
-from purchasing.models import PurchaseOrder, PurchaseOrderLine
+from purchasing.models import PPICProductionPlan, PurchaseOrder, PurchaseOrderLine
 
-from .models import ProductionActivity, ProductionCogsFinalization, ProductionPlan, ProductionStage, ProductionTrial
-from .forms import ProductionStageUpdateForm
+from .models import (
+    ProductionActivity,
+    ProductionCogsFinalization,
+    ProductionOrder,
+    ProductionPlan,
+    ProductionStage,
+    ProductionTrial,
+)
+from .forms import ProductionActivityForm, ProductionStageUpdateForm
 from .services import (
     append_trial_note,
     approve_production_cogs_finalization,
@@ -125,6 +132,7 @@ class ProductionWorkflowTests(TestCase):
         monitoring_workbook = load_workbook(BytesIO(monitoring_response.content), read_only=True)
         self.assertEqual(monitoring_workbook.sheetnames, ["Production Monitoring", "QC Follow Up"])
         self.assertEqual(monitoring_workbook["Production Monitoring"]["A1"].value, "Purchase Order")
+        self.assertEqual(monitoring_workbook["Production Monitoring"]["B1"].value, "Production Method")
         self.assertEqual(monitoring_workbook["Production Monitoring"].max_row, 2)
 
     def _approve_trial(self):
@@ -1373,7 +1381,12 @@ class ProductionWorkflowTests(TestCase):
             reverse("production:delivery_order_preview"),
             {"date": "2026-09-01"},
         )
-        self.assertEqual(preview.json()["number"], "DOP.VOB-09/26-001")
+        self.assertEqual(preview.json()["number"], "DOP.VOB-09/26-002")
+        next_year_preview = self.client.get(
+            reverse("production:delivery_order_preview"),
+            {"date": "2027-01-01"},
+        )
+        self.assertEqual(next_year_preview.json()["number"], "DOP.VOB-01/27-001")
         snapshot = production_snapshot(self.production_order)
         self.assertEqual(snapshot["ready_to_deliver_qty"], Decimal("1"))
         self.assertEqual(snapshot["delivering_qty"], Decimal("3"))
@@ -1431,7 +1444,7 @@ class ProductionWorkflowTests(TestCase):
         )
         self.assertContains(
             rejected_partial,
-            "Quantity Received harus sama dengan Qty Delivering (3 pcs).",
+            "Total Sellable + Exception harus sama dengan Qty Delivering (3 pcs).",
         )
         inbound_response = self.client.post(
             reverse("inventory:inbound"),
@@ -1565,6 +1578,85 @@ class ProductionWorkflowTests(TestCase):
                 entity_id=str(finalization.id),
             ).exists()
         )
+
+    def test_fpp_vendor_reject_reduces_po_cost_without_changing_unit_cogs(self):
+        cmt_form = ProductionActivityForm(production_order=self.production_order)
+        disposition_field = f"qc_disposition_{self.line.id}"
+        self.assertNotIn(
+            QCInspection.Disposition.VENDOR_REJECTED,
+            dict(cmt_form.fields[disposition_field].choices),
+        )
+        PPICProductionPlan.objects.create(
+            need_month=self.po.need_month,
+            production_method=PPICProductionPlan.ProductionMethod.FPP,
+            supplier=self.supplier,
+            status=PPICProductionPlan.Status.GENERATED,
+            purchase_order=self.po,
+            control_material_purchase=True,
+            control_trial=False,
+            control_cut=True,
+            control_make=True,
+            control_trim=True,
+            control_qc=True,
+            control_inbound=True,
+            created_by=self.user,
+        )
+        self.production_order = ProductionOrder.objects.select_related(
+            "po__ppic_production_plan"
+        ).get(pk=self.production_order.pk)
+        fpp_form = ProductionActivityForm(production_order=self.production_order)
+        self.assertIn(
+            QCInspection.Disposition.VENDOR_REJECTED,
+            dict(fpp_form.fields[disposition_field].choices),
+        )
+
+        self._activate_plan()
+        for stage_code in (
+            ProductionStage.Stage.MATERIAL_PURCHASE,
+            ProductionStage.Stage.CUT,
+            ProductionStage.Stage.MAKE,
+            ProductionStage.Stage.TRIM,
+        ):
+            self._complete_stage(stage_code)
+        record_qc(
+            po_line=self.line,
+            inspected_at=timezone.make_aware(datetime(2026, 8, 25, 10, 0)),
+            qty_inspected=100,
+            qty_passed=98,
+            qty_failed=2,
+            disposition=QCInspection.Disposition.VENDOR_REJECTED,
+            notes="Tidak dapat di-rework; ditolak ke vendor.",
+            actor=self.user,
+        )
+        warehouse = Warehouse.objects.create(code="WH-FPP", name="FPP Warehouse")
+        _receipt, movement = record_inbound(
+            po_line=self.line,
+            inbound_date=date(2026, 8, 26),
+            received_qty=98,
+            warehouse=warehouse,
+            reference="GRN-FPP-VENDOR-REJECT",
+            actor=self.user,
+        )
+
+        follow_up = QCFollowUp.objects.get(po_line=self.line)
+        card = production_cogs_finalization_card(self.production_order, actor=self.user)
+        self.assertEqual(follow_up.status, QCFollowUp.Status.VENDOR_REJECTED)
+        self.assertTrue(card["ready"], card["blockers"])
+        self.assertEqual(card["total_vendor_rejected_qty"], Decimal("2"))
+        self.assertEqual(card["total_shortage_qty"], Decimal("0"))
+        self.assertEqual(card["total_po_cost"], Decimal("12250000"))
+        self.assertEqual(card["rows"][0]["final_unit_cogs"], Decimal("125000.0000"))
+        self.assertEqual(card["rows"][0]["unit_cogs_increase"], Decimal("0.0000"))
+
+        self.user.is_superuser = True
+        self.user.save(update_fields=("is_superuser",))
+        finalization = approve_production_cogs_finalization(
+            production_order=self.production_order,
+            actor=self.user,
+        )
+        movement.refresh_from_db()
+        self.assertEqual(finalization.total_po_cost, Decimal("12250000"))
+        self.assertEqual(movement.allocated_cost, Decimal("12250000"))
 
     def test_parent_sku_absorbs_cutting_mix_and_reject_cost(self):
         second_sku = SKU.objects.create(

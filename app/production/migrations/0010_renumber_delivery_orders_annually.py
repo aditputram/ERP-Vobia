@@ -33,11 +33,16 @@ def renumber_delivery_orders(apps, schema_editor):
         number = f"DOP.VOB-{order.delivery_date:%m/%y}-{sequence:03d}"
         changes.append((order, order.number, number, issue_month, sequence))
 
-    for order, old, new, _issue_month, _sequence in changes:
-        if old != new:
-            DeliveryOrder.objects.using(database).filter(pk=order.pk).update(
-                number=f"TMP-{str(order.pk).replace('-', '')[:26]}"
-            )
+    # Park every row on a unique temporary number and sequence first. Existing
+    # monthly sequences can otherwise collide while they are being rewritten
+    # into one annual sequence on PostgreSQL, even when the final values are
+    # unique.
+    max_existing_sequence = max((order.sequence or 0 for order in orders), default=0)
+    for position, (order, _old, _new, _issue_month, _sequence) in enumerate(changes, start=1):
+        DeliveryOrder.objects.using(database).filter(pk=order.pk).update(
+            number=f"TMP-{str(order.pk).replace('-', '')[:26]}",
+            sequence=max_existing_sequence + position,
+        )
 
     for order, old, new, issue_month, sequence in changes:
         if old != new:

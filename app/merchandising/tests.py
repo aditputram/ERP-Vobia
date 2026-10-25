@@ -286,11 +286,15 @@ class MerchandisingWorkflowTests(TestCase):
         self.assertEqual(september_incoming.prior_ending_qty, Decimal("100"))
         self.assertEqual(october_incoming.prior_ending_qty, Decimal("110"))
 
-        save_scenario_draft(
-            self.scenario.id,
-            self.user,
-            sales_values={str(september.id): Decimal("15")},
-        )
+        with patch(
+            "merchandising.services.workflows.timezone.localdate",
+            return_value=date(2026, 9, 15),
+        ):
+            save_scenario_draft(
+                self.scenario.id,
+                self.user,
+                sales_values={str(september.id): Decimal("15")},
+            )
         september.refresh_from_db()
         october.refresh_from_db()
         october_incoming.refresh_from_db()
@@ -1533,13 +1537,22 @@ class MerchandisingReportViewTests(TestCase):
         carryover = IncomingCarryover.objects.get(source_close=close, po_line=line)
         self.assertEqual(carryover.target_month, date(2026, 9, 1))
         self.assertEqual(carryover.carryover_qty, Decimal("2"))
-        response = self.client.get(
-            "/merchandising/projection/",
-            {"month": ["9"], "metric": ["incoming"], "submetric": ["qty"]},
-        )
+        planning_state = {
+            "year": 2026,
+            "current_month_number": 8,
+            "cutoff_date": date(2026, 8, 31),
+            "run_date": date(2026, 8, 31),
+            "day_factor": 1,
+        }
+        with patch("merchandising.views.official_planning_state", return_value=planning_state):
+            response = self.client.get(
+                "/merchandising/projection/",
+                {"month": ["9"], "metric": ["incoming"], "submetric": ["qty"]},
+            )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["table_rows"][0]["cells"][-1]["value"], Decimal("2"))
-        dashboard = self.client.get("/merchandising/dashboard/")
+        with patch("merchandising.views.official_planning_state", return_value=planning_state):
+            dashboard = self.client.get("/merchandising/dashboard/")
         dashboard_rows = {row["label"]: row for row in dashboard.context["table_rows"]}
         self.assertEqual(dashboard_rows["Incoming COGS"]["values"][7], Decimal("300000"))
         self.assertEqual(dashboard_rows["Ending Stock COGS"]["values"][7], Decimal("300000"))
@@ -1982,14 +1995,22 @@ class MerchandisingReportViewTests(TestCase):
             reason="MOQ preview",
         )
 
-        projection_response = self.client.get(
-            "/merchandising/projection/",
-            {
-                "month": ["9"],
-                "metric": ["incoming", "beginning", "sales", "ending", "stock_ratio", "mos"],
-                "submetric": ["qty"],
-            },
-        )
+        planning_state = {
+            "year": 2026,
+            "current_month_number": 8,
+            "cutoff_date": date(2026, 8, 31),
+            "run_date": date(2026, 8, 31),
+            "day_factor": 1,
+        }
+        with patch("merchandising.views.official_planning_state", return_value=planning_state):
+            projection_response = self.client.get(
+                "/merchandising/projection/",
+                {
+                    "month": ["9"],
+                    "metric": ["incoming", "beginning", "sales", "ending", "stock_ratio", "mos"],
+                    "submetric": ["qty"],
+                },
+            )
         self.assertEqual(projection_response.context["planning_preview"]["draft_scenario_count"], 1)
         self.assertContains(
             projection_response,
@@ -2003,7 +2024,8 @@ class MerchandisingReportViewTests(TestCase):
             ],
         )
 
-        dashboard_response = self.client.get("/merchandising/dashboard/")
+        with patch("merchandising.views.official_planning_state", return_value=planning_state):
+            dashboard_response = self.client.get("/merchandising/dashboard/")
         self.assertEqual(dashboard_response.context["planning_preview"]["draft_scenario_count"], 1)
         self.assertContains(
             dashboard_response,
@@ -2023,10 +2045,18 @@ class MerchandisingReportViewTests(TestCase):
         self.assertFalse(PPICRequirement.objects.filter(incoming_plan__scenario=scenario).exists())
 
     def test_projection_supports_selected_months_and_metrics(self):
-        response = self.client.get(
-            "/merchandising/projection/",
-            {"month": ["8"], "metric": ["sales", "ending"], "submetric": ["qty"]},
-        )
+        planning_state = {
+            "year": 2026,
+            "current_month_number": 8,
+            "cutoff_date": date(2026, 8, 31),
+            "run_date": date(2026, 8, 31),
+            "day_factor": 1,
+        }
+        with patch("merchandising.views.official_planning_state", return_value=planning_state):
+            response = self.client.get(
+                "/merchandising/projection/",
+                {"month": ["8"], "metric": ["sales", "ending"], "submetric": ["qty"]},
+            )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Projection matrix")
         self.assertContains(response, "Sales QTY")
@@ -2213,18 +2243,26 @@ class MerchandisingReportViewTests(TestCase):
 
     def test_incoming_view_modes_change_matrix_and_include_filtered_subtotal(self):
         base_query = {"month": ["8"], "metric": ["incoming"], "submetric": ["qty"]}
-        projection = self.client.get(
-            "/merchandising/projection/",
-            {**base_query, "incoming_mode": "projection"},
-        )
-        actual = self.client.get(
-            "/merchandising/projection/",
-            {**base_query, "incoming_mode": "actual"},
-        )
-        comparison = self.client.get(
-            "/merchandising/projection/",
-            {**base_query, "incoming_mode": "comparison"},
-        )
+        planning_state = {
+            "year": 2026,
+            "current_month_number": 8,
+            "cutoff_date": date(2026, 8, 31),
+            "run_date": date(2026, 8, 31),
+            "day_factor": 1,
+        }
+        with patch("merchandising.views.official_planning_state", return_value=planning_state):
+            projection = self.client.get(
+                "/merchandising/projection/",
+                {**base_query, "incoming_mode": "projection"},
+            )
+            actual = self.client.get(
+                "/merchandising/projection/",
+                {**base_query, "incoming_mode": "actual"},
+            )
+            comparison = self.client.get(
+                "/merchandising/projection/",
+                {**base_query, "incoming_mode": "comparison"},
+            )
         self.assertEqual([cell["value"] for cell in projection.context["table_rows"][0]["cells"]], [Decimal("13"), Decimal("5")])
         self.assertEqual([cell["value"] for cell in actual.context["table_rows"][0]["cells"]], [Decimal("13"), Decimal("0")])
         self.assertEqual(
@@ -2242,10 +2280,18 @@ class MerchandisingReportViewTests(TestCase):
         self.assertContains(comparison, "TOTAL FILTER")
 
     def test_future_month_snapshot_is_not_presented_as_official_projection(self):
-        response = self.client.get(
-            "/merchandising/projection/",
-            {"month": ["9", "10"], "metric": ["incoming", "sales", "ending"], "submetric": ["qty"]},
-        )
+        planning_state = {
+            "year": 2026,
+            "current_month_number": 8,
+            "cutoff_date": date(2026, 8, 31),
+            "run_date": date(2026, 8, 31),
+            "day_factor": 1,
+        }
+        with patch("merchandising.views.official_planning_state", return_value=planning_state):
+            response = self.client.get(
+                "/merchandising/projection/",
+                {"month": ["9", "10"], "metric": ["incoming", "sales", "ending"], "submetric": ["qty"]},
+            )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["dynamic_headers"][0]["month"], "Aug")
         self.assertTrue(response.context["dynamic_headers"][0]["is_auto_previous"])
@@ -3345,10 +3391,12 @@ class MerchandisingReportViewTests(TestCase):
             "reason": "Historical sales UAT",
         }
 
-        preview = self.client.post(
-            "/merchandising/planning-builder/",
-            {**payload, "action": "preview"},
-        )
+        with patch("merchandising.services.builder.date", wraps=date) as builder_date:
+            builder_date.today.return_value = date(2026, 8, 31)
+            preview = self.client.post(
+                "/merchandising/planning-builder/",
+                {**payload, "action": "preview"},
+            )
         self.assertEqual(preview.status_code, 200)
         self.assertEqual(
             preview.context["preview_history_months"],
@@ -3363,23 +3411,26 @@ class MerchandisingReportViewTests(TestCase):
         self.assertContains(preview, "Historical Sales QTY Juli")
         self.assertContains(preview, "Baseline Sales QTY Agustus")
 
-        draft = self.client.post(
-            "/merchandising/planning-builder/",
-            {**payload, "action": "draft"},
-        )
+        with patch("merchandising.services.builder.date", wraps=date) as builder_date:
+            builder_date.today.return_value = date(2026, 8, 31)
+            draft = self.client.post(
+                "/merchandising/planning-builder/",
+                {**payload, "action": "draft"},
+            )
         self.assertRedirects(
             draft,
             f"/merchandising/planning-builder/?view_draft={scenario.id}#draft-projection",
         )
         projection = scenario.projections.get(sku=self.sku, month=date(2026, 9, 1))
-        draft_view = self.client.get(
-            "/merchandising/planning-builder/",
-            {
-                "view_draft": scenario.id,
-                "draft_month": "2026-09",
-                "draft_metric": "sales",
-            },
-        )
+        with patch("merchandising.views.timezone.localdate", return_value=date(2026, 8, 31)):
+            draft_view = self.client.get(
+                "/merchandising/planning-builder/",
+                {
+                    "view_draft": scenario.id,
+                    "draft_month": "2026-09",
+                    "draft_metric": "sales",
+                },
+            )
         headers = draft_view.context["draft_matrix_headers"]
         self.assertEqual(
             [(header["month"], header["metric"]) for header in headers[:3]],

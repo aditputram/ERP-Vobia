@@ -870,7 +870,7 @@ class InventoryWorkflowTests(TestCase):
         self.assertEqual(exception.quantity, Decimal("2"))
         self.assertEqual(inventory_balance(self.sku), Decimal("-2"))
 
-    @patch("inventory.notifications.send_web_push")
+    @patch("inventory.notifications.enqueue_web_push")
     def test_fifo_short_notifies_warehouse_once_and_opens_from_space_notifications(self, send_push_mock):
         self.user.module_access = {
             "sales": "none",

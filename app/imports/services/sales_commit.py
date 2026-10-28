@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from audit.services import record_audit
 from inventory.services.fifo import create_expected_return, post_sales_out, rebuild_fifo_for_sku
-from inventory.models import FIFOOpeningImportBatch
+from inventory.models import FIFOOpeningImportBatch, InventoryMovement
 from sales.models import SalesOrder, SalesOrderLine, SalesStatusHistory
 
 from ..models import SalesImportBatch, StagedSalesRow
@@ -54,6 +54,20 @@ def _sync_order_status(order):
     )
 
 
+def _same_financial_snapshot(row, line):
+    return (
+        row.quantity,
+        row.net_unit_price,
+        row.retail_price_snapshot,
+        row.sales_cogs_snapshot,
+    ) == (
+        line.quantity,
+        line.net_unit_price,
+        line.retail_price_snapshot,
+        line.sales_cogs_snapshot,
+    )
+
+
 @transaction.atomic
 def approve_sales_import(batch_id, actor):
     if not settings.SALES_IMPORT_COMMIT_ENABLED:
@@ -89,7 +103,7 @@ def approve_sales_import(batch_id, actor):
         "historical_backfill_orders": 0,
         "historical_backfill_lines": 0,
     }
-    fifo_replay_skus = {}
+    inventory_lines = {}
 
     for order_number, rows in order_groups.items():
         representative = rows[0]
@@ -97,6 +111,12 @@ def approve_sales_import(batch_id, actor):
             source=batch.source,
             order_number=order_number,
         ).first()
+        existing_lines = {
+            line.sku_code_snapshot: line
+            for line in SalesOrderLine.objects.select_for_update()
+            .select_related("order", "sku")
+            .filter(order=existing_order)
+        } if existing_order else {}
         is_historical_status_audit = bool(
             representative.selected_source_data.get("historical_status_audit")
         )
@@ -125,7 +145,7 @@ def approve_sales_import(batch_id, actor):
                 if not row.selected_source_data.get("historical_status_update_allowed", True):
                     counts["unchanged"] += 1
                     continue
-                line = row.existing_line
+                line = existing_lines.get(row.sku_text) or row.existing_line
                 if line is None:
                     counts["unchanged"] += 1
                     continue
@@ -219,6 +239,7 @@ def approve_sales_import(batch_id, actor):
                 counts["historical_backfill_orders"] += 1
         else:
             order = existing_order
+            became_shipped = not order.shipped_datetime and any(row.shipped_datetime for row in rows)
             if not order.source_label:
                 order.source_label = batch.source
             if not order.shipped_datetime:
@@ -229,9 +250,17 @@ def approve_sales_import(batch_id, actor):
             order.latest_batch_id = batch.id
             order.save(update_fields=["source_label", "shipped_datetime", "latest_batch_id", "updated_at"])
 
+        if order_created:
+            became_shipped = bool(order.shipped_datetime)
+
         for row in rows:
-            if row.existing_line:
-                line = row.existing_line
+            line = existing_lines.get(row.sku_text)
+            if line is not None:
+                if not row.is_pure_cancelled and not _same_financial_snapshot(row, line):
+                    raise ValidationError(
+                        f"Staged row {row.row_number}: transaksi sudah masuk dari batch lain dengan "
+                        "qty/harga/COGS berbeda. Cek ulang batch sebelum commit."
+                    )
                 changed = (
                     line.current_status != row.normalized_status
                     or line.source_status != row.source_status
@@ -241,6 +270,8 @@ def approve_sales_import(batch_id, actor):
                 )
                 if not changed:
                     counts["unchanged"] += 1
+                    if line.is_counted and (order.shipped_datetime or line.is_final):
+                        inventory_lines[line.id] = line
                     continue
                 before_line_status = {
                     "current_status": line.current_status,
@@ -280,6 +311,8 @@ def approve_sales_import(batch_id, actor):
                         "import_batch_id": str(batch.id),
                     },
                 )
+                if line.is_counted and (order.shipped_datetime or line.is_final):
+                    inventory_lines[line.id] = line
                 continue
             if row.is_pure_cancelled:
                 counts["pure_cancellations_ignored"] += 1
@@ -347,6 +380,8 @@ def approve_sales_import(batch_id, actor):
                     },
                 )
             counts["lines_created"] += 1
+            existing_lines[line.sku_code_snapshot] = line
+            inventory_lines[line.id] = line
             if is_historical_backfill:
                 counts["historical_backfill_lines"] += 1
 
@@ -377,17 +412,27 @@ def approve_sales_import(batch_id, actor):
                 },
             )
 
-        for line in order.lines.filter(is_counted=True).select_related("order", "sku"):
-            if not (order.shipped_datetime or line.is_final):
-                continue
-            was_posted = line.inventory_movements.filter(
-                movement_type="SALES_OUT",
-            ).exists()
+        if became_shipped:
+            for line in order.lines.filter(is_counted=True).select_related("order", "sku"):
+                inventory_lines[line.id] = line
+
+    posted_line_ids = set(
+        InventoryMovement.objects.filter(
+            movement_type=InventoryMovement.MovementType.SALES_OUT,
+            sales_line_id__in=inventory_lines,
+        ).values_list("sales_line_id", flat=True)
+    )
+    fifo_replay_skus = {}
+    for line in inventory_lines.values():
+        if not (line.order.shipped_datetime or line.is_final):
+            continue
+        was_posted = line.id in posted_line_ids
+        if not was_posted:
             post_sales_out(line, actor, replay_backdated=False)
-            if order.affects_inventory and not was_posted:
+            if line.order.affects_inventory:
                 fifo_replay_skus[line.sku_id] = line.sku
-            if order.affects_inventory and line.current_status == "Retur":
-                create_expected_return(line)
+        if line.order.affects_inventory and line.current_status == "Retur":
+            create_expected_return(line)
 
     for sku in fifo_replay_skus.values():
         rebuild_fifo_for_sku(

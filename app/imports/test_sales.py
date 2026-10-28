@@ -4,6 +4,7 @@ import tempfile
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -820,6 +821,76 @@ class SalesImportWorkflowTests(TestCase):
         )
         self.assertEqual(batch.status, SalesImportBatch.Status.BLOCKED)
         self.assertEqual(batch.quality_summary["duplicate_business_key_count"], 1)
+
+    def test_commit_reconciles_line_created_after_preview(self):
+        stale_batch = create_sales_import(
+            make_csv(SHOPEE_HEADERS, [self.shopee_row()], "stale-preview.csv"),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+        winning_batch = create_sales_import(
+            make_csv(
+                SHOPEE_HEADERS,
+                [self.shopee_row(**{"Status Pesanan": "Sedang Dikirim"})],
+                "committed-after-preview.csv",
+            ),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+        self.assertIsNone(stale_batch.staged_rows.get().existing_line_id)
+        approve_sales_import(winning_batch.id, self.user)
+
+        _, counts = approve_sales_import(stale_batch.id, self.user)
+
+        line = SalesOrderLine.objects.get()
+        self.assertEqual(SalesOrderLine.objects.count(), 1)
+        self.assertEqual(line.current_status, "Selesai")
+        self.assertEqual(counts["lines_created"], 0)
+        self.assertEqual(counts["status_updates"], 1)
+
+    def test_commit_blocks_stale_preview_when_financial_snapshot_changed(self):
+        stale_batch = create_sales_import(
+            make_csv(
+                SHOPEE_HEADERS,
+                [self.shopee_row(**{"Jumlah": "1"})],
+                "stale-financial-preview.csv",
+            ),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+        winning_batch = create_sales_import(
+            make_csv(SHOPEE_HEADERS, [self.shopee_row()], "winning-financial.csv"),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+        approve_sales_import(winning_batch.id, self.user)
+
+        with self.assertRaisesMessage(ValidationError, "batch lain"):
+            approve_sales_import(stale_batch.id, self.user)
+
+        stale_batch.refresh_from_db()
+        self.assertEqual(stale_batch.status, SalesImportBatch.Status.READY)
+        self.assertEqual(SalesOrderLine.objects.count(), 1)
+
+    def test_unchanged_reimport_does_not_repost_existing_sales_out(self):
+        first = create_sales_import(
+            make_csv(SHOPEE_HEADERS, [self.shopee_row()], "first-post.csv"),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+        approve_sales_import(first.id, self.user)
+        second_row = self.shopee_row(**{"Waktu Pesanan Dibuat": "18/08/2026 10:30"})
+        second = create_sales_import(
+            make_csv(SHOPEE_HEADERS, [second_row], "unchanged-reimport.csv"),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+        self.assertEqual(second.unchanged_rows, 1)
+
+        with patch("imports.services.sales_commit.post_sales_out") as post_sales_out_mock:
+            approve_sales_import(second.id, self.user)
+
+        post_sales_out_mock.assert_not_called()
 
     def test_tiktok_xlsx_description_row_is_skipped(self):
         workbook = Workbook()

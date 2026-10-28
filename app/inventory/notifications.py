@@ -5,7 +5,7 @@ from django.db import transaction
 from django.urls import reverse
 
 from accounts.access import can_access_tab
-from chat.push import send_web_push
+from chat.push import enqueue_web_push
 from rnd.models import RndNotification
 
 from .models import InventoryException
@@ -83,7 +83,7 @@ def sync_fifo_short_notification(exception, *, actor=None):
         targets.setdefault(notification.target_url, []).append(notification.recipient_id)
     for target_url, recipient_ids in targets.items():
         transaction.on_commit(
-            lambda ids=recipient_ids, url=target_url: send_web_push(
+            lambda ids=recipient_ids, url=target_url: enqueue_web_push(
                 ids,
                 title="Stok Warehouse perlu diaudit",
                 body=f"{exception.sku.sku} · FIFO kurang {quantity} pcs.",

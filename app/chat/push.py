@@ -1,5 +1,6 @@
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from django.conf import settings
 from pywebpush import WebPushException, webpush
@@ -8,6 +9,19 @@ from .models import PushSubscription
 
 
 logger = logging.getLogger(__name__)
+_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="web-push")
+
+
+def enqueue_web_push(user_ids, *, title, body, url, tag):
+    """Queue best-effort browser push without delaying the committed request."""
+    return _executor.submit(
+        send_web_push,
+        list(user_ids),
+        title=title,
+        body=body,
+        url=url,
+        tag=tag,
+    )
 
 
 def send_web_push(user_ids, *, title, body, url, tag):

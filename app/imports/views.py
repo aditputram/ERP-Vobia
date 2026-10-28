@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
@@ -31,6 +32,9 @@ from .services.sales_parser import parse_sales_batch
 from .services.storage import DuplicateRawFile, create_master_import, create_sales_import
 from sales.services.requirements import import_requirements, summarize_import_requirements
 from inventory.models import FIFOOpeningImportBatch
+
+
+logger = logging.getLogger(__name__)
 
 
 def _can_edit_store_traffic(user):
@@ -353,6 +357,12 @@ def sales_import_approve(request, batch_id):
         _, counts = approve_sales_import(batch.id, request.user)
     except ValidationError as exc:
         messages.error(request, " ".join(exc.messages))
+    except Exception:
+        logger.exception("Sales import commit gagal untuk batch %s", batch.id)
+        messages.error(
+            request,
+            "Commit belum berhasil dan seluruh perubahan sudah dibatalkan. Tim teknis dapat mengecek error ID batch ini.",
+        )
     else:
         messages.success(
             request,

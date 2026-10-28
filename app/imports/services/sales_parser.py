@@ -324,11 +324,11 @@ def parse_sales_batch(batch):
     }
     order_numbers = [_text(row.get(resolved["order_number"])) for _, row in source_rows]
     existing_lines = {
-        (line.order.order_number, line.sku.sku): line
+        (line.order.order_number, line.sku_code_snapshot): line
         for line in SalesOrderLine.objects.select_related("order", "sku").filter(
             order__source=batch.source,
             order__order_number__in=order_numbers,
-            sku__sku__in=sku_values,
+            sku_code_snapshot__in=sku_values,
         )
     }
     historical_orders = {

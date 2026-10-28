@@ -113,7 +113,7 @@ def approve_sales_import(batch_id, actor):
         ).first()
         existing_lines = {
             line.sku_code_snapshot: line
-            for line in SalesOrderLine.objects.select_for_update()
+            for line in SalesOrderLine.objects.select_for_update(of=("self",))
             .select_related("order", "sku")
             .filter(order=existing_order)
         } if existing_order else {}

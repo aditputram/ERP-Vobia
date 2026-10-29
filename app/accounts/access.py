@@ -164,6 +164,7 @@ MODULE_TABS = {
                 "rnd:dashboard",
                 "rnd:collection_create",
                 "rnd:collection_detail",
+                "rnd:collection_edit",
                 "rnd:collection_delete",
                 "rnd:collection_start_development",
                 "rnd:collection_handover",

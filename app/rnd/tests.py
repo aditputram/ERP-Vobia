@@ -1811,19 +1811,22 @@ class RndWorkflowTests(TestCase):
             ).exists()
         )
 
-    def test_rnd_supervisor_can_delete_collection(self):
+    def test_rnd_supervisor_can_edit_and_delete_collection(self):
         collection = self._collection(code="COL-SUPERVISOR")
         product = self._product(collection, code="P-SUPERVISOR")
         supervisor = get_user_model().objects.create_user(
             username="rnd.supervisor",
             password="test-password",
             module_access={"rnd": "supervisor", "marketing": "none"},
+            tab_access={"rnd": ["collections"]},
         )
         self.client.force_login(supervisor)
 
         page = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
         self.assertContains(page, "Delete Collection")
         self.assertContains(page, "Ya, Delete Collection")
+        edit_page = self.client.get(reverse("rnd:collection_edit", args=[collection.id]))
+        self.assertContains(edit_page, "Edit Collection")
         deleted = self.client.post(reverse("rnd:collection_delete", args=[collection.id]))
 
         self.assertRedirects(deleted, reverse("rnd:dashboard"))

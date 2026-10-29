@@ -163,6 +163,47 @@ class RndWorkflowTests(TestCase):
 
         self.assertEqual(list(response.context["products"]), [approved, waiting])
 
+    def test_editor_can_edit_collection_metadata_during_development(self):
+        collection = self._collection()
+        collection.development_started_at = timezone.now()
+        collection.status = Collection.Status.DEVELOPMENT
+        collection.save(update_fields=("development_started_at", "status", "updated_at"))
+        self.client.force_login(self.rnd_editor)
+
+        detail = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
+        self.assertContains(detail, "Edit Collection")
+        response = self.client.post(
+            reverse("rnd:collection_edit", args=[collection.id]),
+            {
+                "code": "kartika-series",
+                "name": "Kartika Series Revised",
+                "objective": "Menyempurnakan size spec koleksi Kartika.",
+            },
+        )
+
+        self.assertRedirects(response, reverse("rnd:collection_detail", args=[collection.id]))
+        collection.refresh_from_db()
+        self.assertEqual(collection.code, "KARTIKA-SERIES")
+        self.assertEqual(collection.name, "Kartika Series Revised")
+        self.assertEqual(collection.objective, "Menyempurnakan size spec koleksi Kartika.")
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="rnd_collection_updated",
+                entity_id=str(collection.id),
+            ).exists()
+        )
+
+        collection.handed_over_at = timezone.now()
+        collection.status = Collection.Status.MARKETING_REVIEW
+        collection.save(update_fields=("handed_over_at", "status", "updated_at"))
+        locked = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
+        self.assertNotContains(locked, "Edit Collection")
+        denied = self.client.post(
+            reverse("rnd:collection_edit", args=[collection.id]),
+            {"code": "CHANGED", "name": "Changed", "objective": "Changed"},
+        )
+        self.assertEqual(denied.status_code, 403)
+
     def test_collection_dashboard_uses_cards_with_four_product_covers(self):
         collection = self._collection()
         products = []

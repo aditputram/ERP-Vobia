@@ -50,6 +50,7 @@ urlpatterns = [
     path("designing/<uuid:design_id>/delete/", views.design_delete, name="design_delete"),
     path("collections/new/", views.collection_create, name="collection_create"),
     path("collections/<uuid:collection_id>/", views.collection_detail, name="collection_detail"),
+    path("collections/<uuid:collection_id>/edit/", views.collection_edit, name="collection_edit"),
     path("collections/<uuid:collection_id>/delete/", views.collection_delete, name="collection_delete"),
     path(
         "collections/<uuid:collection_id>/start-development/",

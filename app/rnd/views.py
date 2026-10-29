@@ -369,6 +369,43 @@ def collection_create(request):
 
 @login_required
 @transaction.atomic
+def collection_edit(request, collection_id):
+    if not can_edit_module(request.user, "rnd"):
+        return HttpResponseForbidden("Edit Collection memerlukan akses Edit, Supervisor, atau Approve R&D.")
+    collection = get_object_or_404(Collection.objects.select_for_update(), id=collection_id)
+    if collection.handed_over_at or collection.commercial_approved_at:
+        return HttpResponseForbidden("Collection sudah dikunci setelah handover ke Marketing.")
+    before_values = {
+        "code": collection.code,
+        "name": collection.name,
+        "objective": collection.objective,
+    }
+    form = CollectionForm(request.POST or None, instance=collection)
+    if request.method == "POST" and form.is_valid():
+        collection = form.save()
+        record_audit(
+            actor=request.user,
+            action="rnd_collection_updated",
+            entity_type="rnd.collection",
+            entity_id=collection.id,
+            before_values=before_values,
+            after_values={
+                "code": collection.code,
+                "name": collection.name,
+                "objective": collection.objective,
+            },
+        )
+        messages.success(request, "Collection berhasil diperbarui.")
+        return redirect("rnd:collection_detail", collection_id=collection.id)
+    return render(
+        request,
+        "rnd/collection_form.html",
+        {"form": form, "collection": collection},
+    )
+
+
+@login_required
+@transaction.atomic
 def collection_detail(request, collection_id):
     request.session["active_module"] = "rnd"
     collection = get_object_or_404(
@@ -441,6 +478,9 @@ def collection_detail(request, collection_id):
             "approved_document_count": approved_document_count,
             "all_documents_approved": all_documents_approved,
             "can_start_development": _can_edit_rnd(request.user),
+            "can_edit_collection": can_edit_module(request.user, "rnd")
+            and not collection.handed_over_at
+            and not collection.commercial_approved_at,
             "can_delete": can_supervise_module(request.user, "rnd")
             and not collection.handed_over_at
             and not collection.commercial_approved_at,

@@ -28,6 +28,11 @@ def can_edit_module(user, module):
     return user.is_superuser or (user.module_access or {}).get(module, default_level) in {"edit", "supervisor", "approve"}
 
 
+def can_supervise_module(user, module):
+    default_level = "none" if module == "rnd" else "approve"
+    return user.is_superuser or (user.module_access or {}).get(module, default_level) in {"supervisor", "approve"}
+
+
 def _actor_name(actor):
     return actor.get_full_name().strip() or actor.get_username()
 
@@ -625,8 +630,8 @@ def delete_rejected_product(*, product, actor):
 
 @transaction.atomic
 def delete_collection(*, collection, actor):
-    if not can_approve_module(actor, "rnd"):
-        raise PermissionDenied("Delete Collection memerlukan akses Approve R&D.")
+    if not can_supervise_module(actor, "rnd"):
+        raise PermissionDenied("Delete Collection memerlukan akses Supervisor atau Approve R&D.")
     collection = Collection.objects.select_for_update().get(pk=collection.pk)
     if collection.handed_over_at or collection.commercial_approved_at:
         raise ValidationError("Collection yang sudah di-handover ke Marketing tidak dapat dihapus.")

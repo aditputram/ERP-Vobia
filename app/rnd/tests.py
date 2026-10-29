@@ -1663,6 +1663,24 @@ class RndWorkflowTests(TestCase):
             ).exists()
         )
 
+    def test_rnd_supervisor_can_delete_collection(self):
+        collection = self._collection(code="COL-SUPERVISOR")
+        product = self._product(collection, code="P-SUPERVISOR")
+        supervisor = get_user_model().objects.create_user(
+            username="rnd.supervisor",
+            password="test-password",
+            module_access={"rnd": "supervisor", "marketing": "none"},
+        )
+        self.client.force_login(supervisor)
+
+        page = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
+        self.assertContains(page, "Delete Collection")
+        deleted = self.client.post(reverse("rnd:collection_delete", args=[collection.id]))
+
+        self.assertRedirects(deleted, reverse("rnd:dashboard"))
+        self.assertFalse(Collection.objects.filter(pk=collection.id).exists())
+        self.assertFalse(DevelopmentProduct.objects.filter(pk=product.id).exists())
+
     def test_collection_delete_is_blocked_after_marketing_handover(self):
         collection = self._collection()
         collection.status = Collection.Status.MARKETING_REVIEW

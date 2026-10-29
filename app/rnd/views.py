@@ -49,6 +49,7 @@ from .services import (
     approve_product_document,
     can_approve_module,
     can_edit_module,
+    can_supervise_module,
     delete_collection,
     delete_rejected_product,
     duplicate_product,
@@ -440,7 +441,7 @@ def collection_detail(request, collection_id):
             "approved_document_count": approved_document_count,
             "all_documents_approved": all_documents_approved,
             "can_start_development": _can_edit_rnd(request.user),
-            "can_delete": can_approve_module(request.user, "rnd")
+            "can_delete": can_supervise_module(request.user, "rnd")
             and not collection.handed_over_at
             and not collection.commercial_approved_at,
             "all_final": product_count > 0
@@ -1239,7 +1240,7 @@ def collection_delete(request, collection_id):
         messages.error(request, _validation_message(exc))
         return redirect("rnd:collection_detail", collection_id=collection.id)
     except PermissionDenied:
-        return HttpResponseForbidden("Delete Collection memerlukan akses Approve R&D.")
+        return HttpResponseForbidden("Delete Collection memerlukan akses Supervisor atau Approve R&D.")
     messages.success(request, f"Collection {collection_name} beserta seluruh Product berhasil dihapus.")
     return redirect("rnd:dashboard")
 

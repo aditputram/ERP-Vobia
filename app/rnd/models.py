@@ -362,6 +362,7 @@ class DevelopmentProductStageDate(UUIDTimestampedModel):
     target_date = models.DateField(null=True, blank=True)
     actual_date = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True)
+    document_revision = models.PositiveSmallIntegerField(null=True, blank=True)
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,

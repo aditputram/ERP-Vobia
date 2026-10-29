@@ -528,6 +528,11 @@ def development_detail(request, collection_id):
 
 def _development_timeline(product):
     stage = product.development_stage
+    prototype_revisions = {
+        item.stage_key: item.document_revision
+        for item in product.stage_dates.all()
+        if item.stage_key.startswith("prototype_") and item.document_revision is not None
+    }
     timeline = [
         {
             "key": "material_purchase",
@@ -595,6 +600,12 @@ def _development_timeline(product):
                     "label": f"Prototype {number}",
                     "state": "active" if is_active else "done",
                     "detail": "Menunggu keputusan Approve R&D" if is_active else "Selesai",
+                    "document_revision_label": (
+                        f'{prototype_revisions[f"prototype_{number}"]:03d}'
+                        if f"prototype_{number}" in prototype_revisions
+                        else ""
+                    ),
+                    "is_current_prototype": is_active,
                 }
             )
             if number < product.prototype_number:
@@ -760,6 +771,11 @@ def development_product_detail(request, product_id):
             "product": product,
             "timeline": timeline,
             "can_edit_details": can_edit_module(request.user, "rnd"),
+            "can_request_mdr_revision": (
+                request.user.is_superuser
+                and product.document_status == DevelopmentProduct.DocumentStatus.APPROVED
+                and product.development_stage == DevelopmentProduct.DevelopmentStage.PROTOTYPE
+            ),
         },
     )
 
@@ -856,8 +872,17 @@ def product_development_transition(request, product_id):
 def product_detail(request, product_id):
     request.session["active_module"] = "rnd"
     product = get_object_or_404(DevelopmentProduct.objects.select_related("collection"), id=product_id)
+    development_revision_editable = (
+        product.collection.development_started_at
+        and product.collection.status == Collection.Status.DEVELOPMENT
+        and product.development_stage
+        in {
+            DevelopmentProduct.DevelopmentStage.PROTOTYPE,
+            DevelopmentProduct.DevelopmentStage.RESAMPLING,
+        }
+    )
     editable = (
-        not product.collection.development_started_at
+        (not product.collection.development_started_at or development_revision_editable)
         and not product.collection.handed_over_at
         and not product.collection.commercial_approved_at
         and product.document_status
@@ -983,9 +1008,15 @@ def product_detail(request, product_id):
             "show_edit": request.method == "POST" or request.GET.get("edit") == "1",
             "can_approve": can_approve_module(request.user, "rnd"),
             "can_officially_approve": request.user.is_superuser,
+            "can_request_mdr_revision": (
+                request.user.is_superuser
+                and product.document_status == DevelopmentProduct.DocumentStatus.APPROVED
+                and product.development_stage == DevelopmentProduct.DevelopmentStage.PROTOTYPE
+            ),
             "can_delete_product": (
                 product.document_status == DevelopmentProduct.DocumentStatus.REJECTED
                 and can_edit_module(request.user, "rnd")
+                and not product.collection.development_started_at
             ),
             "can_duplicate_product": (
                 can_edit_module(request.user, "rnd")

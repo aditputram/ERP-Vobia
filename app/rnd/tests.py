@@ -1403,6 +1403,13 @@ class RndWorkflowTests(TestCase):
             self.assertEqual(product.development_stage, expected_stage)
         self.assertEqual(product.prototype_number, 1)
         self.assertEqual(product.development_stage_label, "Prototype 1")
+        self.assertEqual(
+            DevelopmentProductStageDate.objects.get(
+                product=product,
+                stage_key="prototype_1",
+            ).document_revision,
+            0,
+        )
 
         denied = self.client.post(
             reverse("rnd:product_development_transition", args=[product.id]),
@@ -1428,6 +1435,13 @@ class RndWorkflowTests(TestCase):
         )
         product.refresh_from_db()
         self.assertEqual(product.development_stage_label, "Prototype 2")
+        self.assertEqual(
+            DevelopmentProductStageDate.objects.get(
+                product=product,
+                stage_key="prototype_2",
+            ).document_revision,
+            0,
+        )
         timeline_page = self.client.get(
             reverse("rnd:development_product_detail", args=[product.id])
         )
@@ -1446,6 +1460,8 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(timeline_page.context["timeline"][-2]["state"], "active")
         self.assertNotContains(timeline_page, "Mockup + Technical Drawing")
         self.assertContains(timeline_page, "Target dan alur kerja")
+        self.assertContains(timeline_page, "Prototype 1 menggunakan Dokumen MDR 000")
+        self.assertContains(timeline_page, "Prototype 2 menggunakan Dokumen MDR 000")
         self.assertContains(timeline_page, "Belum ada notes.")
         self.assertContains(timeline_page, "+ Tambah Material")
         dated = self.client.post(
@@ -1519,6 +1535,97 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(product.development_stage, DevelopmentProduct.DevelopmentStage.FINAL)
         self.assertEqual(product.status, DevelopmentProduct.Status.FINAL_APPROVED)
         self.assertEqual(collection.status, Collection.Status.FINAL_DEVELOPMENT)
+
+    def test_mdr_revision_during_development_is_snapshotted_per_prototype(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.mockup = self._pdf("mockup-000.pdf", "MDR REVISION ZERO")
+        product.technical_drawing = self._pdf("drawing-000.pdf", "DRAWING REVISION ZERO")
+        product.save(update_fields=("mockup", "technical_drawing", "updated_at"))
+
+        self.client.force_login(self.rnd_editor)
+        self.client.post(reverse("rnd:product_submit", args=[product.id]))
+        self.client.force_login(self.admin)
+        self.client.post(reverse("rnd:product_approve", args=[product.id]))
+        self.client.force_login(self.rnd_editor)
+        self.client.post(reverse("rnd:collection_start_development", args=[collection.id]))
+        material_stage = DevelopmentProductStageDate.objects.create(
+            product=product,
+            stage_key="material_purchase",
+            updated_by=self.rnd_editor,
+        )
+        DevelopmentProductStageMaterial.objects.create(
+            stage=material_stage,
+            material="Material Awal",
+            purchase_price=Decimal("125000"),
+        )
+        for action in ("material_completed", "sampling_completed"):
+            self.client.post(
+                reverse("rnd:product_development_transition", args=[product.id]),
+                {"action": action},
+            )
+
+        self.client.force_login(self.admin)
+        timeline = self.client.get(reverse("rnd:development_product_detail", args=[product.id]))
+        self.assertContains(timeline, "Prototype 1 menggunakan Dokumen MDR 000")
+        self.assertContains(timeline, "Revisi MDR")
+        self.client.post(
+            reverse("rnd:product_request_revision", args=[product.id]),
+            {
+                "revision_note": "Adjust size spec setelah evaluasi Prototype 1.",
+                "revision_target": DevelopmentProductDocumentRevision.RevisionTarget.TECHNICAL_DRAWING,
+            },
+        )
+        product.refresh_from_db()
+        self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.REVISION_REQUESTED)
+
+        self.client.force_login(self.rnd_editor)
+        revised = self.client.post(
+            reverse("rnd:product_detail", args=[product.id]),
+            {
+                **self._product_payload(product, DevelopmentProduct.Status.REVISION),
+                "technical_drawing": self._pdf("drawing-001.pdf", "DRAWING REVISION ONE"),
+            },
+        )
+        self.assertRedirects(revised, reverse("rnd:product_detail", args=[product.id]))
+        product.refresh_from_db()
+        self.assertEqual(product.document_revision, 1)
+        self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.DRAFT)
+        self.client.post(reverse("rnd:product_submit", args=[product.id]))
+        product.refresh_from_db()
+        self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.SUBMITTED)
+
+        self.client.force_login(self.admin)
+        self.client.post(reverse("rnd:product_approve", args=[product.id]))
+        self.client.force_login(self.rnd_approver)
+        self.client.post(
+            reverse("rnd:product_development_transition", args=[product.id]),
+            {"action": "prototype_resampling"},
+        )
+        self.client.force_login(self.rnd_editor)
+        self.client.post(
+            reverse("rnd:product_development_transition", args=[product.id]),
+            {"action": "resampling_completed"},
+        )
+        product.refresh_from_db()
+        self.assertEqual(product.prototype_number, 2)
+        self.assertEqual(
+            DevelopmentProductStageDate.objects.get(
+                product=product,
+                stage_key="prototype_1",
+            ).document_revision,
+            0,
+        )
+        self.assertEqual(
+            DevelopmentProductStageDate.objects.get(
+                product=product,
+                stage_key="prototype_2",
+            ).document_revision,
+            1,
+        )
+        timeline = self.client.get(reverse("rnd:development_product_detail", args=[product.id]))
+        self.assertContains(timeline, "Prototype 1 menggunakan Dokumen MDR 000")
+        self.assertContains(timeline, "Prototype 2 menggunakan Dokumen MDR 001")
 
     def test_development_attachment_can_be_deleted_and_reuploaded(self):
         collection = self._collection()

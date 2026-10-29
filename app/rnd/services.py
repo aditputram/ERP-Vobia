@@ -14,6 +14,7 @@ from .models import (
     DevelopmentProduct,
     DevelopmentProductDocumentRevision,
     DevelopmentProductMaterial,
+    DevelopmentProductStageDate,
     MarketingRecommendation,
 )
 
@@ -159,10 +160,17 @@ def sync_collection_status(*, collection, actor=None):
 @transaction.atomic
 def submit_product_document(*, product, actor):
     product = DevelopmentProduct.objects.select_for_update().select_related("collection").get(pk=product.pk)
-    if (
+    revision_during_development = (
         product.collection.development_started_at
-        or product.collection.handed_over_at
-        or product.collection.commercial_approved_at
+        and product.collection.status == Collection.Status.DEVELOPMENT
+        and product.development_stage
+        in {
+            DevelopmentProduct.DevelopmentStage.PROTOTYPE,
+            DevelopmentProduct.DevelopmentStage.RESAMPLING,
+        }
+    )
+    if product.collection.handed_over_at or product.collection.commercial_approved_at or (
+        product.collection.development_started_at and not revision_during_development
     ):
         raise ValidationError("Product sudah dikunci setelah Development dimulai atau handover ke Marketing.")
     if product.document_status not in {
@@ -359,8 +367,14 @@ def request_product_document_revision(*, product, actor, note, target):
     if target not in DevelopmentProductDocumentRevision.RevisionTarget.values:
         raise ValidationError("Pilih bagian dokumen yang harus direvisi.")
     product = DevelopmentProduct.objects.select_for_update().select_related("collection").get(pk=product.pk)
-    if product.collection.development_started_at:
-        raise ValidationError("Revisi dokumen ditutup setelah Collection masuk ke Development.")
+    if product.collection.development_started_at and (
+        product.collection.status != Collection.Status.DEVELOPMENT
+        or product.development_stage != DevelopmentProduct.DevelopmentStage.PROTOTYPE
+        or product.prototype_number < 1
+    ):
+        raise ValidationError(
+            "Revisi MDR selama Development hanya tersedia saat Product sedang menunggu keputusan Prototype."
+        )
     if product.document_status not in {
         DevelopmentProduct.DocumentStatus.SUBMITTED,
         DevelopmentProduct.DocumentStatus.APPROVED,
@@ -551,6 +565,15 @@ def transition_product_development(*, product, actor, action):
         product.status = DevelopmentProduct.Status.FINAL_APPROVED
         update_fields.append("status")
     product.save(update_fields=update_fields)
+    if action in {"sampling_completed", "resampling_completed"}:
+        DevelopmentProductStageDate.objects.update_or_create(
+            product=product,
+            stage_key=f"prototype_{product.prototype_number}",
+            defaults={
+                "document_revision": product.document_revision,
+                "updated_by": actor,
+            },
+        )
     sync_collection_status(collection=product.collection, actor=actor)
     record_audit(
         actor=actor,
@@ -561,6 +584,11 @@ def transition_product_development(*, product, actor, action):
         after_values={
             "development_stage": product.development_stage,
             "prototype_number": product.prototype_number,
+            "document_revision": (
+                f"{product.document_revision:03d}"
+                if action in {"sampling_completed", "resampling_completed"}
+                else None
+            ),
         },
     )
     return product

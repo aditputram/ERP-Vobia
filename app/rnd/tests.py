@@ -1823,6 +1823,7 @@ class RndWorkflowTests(TestCase):
 
         page = self.client.get(reverse("rnd:collection_detail", args=[collection.id]))
         self.assertContains(page, "Delete Collection")
+        self.assertContains(page, "Ya, Delete Collection")
         deleted = self.client.post(reverse("rnd:collection_delete", args=[collection.id]))
 
         self.assertRedirects(deleted, reverse("rnd:dashboard"))

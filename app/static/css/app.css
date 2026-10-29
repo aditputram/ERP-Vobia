@@ -380,6 +380,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .preview-edit-note { margin: -4px 0 14px; font-size: 9px; }
 .ratio-alert { min-width: 54px; display: inline-flex; justify-content: center; padding: 6px 8px; border: 1px solid #e2b4b1; border-radius: 7px; color: var(--danger); background: #fde3e1; font-weight: 900; }
 .danger-button { color: var(--danger); border-color: #e2b4b1; }
+.rnd-delete-confirm { position: relative; }
+.rnd-delete-confirm > summary { cursor: pointer; list-style: none; }
+.rnd-delete-confirm > summary::-webkit-details-marker { display: none; }
+.rnd-delete-confirm > div { position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; width: min(330px, calc(100vw - 32px)); padding: 14px; border: 1px solid #e2b4b1; border-radius: 12px; background: white; box-shadow: 0 14px 32px rgba(22, 22, 18, .14); }
+.rnd-delete-confirm p { margin: 6px 0 12px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
 .finance-opening-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: end; gap: 12px; }
 .finance-opening-grid > div { display: grid; gap: 5px; }

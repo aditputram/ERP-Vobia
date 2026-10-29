@@ -190,6 +190,50 @@ class UserManagementTests(TestCase):
         self.assertTrue(user.check_password("Marketing-Aman-2026!"))
         self.assertTrue(AuditEvent.objects.filter(action="user_created", actor=self.admin).exists())
 
+    def test_superadmin_can_assign_supervisor_access(self):
+        response = self.client.post(
+            reverse("accounts:user_create"),
+            {
+                "username": "sales.supervisor",
+                "first_name": "Sales",
+                "last_name": "Supervisor",
+                "is_active": "on",
+                "password": "Supervisor-Aman-2026!",
+                "access_sales": "supervisor",
+                "access_operation": "none",
+                "access_rnd": "none",
+                "access_marketing": "none",
+                "access_finance": "none",
+                "access_master_data": "none",
+                "access_reconciliation": "none",
+                "access_guide": "none",
+                "tabs_sales": ["dashboard"],
+            },
+        )
+
+        self.assertRedirects(response, reverse("accounts:user_list"))
+        user = get_user_model().objects.get(username="sales.supervisor")
+        self.assertEqual(user.module_access["sales"], "supervisor")
+
+    def test_supervisor_can_work_but_cannot_approve(self):
+        user = get_user_model().objects.create_user(
+            username="supervisor",
+            password=self.password,
+            module_access={"sales": "supervisor"},
+            tab_access={"sales": ["dashboard", "data_import"]},
+        )
+        self.client.force_login(user)
+
+        self.assertEqual(self.client.post(reverse("sales:dashboard")).status_code, 200)
+        self.assertEqual(
+            self.client.post(reverse("sales:dashboard"), {"action": "approve"}).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(reverse("imports:sales_approve", args=[uuid.uuid4()])).status_code,
+            403,
+        )
+
     def test_user_management_uses_system_layout_without_module_sidebar(self):
         response = self.client.get(reverse("accounts:user_list"))
 

@@ -51,6 +51,9 @@ class ModuleAccessMiddleware:
                     if level == "view":
                         return HttpResponseForbidden("Akun ini hanya memiliki akses lihat.")
                     url_name = getattr(request.resolver_match, "url_name", "") or ""
-                    if level == "edit" and any(word in url_name for word in APPROVAL_WORDS):
+                    approval_action = any(word in url_name for word in APPROVAL_WORDS) or (
+                        request.POST.get("action") == "approve"
+                    )
+                    if level != "approve" and approval_action:
                         return HttpResponseForbidden("Tindakan ini memerlukan akses Approve.")
         return None

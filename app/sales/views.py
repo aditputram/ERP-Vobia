@@ -2997,7 +2997,7 @@ def _forecast_recommendation_context(request):
 def _save_store_traffic(request, *, traffic_date=None, values=None):
     if not (
         request.user.is_superuser
-        or module_level(request.user, "sales") in {"edit", "approve"}
+        or module_level(request.user, "sales") in {"edit", "supervisor", "approve"}
     ):
         raise PermissionDenied("Input Traffic Toko memerlukan akses Edit Sales.")
 

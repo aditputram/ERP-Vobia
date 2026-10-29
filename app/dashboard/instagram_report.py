@@ -416,7 +416,7 @@ def dashboard(request):
     if not runtime_allowed(request):
         return HttpResponseForbidden("Dashboard Instagram memerlukan koneksi aman.")
     access_level = (getattr(request.user, "module_access", None) or {}).get("marketing", "approve")
-    can_refresh = request.user.is_superuser or access_level in {"edit", "approve"}
+    can_refresh = request.user.is_superuser or access_level in {"edit", "supervisor", "approve"}
     if request.method == "POST" and not can_refresh:
         return HttpResponseForbidden("Refresh data memerlukan akses Input / Edit atau Approve Marketing.")
     data = request.POST if request.method == "POST" else request.GET

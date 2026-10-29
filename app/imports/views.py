@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 def _can_edit_store_traffic(user):
-    return user.is_superuser or module_level(user, "sales") in {"edit", "approve"}
+    return user.is_superuser or module_level(user, "sales") in {"edit", "supervisor", "approve"}
 
 
 @login_required

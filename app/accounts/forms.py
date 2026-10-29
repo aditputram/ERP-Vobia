@@ -8,6 +8,7 @@ ACCESS_LEVELS = (
     ("none", "Tidak ada akses"),
     ("view", "Lihat"),
     ("edit", "Input / Edit"),
+    ("supervisor", "Supervisor"),
     ("approve", "Approve"),
 )
 

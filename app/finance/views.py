@@ -62,7 +62,7 @@ def dashboard(request):
             "draft_count": JournalEntry.objects.filter(status=JournalEntry.Status.DRAFT).count(),
             "posted_count": JournalEntry.objects.filter(status=JournalEntry.Status.POSTED).count(),
             "posted_debit": posted_lines["debit"] or Decimal("0"),
-            "can_edit": request.user.is_superuser or module_level(request.user, "finance") in {"edit", "approve"},
+            "can_edit": request.user.is_superuser or module_level(request.user, "finance") in {"edit", "supervisor", "approve"},
             "sections": FINANCE_NAV_SECTIONS,
         },
     )
@@ -70,7 +70,7 @@ def dashboard(request):
 
 @login_required
 def account_list(request):
-    can_edit = request.user.is_superuser or module_level(request.user, "finance") in {"edit", "approve"}
+    can_edit = request.user.is_superuser or module_level(request.user, "finance") in {"edit", "supervisor", "approve"}
     edit_id = (request.POST.get("account_id") if request.method == "POST" else request.GET.get("edit")) or ""
     editing_account = None
     if edit_id and can_edit:
@@ -170,7 +170,7 @@ def journal_list(request):
         "finance/journals.html",
         {
             "journals": JournalEntry.objects.select_related("created_by", "posted_by").prefetch_related("lines")[:200],
-            "can_edit": request.user.is_superuser or module_level(request.user, "finance") in {"edit", "approve"},
+            "can_edit": request.user.is_superuser or module_level(request.user, "finance") in {"edit", "supervisor", "approve"},
             "can_delete": request.user.is_superuser or module_level(request.user, "finance") == "approve",
         },
     )
@@ -633,7 +633,7 @@ def _money_rows(rows, account_types):
 def sales_settings(request):
     if not can_access_tab(request.user, "finance", "sales_settings"):
         return HttpResponseForbidden("Akun ini tidak memiliki akses ke tab tersebut.")
-    can_edit = request.user.is_superuser or module_level(request.user, "finance") in {"edit", "approve"}
+    can_edit = request.user.is_superuser or module_level(request.user, "finance") in {"edit", "supervisor", "approve"}
 
     from master_data.models import Category, Product, ProductStatus, Subcategory
 
@@ -832,7 +832,7 @@ def feature(request, slug):
         all_lines = finance_sales_lines()
         can_create_sales_journal = request.user.is_superuser or module_level(
             request.user, "finance"
-        ) in {"edit", "approve"}
+        ) in {"edit", "supervisor", "approve"}
         receipt_account_options = list(
             Account.objects.filter(
                 account_type__in={"AREC", "BANK"}, is_active=True, is_postable=True
@@ -995,7 +995,7 @@ def feature(request, slug):
 
         can_create_sales_return_journal = request.user.is_superuser or module_level(
             request.user, "finance"
-        ) in {"edit", "approve"}
+        ) in {"edit", "supervisor", "approve"}
         if request.GET.get("journal_preview") == "1":
             if not can_create_sales_return_journal:
                 return JsonResponse({"ok": False, "error": "Akun ini tidak memiliki akses membuat jurnal Sales Return."}, status=403)

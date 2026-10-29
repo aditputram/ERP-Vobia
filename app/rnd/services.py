@@ -25,7 +25,7 @@ def can_approve_module(user, module):
 
 def can_edit_module(user, module):
     default_level = "none" if module == "rnd" else "approve"
-    return user.is_superuser or (user.module_access or {}).get(module, default_level) in {"edit", "approve"}
+    return user.is_superuser or (user.module_access or {}).get(module, default_level) in {"edit", "supervisor", "approve"}
 
 
 def _actor_name(actor):

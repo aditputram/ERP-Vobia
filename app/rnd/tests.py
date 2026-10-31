@@ -256,8 +256,11 @@ class RndWorkflowTests(TestCase):
         self.assertLessEqual(max(stored_image.size), 2400)
         design.image.close()
         page = self.client.get(reverse("rnd:designing"))
+        self.assertContains(page, '?tab=design" aria-current="page"')
+        self.assertContains(page, "Recommendation")
+        self.assertContains(page, "Arsip")
         self.assertContains(page, "Desain Terbaru")
-        self.assertContains(page, "Direkomendasikan untuk Collection Baru")
+        self.assertNotContains(page, "Direkomendasikan untuk Collection Baru")
         self.assertContains(page, design.original_name)
         detail = self.client.get(reverse("rnd:design_detail", args=[design.id]))
         self.assertContains(detail, "history.back()")
@@ -303,7 +306,9 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(design.recommended_by, self.rnd_approver)
         self.assertEqual(Collection.objects.count(), 0)
         self.assertEqual(DevelopmentProduct.objects.count(), 0)
-        page = self.client.get(reverse("rnd:designing"))
+        page = self.client.get(f'{reverse("rnd:designing")}?tab=recommendation')
+        self.assertContains(page, '?tab=recommendation" aria-current="page"')
+        self.assertContains(page, "Direkomendasikan untuk Collection Baru")
         self.assertContains(page, "Direkomendasikan")
 
         cancelled = self.client.post(
@@ -315,7 +320,8 @@ class RndWorkflowTests(TestCase):
         self.assertIsNone(design.recommended_at)
 
         DesignAsset.objects.filter(pk=design.pk).update(created_at=timezone.now() - timedelta(days=8))
-        archive = self.client.get(reverse("rnd:designing"))
+        archive = self.client.get(f'{reverse("rnd:designing")}?tab=archive')
+        self.assertContains(archive, '?tab=archive" aria-current="page"')
         self.assertContains(archive, "Design Lainnya")
 
         file_response = self.client.get(reverse("rnd:design_file", args=[design.id]))

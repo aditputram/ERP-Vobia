@@ -176,6 +176,9 @@ def dashboard(request):
 def designing(request):
     request.session["active_module"] = "rnd"
     _purge_expired_designs()
+    active_tab = request.GET.get("tab", "design")
+    if active_tab not in {"design", "recommendation", "archive"}:
+        active_tab = "design"
     can_upload = _can_edit_rnd(request.user)
     form = DesignAssetForm(request.POST or None, request.FILES or None)
     if request.method == "POST":
@@ -204,6 +207,7 @@ def designing(request):
         {
             "form": form,
             "can_upload": can_upload,
+            "active_tab": active_tab,
             "recent_designs": base.filter(created_at__gte=cutoff),
             "recommended_designs": base.filter(recommended_at__isnull=False).order_by("-recommended_at"),
             "other_designs": base.filter(created_at__lt=cutoff, recommended_at__isnull=True),

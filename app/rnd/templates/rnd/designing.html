@@ -23,6 +23,12 @@
 {% endif %}
 
 <section class="panel section-gap">
+    <nav class="rnd-design-tabs" aria-label="Design Library">
+        <a class="{% if active_tab == 'design' %}is-active{% endif %}" href="{% url 'rnd:designing' %}?tab=design"{% if active_tab == 'design' %} aria-current="page"{% endif %}>Design</a>
+        <a class="{% if active_tab == 'recommendation' %}is-active{% endif %}" href="{% url 'rnd:designing' %}?tab=recommendation"{% if active_tab == 'recommendation' %} aria-current="page"{% endif %}>Recommendation</a>
+        <a class="{% if active_tab == 'archive' %}is-active{% endif %}" href="{% url 'rnd:designing' %}?tab=archive"{% if active_tab == 'archive' %} aria-current="page"{% endif %}>Arsip</a>
+    </nav>
+    {% if active_tab == 'design' %}
     <div class="panel-header"><div><p class="eyebrow">7 HARI TERAKHIR</p><h2>Desain Terbaru</h2></div></div>
     <div class="rnd-design-grid">
         {% for design in recent_designs %}
@@ -32,9 +38,7 @@
         </a>
         {% empty %}<p class="empty-state rnd-design-empty">Belum ada foto Design dalam 7 hari terakhir.</p>{% endfor %}
     </div>
-</section>
-
-<section class="panel section-gap">
+    {% elif active_tab == 'recommendation' %}
     <div class="panel-header"><div><p class="eyebrow">SHORTLIST</p><h2>Direkomendasikan untuk Collection Baru</h2></div></div>
     <div class="rnd-design-grid">
         {% for design in recommended_designs %}
@@ -44,10 +48,7 @@
         </a>
         {% empty %}<p class="empty-state rnd-design-empty">Belum ada Design yang direkomendasikan.</p>{% endfor %}
     </div>
-</section>
-
-{% if other_designs %}
-<section class="panel section-gap">
+    {% else %}
     <div class="panel-header"><div><p class="eyebrow">ARSIP</p><h2>Design Lainnya</h2></div></div>
     <div class="rnd-design-grid">
         {% for design in other_designs %}
@@ -55,9 +56,9 @@
             <div class="rnd-design-image"><img src="{% url 'rnd:design_file' design.id %}?size=card&amp;v={{ design.created_at|date:'U' }}" alt="{{ design.original_name }}" loading="lazy" decoding="async"></div>
             <div class="rnd-design-copy"><strong>{{ design.original_name }}</strong><small>{{ design.created_at|date:"d M Y · H:i" }}</small></div>
         </a>
-        {% endfor %}
+        {% empty %}<p class="empty-state rnd-design-empty">Belum ada Design di arsip.</p>{% endfor %}
     </div>
+    {% endif %}
 </section>
-{% endif %}
 <script src="{% static 'js/rnd-materials.js' %}?v=20260908-02" defer></script>
 {% endblock %}

@@ -65,13 +65,13 @@
                     {% endif %}
                 </div>
                 {% endif %}
-                {% if tab_permissions.operation.ppic_requirement or tab_permissions.operation.production_plan or tab_permissions.operation.ppic_generator or tab_permissions.operation.purchase_order or tab_permissions.operation.vendors %}
+                {% if tab_permissions.operation.ppic_requirement or tab_permissions.operation.ppic_production_plan or tab_permissions.operation.ppic_generator or tab_permissions.operation.purchase_order or tab_permissions.operation.vendors %}
                 <button class="nav-item nav-group-toggle {% if request.resolver_match.namespace == 'purchasing' %}active{% endif %}" type="button" data-nav-group-toggle="purchasing" data-nav-group-active="{% if request.resolver_match.namespace == 'purchasing' %}true{% else %}false{% endif %}" aria-expanded="{% if request.resolver_match.namespace == 'purchasing' %}true{% else %}false{% endif %}"><span>PPIC</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
                 <div class="nav-subitems" data-nav-group-panel="purchasing"{% if request.resolver_match.namespace != 'purchasing' %} hidden{% endif %}>
                     {% if tab_permissions.operation.ppic_requirement %}
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'requirements' %}active{% endif %}" href="{% url 'purchasing:requirements' %}">Requirement</a>
                     {% endif %}
-                    {% if tab_permissions.operation.production_plan %}
+                    {% if tab_permissions.operation.ppic_production_plan %}
                     <a class="nav-subitem {% if request.resolver_match.url_name == 'production_plans' or request.resolver_match.url_name == 'production_plan_create' or request.resolver_match.url_name == 'production_plan_detail' %}active{% endif %}" href="{% url 'purchasing:production_plans' %}">Production Plan</a>
                     {% endif %}
                     {% if tab_permissions.operation.ppic_generator %}

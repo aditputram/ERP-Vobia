@@ -293,12 +293,36 @@ class UserManagementTests(TestCase):
 
         response = self.client.get(reverse("accounts:user_edit", args=[user.id]))
 
+        self.assertContains(response, "PPIC · Production Plan")
         self.assertContains(response, "Production · Production Activity")
-        self.assertContains(response, 'name="tabs_operation"', count=17)
+        self.assertContains(response, 'name="tabs_operation"', count=18)
+        self.assertContains(response, 'value="ppic_production_plan"')
         self.assertContains(
             response,
-            'value="production_activity" id="id_tabs_operation_10" checked',
+            'value="production_activity" id="id_tabs_operation_11" checked',
         )
+
+    def test_ppic_production_plan_routes_follow_their_own_tab_access(self):
+        user = get_user_model().objects.create_user(
+            username="ppic-team",
+            password=self.password,
+            module_access={"operation": "edit"},
+            tab_access={"operation": ["ppic_production_plan"]},
+        )
+        self.client.force_login(user)
+
+        self.assertEqual(self.client.get(reverse("purchasing:production_plans")).status_code, 200)
+        self.assertNotEqual(
+            self.client.get(reverse("purchasing:production_plan_create")).status_code,
+            403,
+        )
+        self.assertNotEqual(
+            self.client.get(
+                reverse("purchasing:production_plan_detail", args=[uuid.uuid4()])
+            ).status_code,
+            403,
+        )
+        self.assertEqual(self.client.get(reverse("production:planning")).status_code, 403)
 
     def test_rnd_product_documents_are_shared_by_collection_and_development_tabs(self):
         self.assertEqual(

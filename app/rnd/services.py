@@ -165,6 +165,7 @@ def submit_product_document(*, product, actor):
         and product.collection.status == Collection.Status.DEVELOPMENT
         and product.development_stage
         in {
+            DevelopmentProduct.DevelopmentStage.NOT_STARTED,
             DevelopmentProduct.DevelopmentStage.PROTOTYPE,
             DevelopmentProduct.DevelopmentStage.RESAMPLING,
         }
@@ -282,15 +283,20 @@ def approve_product_document(*, product, actor):
     product.document_status = DevelopmentProduct.DocumentStatus.APPROVED
     product.rnd_approved_at = approved_at
     product.rnd_approved_by = actor
-    product.save(
-        update_fields=(
-            "approved_document",
-            "document_status",
-            "rnd_approved_at",
-            "rnd_approved_by",
-            "updated_at",
-        )
-    )
+    update_fields = [
+        "approved_document",
+        "document_status",
+        "rnd_approved_at",
+        "rnd_approved_by",
+        "updated_at",
+    ]
+    if (
+        product.collection.development_started_at
+        and product.development_stage == DevelopmentProduct.DevelopmentStage.NOT_STARTED
+    ):
+        product.development_stage = DevelopmentProduct.DevelopmentStage.MATERIAL_PURCHASE
+        update_fields.append("development_stage")
+    product.save(update_fields=update_fields)
     revision = DevelopmentProductDocumentRevision.objects.select_for_update().get(
         product=product,
         revision=product.document_revision,
@@ -367,13 +373,19 @@ def request_product_document_revision(*, product, actor, note, target):
     if target not in DevelopmentProductDocumentRevision.RevisionTarget.values:
         raise ValidationError("Pilih bagian dokumen yang harus direvisi.")
     product = DevelopmentProduct.objects.select_for_update().select_related("collection").get(pk=product.pk)
-    if product.collection.development_started_at and (
-        product.collection.status != Collection.Status.DEVELOPMENT
-        or product.development_stage != DevelopmentProduct.DevelopmentStage.PROTOTYPE
-        or product.prototype_number < 1
+    if product.collection.development_started_at and not (
+        product.collection.status == Collection.Status.DEVELOPMENT
+        and (
+            product.development_stage == DevelopmentProduct.DevelopmentStage.NOT_STARTED
+            or (
+                product.development_stage == DevelopmentProduct.DevelopmentStage.PROTOTYPE
+                and product.prototype_number >= 1
+            )
+        )
     ):
         raise ValidationError(
-            "Revisi MDR selama Development hanya tersedia saat Product sedang menunggu keputusan Prototype."
+            "Revisi MDR selama Development hanya tersedia sebelum Product dimulai "
+            "atau saat menunggu keputusan Prototype."
         )
     if product.document_status not in {
         DevelopmentProduct.DocumentStatus.SUBMITTED,

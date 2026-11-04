@@ -416,11 +416,7 @@ def collection_detail(request, collection_id):
         Collection.objects.select_related("handed_over_by", "marketing_previewed_by"),
         id=collection_id,
     )
-    editable = not (
-        collection.development_started_at
-        or collection.handed_over_at
-        or collection.commercial_approved_at
-    )
+    editable = not (collection.handed_over_at or collection.commercial_approved_at)
     product = DevelopmentProduct(collection=collection)
     product_form = DevelopmentProductForm(request.POST or None, request.FILES or None, instance=product)
     material_formset = DevelopmentProductMaterialFormSet(
@@ -431,7 +427,7 @@ def collection_detail(request, collection_id):
     if request.method == "POST":
         if not editable:
             return HttpResponseForbidden(
-                "Product baru tidak dapat ditambahkan setelah Development dimulai atau handover ke Marketing."
+                "Product baru tidak dapat ditambahkan setelah handover ke Marketing."
             )
         if product_form.is_valid() and material_formset.is_valid():
             product = product_form.save(commit=False)
@@ -718,6 +714,8 @@ def development_product_detail(request, product_id):
     )
     timeline = _development_timeline(product)
     if request.method == "POST":
+        if product.development_stage == DevelopmentProduct.DevelopmentStage.NOT_STARTED:
+            return HttpResponseForbidden("Dokumen Product wajib Approved sebelum proses Development diisi.")
         if not can_edit_module(request.user, "rnd"):
             return HttpResponseForbidden("Tanggal Development memerlukan akses Edit atau Approve R&D.")
         stage_key = request.POST.get("stage_key", "")
@@ -814,7 +812,8 @@ def development_product_detail(request, product_id):
         {
             "product": product,
             "timeline": timeline,
-            "can_edit_details": can_edit_module(request.user, "rnd"),
+            "can_edit_details": can_edit_module(request.user, "rnd")
+            and product.development_stage != DevelopmentProduct.DevelopmentStage.NOT_STARTED,
             "can_request_mdr_revision": (
                 request.user.is_superuser
                 and product.document_status == DevelopmentProduct.DocumentStatus.APPROVED
@@ -921,6 +920,7 @@ def product_detail(request, product_id):
         and product.collection.status == Collection.Status.DEVELOPMENT
         and product.development_stage
         in {
+            DevelopmentProduct.DevelopmentStage.NOT_STARTED,
             DevelopmentProduct.DevelopmentStage.PROTOTYPE,
             DevelopmentProduct.DevelopmentStage.RESAMPLING,
         }

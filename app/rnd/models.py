@@ -275,6 +275,7 @@ class DevelopmentProductDocumentRevision(UUIDTimestampedModel):
     class RevisionTarget(models.TextChoices):
         MOCKUP = "MOCKUP", "Mockup"
         TECHNICAL_DRAWING = "TECHNICAL_DRAWING", "Technical Drawing"
+        BILL_OF_MATERIAL = "BILL_OF_MATERIAL", "Bill of Material"
         BOTH = "BOTH", "Mockup dan Technical Drawing"
 
     product = models.ForeignKey(

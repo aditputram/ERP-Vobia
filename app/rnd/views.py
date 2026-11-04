@@ -1027,7 +1027,20 @@ def product_detail(request, product_id):
         requested_revision if requested_revision in revision_numbers else product.document_revision
     )
     selected_revision_record = revisions_by_number.get(selected_revision)
-    if selected_revision_record:
+    live_preview = (
+        selected_revision == product.document_revision
+        and product.document_status
+        in {
+            DevelopmentProduct.DocumentStatus.DRAFT,
+            DevelopmentProduct.DocumentStatus.REJECTED,
+        }
+        and product.mockup
+        and product.technical_drawing
+    )
+    if live_preview:
+        viewer_url = reverse("rnd:product_file", args=(product.id, "combined-preview"))
+        viewer_version = product.updated_at
+    elif selected_revision_record:
         viewer_url = reverse(
             "rnd:product_revision_file",
             args=(product.id, selected_revision),
@@ -1040,7 +1053,7 @@ def product_detail(request, product_id):
         viewer_url = ""
         viewer_version = None
     if viewer_url and viewer_version:
-        viewer_url = f"{viewer_url}?v={int(viewer_version.timestamp())}"
+        viewer_url = f"{viewer_url}?v={int(viewer_version.timestamp() * 1_000_000)}"
     return render(
         request,
         "rnd/product_detail.html",

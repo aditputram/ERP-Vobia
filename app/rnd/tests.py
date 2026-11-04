@@ -1245,6 +1245,127 @@ class RndWorkflowTests(TestCase):
         self.assertIn("MDR REVISION ZERO", old_text)
         self.assertNotIn("MDR REVISION ONE", old_text)
 
+    def test_bom_only_revision_rebuilds_current_mdr_and_preserves_approved_revision(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.mockup = self._pdf("mockup-bom.pdf", "MDR BOM REVISION")
+        product.technical_drawing = self._pdf("drawing-bom.pdf", "DRAWING BOM REVISION")
+        product.save(update_fields=("mockup", "technical_drawing", "updated_at"))
+        material = DevelopmentProductMaterial.objects.create(
+            product=product,
+            material="Canvas 12 oz",
+            requirement="1.2",
+            eom="meter",
+        )
+
+        self.client.force_login(self.rnd_editor)
+        self.client.post(reverse("rnd:product_submit", args=[product.id]))
+        self.client.force_login(self.admin)
+        self.client.post(reverse("rnd:product_approve", args=[product.id]))
+        product.refresh_from_db()
+        revision_zero = product.document_revisions.get(revision=0)
+        original_mockup = product.mockup.name
+        original_drawing = product.technical_drawing.name
+
+        requested = self.client.post(
+            reverse("rnd:product_request_revision", args=[product.id]),
+            {
+                "revision_note": "Tambahkan resleting ke Bill of Material.",
+                "revision_target": DevelopmentProductDocumentRevision.RevisionTarget.BILL_OF_MATERIAL,
+            },
+        )
+        self.assertRedirects(requested, reverse("rnd:product_detail", args=[product.id]))
+
+        self.client.force_login(self.rnd_editor)
+        revised = self.client.post(
+            reverse("rnd:product_detail", args=[product.id]),
+            {
+                "name": product.name,
+                "category": "Bag",
+                "status": DevelopmentProduct.Status.REVISION,
+                "materials-TOTAL_FORMS": "2",
+                "materials-INITIAL_FORMS": "1",
+                "materials-MIN_NUM_FORMS": "0",
+                "materials-MAX_NUM_FORMS": "1000",
+                "materials-0-id": str(material.id),
+                "materials-0-material": "Canvas 12 oz",
+                "materials-0-requirement": "1.2",
+                "materials-0-eom": "meter",
+                "materials-0-notes": "",
+                "materials-1-material": "Resleting YKK",
+                "materials-1-requirement": "1",
+                "materials-1-eom": "pcs",
+                "materials-1-notes": "Warna hitam",
+            },
+        )
+        self.assertRedirects(revised, reverse("rnd:product_detail", args=[product.id]))
+        product.refresh_from_db()
+        self.assertEqual(product.document_revision, 1)
+        self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.DRAFT)
+        self.assertEqual(product.mockup.name, original_mockup)
+        self.assertEqual(product.technical_drawing.name, original_drawing)
+
+        detail = self.client.get(reverse("rnd:product_detail", args=[product.id]))
+        preview_url = reverse("rnd:product_file", args=[product.id, "combined-preview"])
+        self.assertContains(detail, preview_url)
+        current_preview = self.client.get(preview_url)
+        current_pdf = PdfReader(BytesIO(b"".join(current_preview.streaming_content)))
+        current_text = " ".join(page.extract_text() for page in current_pdf.pages)
+        self.assertIn("Canvas 12 oz", current_text)
+        self.assertIn("Resleting YKK", current_text)
+
+        old_file = self.client.get(
+            reverse("rnd:product_revision_file", args=[product.id, revision_zero.revision])
+        )
+        old_pdf = PdfReader(BytesIO(b"".join(old_file.streaming_content)))
+        old_text = " ".join(page.extract_text() for page in old_pdf.pages)
+        self.assertIn("Canvas 12 oz", old_text)
+        self.assertNotIn("Resleting YKK", old_text)
+
+    def test_rejected_bom_edit_uses_regenerated_live_preview(self):
+        collection = self._collection()
+        product = self._product(collection)
+        product.mockup = self._pdf("mockup-rejected-bom.pdf", "MDR REJECTED BOM")
+        product.technical_drawing = self._pdf("drawing-rejected-bom.pdf", "DRAWING REJECTED BOM")
+        product.save(update_fields=("mockup", "technical_drawing", "updated_at"))
+
+        self.client.force_login(self.rnd_editor)
+        self.client.post(reverse("rnd:product_submit", args=[product.id]))
+        self.client.force_login(self.admin)
+        self.client.post(reverse("rnd:product_reject", args=[product.id]))
+        self.client.force_login(self.rnd_editor)
+        self.client.post(
+            reverse("rnd:product_detail", args=[product.id]),
+            {
+                "name": product.name,
+                "category": "Bag",
+                "status": DevelopmentProduct.Status.REVISION,
+                "materials-TOTAL_FORMS": "1",
+                "materials-INITIAL_FORMS": "0",
+                "materials-MIN_NUM_FORMS": "0",
+                "materials-MAX_NUM_FORMS": "1000",
+                "materials-0-material": "BOM Tambahan",
+                "materials-0-requirement": "2",
+                "materials-0-eom": "pcs",
+                "materials-0-notes": "Hasil revisi",
+            },
+        )
+
+        detail = self.client.get(reverse("rnd:product_detail", args=[product.id]))
+        preview_url = reverse("rnd:product_file", args=[product.id, "combined-preview"])
+        revision_url = reverse("rnd:product_revision_file", args=[product.id, 0])
+        self.assertContains(detail, preview_url)
+        self.assertNotContains(detail, f'src="{revision_url}')
+        current_preview = self.client.get(preview_url)
+        current_pdf = PdfReader(BytesIO(b"".join(current_preview.streaming_content)))
+        current_text = " ".join(page.extract_text() for page in current_pdf.pages)
+        self.assertIn("BOM Tambahan", current_text)
+
+        rejected_snapshot = self.client.get(revision_url)
+        rejected_pdf = PdfReader(BytesIO(b"".join(rejected_snapshot.streaming_content)))
+        rejected_text = " ".join(page.extract_text() for page in rejected_pdf.pages)
+        self.assertNotIn("BOM Tambahan", rejected_text)
+
     def test_submit_requires_both_design_documents(self):
         collection = self._collection()
         product = self._product(collection)

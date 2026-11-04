@@ -5,6 +5,7 @@
         <div class="rnd-revision-targets">
             <label><input type="radio" name="revision_target" value="MOCKUP" required{% if selected_revision_record.revision_target == 'MOCKUP' %} checked{% endif %}> Mockup</label>
             <label><input type="radio" name="revision_target" value="TECHNICAL_DRAWING"{% if selected_revision_record.revision_target == 'TECHNICAL_DRAWING' %} checked{% endif %}> Technical Drawing</label>
+            <label><input type="radio" name="revision_target" value="BILL_OF_MATERIAL"{% if selected_revision_record.revision_target == 'BILL_OF_MATERIAL' %} checked{% endif %}> Bill of Material</label>
             <label><input type="radio" name="revision_target" value="BOTH"{% if selected_revision_record.revision_target == 'BOTH' %} checked{% endif %}> Keduanya</label>
         </div>
     </fieldset>

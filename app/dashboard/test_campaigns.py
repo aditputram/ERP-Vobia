@@ -10,6 +10,7 @@ from django.urls import reverse
 from unittest.mock import patch
 from PIL import Image
 
+from inventory.models import FIFOOpeningSnapshot
 from master_data.models import Category, Product, ProductStatus, ProductVariant, SKU
 from imports.models import RawFile
 from sales.models import SalesOrder, SalesOrderLine
@@ -320,6 +321,13 @@ class CampaignTests(TestCase):
 
     @patch("dashboard.campaigns.get_report", return_value=(None, ""))
     def test_product_performance_uses_qty_achievement_and_sales_traffic_visitors(self, report):
+        FIFOOpeningSnapshot.objects.create(
+            sku=self.sku,
+            cutover_date=date(2026, 7, 31),
+            opening_qty=12,
+            frozen_unit_cogs=50000,
+            recorded_by=self.user,
+        )
         raw = RawFile.objects.create(
             dataset_type=RawFile.DatasetType.TRAFFIC_SHOPEE,
             original_filename="traffic.csv", storage_path="tests/traffic.csv",
@@ -337,6 +345,9 @@ class CampaignTests(TestCase):
         response = self.client.get(reverse("dashboard:campaign_detail", args=[self.campaign.id]))
         self.assertEqual(response.context["rows"][0]["traffic_shopee"], 1234)
         self.assertEqual(response.context["rows"][0]["traffic_tiktok"], 0)
+        self.assertEqual(response.context["rows"][0]["stock"], Decimal("12"))
+        self.assertEqual(response.context["product_totals"]["stock"], Decimal("12"))
+        self.assertContains(response, "<th>Stok</th>", html=True)
         self.assertContains(response, "1.234")
         self.assertEqual(response.content.decode().count("<th>Achievement</th>"), 1)
         self.assertContains(response, "<th>Total</th>", html=True)

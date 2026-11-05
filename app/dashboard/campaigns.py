@@ -13,6 +13,8 @@ from django.http import FileResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
+from inventory.services.reporting import inventory_summary_rows
+from master_data.models import SKU, Warehouse
 from sales.models import SalesOrderLine
 from traffic.models import TrafficProductMetric
 from config.image_files import card_image
@@ -181,6 +183,18 @@ def campaign_detail(request, campaign_id):
     for (product_id, source, _period, _listing), views in traffic_by_listing.items():
         traffic_totals[(product_id, source)] = traffic_totals.get((product_id, source), 0) + views
     product_ids = [item.product_id for item in campaign.products.all()]
+    main_warehouse = Warehouse.objects.filter(code="MAIN", is_active=True).first()
+    stock_by_product = {}
+    if main_warehouse:
+        skus = SKU.objects.filter(
+            is_active=True,
+            product_variant__product_id__in=product_ids,
+        ).select_related("product_variant")
+        for stock in inventory_summary_rows(skus, warehouse=main_warehouse):
+            product_id = stock["sku"].product_variant.product_id
+            stock_by_product[product_id] = (
+                stock_by_product.get(product_id, Decimal("0")) + stock["balance"]
+            )
     actual_by_product = {
         item["sku__product_variant__product_id"]: item
         for item in SalesOrderLine.objects.filter(
@@ -199,6 +213,7 @@ def campaign_detail(request, campaign_id):
         qty = actual.get("qty") or 0
         gross = actual.get("gross") or Decimal("0")
         rows.append({"item": item, "qty": qty, "gross": gross,
+                     "stock": stock_by_product.get(item.product_id, Decimal("0")),
                      "qty_achievement": Decimal(qty) / item.target_qty * 100 if item.target_qty else None,
                      "traffic_shopee": traffic_totals.get((item.product_id, "Shopee"), 0),
                      "traffic_tiktok": traffic_totals.get((item.product_id, "Tiktok"), 0)})
@@ -209,6 +224,7 @@ def campaign_detail(request, campaign_id):
     product_totals = {
         "target_qty": total_target_qty,
         "actual_qty": total_actual_qty,
+        "stock": sum((row["stock"] for row in rows), Decimal("0")),
         "achievement": Decimal(total_actual_qty) / total_target_qty * 100 if total_target_qty else None,
         "target_gross": target,
         "actual_gross": gross,

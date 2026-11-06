@@ -9,7 +9,7 @@ from merchandising.models import ProjectionRule
 
 ZERO = Decimal("0")
 PLANNING_BUFFER_TARGET_RATIO = Decimal("1.5")
-NO_INCOMING_STATUSES = {"Discontinue", "Seasonal New"}
+NO_INCOMING_STATUSES = {"Discontinue"}
 NO_INCOMING_CATEGORIES = {"Packaging"}
 
 

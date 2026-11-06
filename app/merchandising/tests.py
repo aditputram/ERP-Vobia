@@ -199,6 +199,12 @@ class MerchandisingCalculationTests(TestCase):
             Decimal("35"),
         )
 
+    def test_seasonal_new_allows_incoming(self):
+        self.assertEqual(
+            apply_product_guardrail(100, "Seasonal New", "Apparel", available_stock=35),
+            Decimal("100"),
+        )
+
 
 class MerchandisingWorkflowTests(TestCase):
     def setUp(self):

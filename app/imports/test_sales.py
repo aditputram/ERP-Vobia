@@ -666,7 +666,7 @@ class SalesImportWorkflowTests(TestCase):
         self.assertRedirects(response, reverse("imports:sales_detail", args=[batch.id]))
         batch.refresh_from_db()
         self.assertEqual(batch.status, SalesImportBatch.Status.READY)
-        self.assertEqual(batch.parser_version, "sales-v9")
+        self.assertEqual(batch.parser_version, "sales-v10")
         self.assertFalse(batch.issues.filter(code="ORDER_HEADER_CONFLICT").exists())
         approve_sales_import(batch.id, self.user)
 
@@ -831,6 +831,39 @@ class SalesImportWorkflowTests(TestCase):
         line = SalesOrderLine.objects.get()
         self.assertEqual(line.quantity, 4)
         self.assertEqual(str(line.total_net_sales), "1196000.0000")
+
+    def test_tiktok_same_seller_sku_merges_across_marketplace_variations(self):
+        headers = [*TIKTOK_HEADERS, "SKU ID", "Variation"]
+        shared = [
+            "TIKTOK-ORDER-002",
+            "Selesai",
+            "SKU-001",
+            "1",
+            "299000",
+            "0",
+            "18/08/2026 23:12:43",
+            "19/08/2026 09:00:00",
+            "",
+        ]
+        batch = create_sales_import(
+            make_csv(
+                headers,
+                [
+                    [*shared, "TIKTOK-SKU-ID-A", "Hobby Sock Rugby"],
+                    [*shared, "TIKTOK-SKU-ID-B", "Hobby Rugby"],
+                ],
+                "tiktok-same-seller-sku.csv",
+            ),
+            SalesImportBatch.Source.TIKTOK,
+            self.user,
+        )
+
+        self.assertEqual(batch.status, SalesImportBatch.Status.READY)
+        self.assertEqual(batch.total_rows, 2)
+        self.assertEqual(batch.staged_rows.count(), 1)
+        self.assertEqual(batch.staged_rows.get().quantity, 2)
+        self.assertEqual(batch.quality_summary["duplicate_business_key_count"], 0)
+        self.assertEqual(batch.quality_summary["merged_same_sku_rows"], 1)
 
     def test_same_sku_rows_with_different_prices_still_block_batch(self):
         batch = create_sales_import(

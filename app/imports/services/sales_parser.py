@@ -16,7 +16,7 @@ from sales.models import SalesOrder, SalesOrderLine
 from ..models import SalesImportBatch, SalesImportIssue, StagedSalesRow
 
 
-PARSER_VERSION = "sales-v9"
+PARSER_VERSION = "sales-v10"
 SALES_CUTOVER_DATE = date(2026, 8, 1)
 SHOPEE_CANCEL_REASON_HEADERS = ("Alasan Pembatalan",)
 SHOPEE_RETURN_STATUS_HEADERS = (
@@ -162,10 +162,14 @@ def _merge_same_sku_rows(source_rows, resolved, source):
             merged_rows.append((row_number, raw))
             continue
 
+        product_identity = (
+            ("seller_sku", seller_sku)
+            if seller_sku
+            else ("marketplace_sku_id", marketplace_sku_id)
+        )
         merge_key = (
             order_number,
-            seller_sku,
-            marketplace_sku_id,
+            product_identity,
             _text(raw.get(resolved["status"])),
             _text(raw.get(resolved["created_time"])),
             _text(raw.get(resolved["shipped_time"])),

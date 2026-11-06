@@ -666,7 +666,7 @@ class SalesImportWorkflowTests(TestCase):
         self.assertRedirects(response, reverse("imports:sales_detail", args=[batch.id]))
         batch.refresh_from_db()
         self.assertEqual(batch.status, SalesImportBatch.Status.READY)
-        self.assertEqual(batch.parser_version, "sales-v8")
+        self.assertEqual(batch.parser_version, "sales-v9")
         self.assertFalse(batch.issues.filter(code="ORDER_HEADER_CONFLICT").exists())
         approve_sales_import(batch.id, self.user)
 
@@ -812,13 +812,37 @@ class SalesImportWorkflowTests(TestCase):
         self.assertEqual(str(original.retail_price_snapshot), "299000.00")
         self.assertEqual(str(original.sales_cogs_snapshot), "99500.0000")
 
-    def test_duplicate_business_key_blocks_batch(self):
+    def test_same_sku_rows_in_one_order_are_merged_as_quantity(self):
         row = self.shopee_row()
         batch = create_sales_import(
             make_csv(SHOPEE_HEADERS, [row, row], "duplicate.csv"),
             SalesImportBatch.Source.SHOPEE,
             self.user,
         )
+        self.assertEqual(batch.status, SalesImportBatch.Status.READY)
+        self.assertEqual(batch.total_rows, 2)
+        self.assertEqual(batch.staged_rows.count(), 1)
+        self.assertEqual(batch.staged_rows.get().quantity, 4)
+        self.assertEqual(batch.quality_summary["duplicate_business_key_count"], 0)
+        self.assertEqual(batch.quality_summary["merged_same_sku_rows"], 1)
+
+        approve_sales_import(batch.id, self.user)
+
+        line = SalesOrderLine.objects.get()
+        self.assertEqual(line.quantity, 4)
+        self.assertEqual(str(line.total_net_sales), "1196000.0000")
+
+    def test_same_sku_rows_with_different_prices_still_block_batch(self):
+        batch = create_sales_import(
+            make_csv(
+                SHOPEE_HEADERS,
+                [self.shopee_row(), self.shopee_row(**{"Harga Setelah Diskon": "250.000"})],
+                "conflicting-duplicate.csv",
+            ),
+            SalesImportBatch.Source.SHOPEE,
+            self.user,
+        )
+
         self.assertEqual(batch.status, SalesImportBatch.Status.BLOCKED)
         self.assertEqual(batch.quality_summary["duplicate_business_key_count"], 1)
 

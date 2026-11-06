@@ -16,7 +16,7 @@ from sales.models import SalesOrder, SalesOrderLine
 from ..models import SalesImportBatch, SalesImportIssue, StagedSalesRow
 
 
-PARSER_VERSION = "sales-v8"
+PARSER_VERSION = "sales-v9"
 SALES_CUTOVER_DATE = date(2026, 8, 1)
 SHOPEE_CANCEL_REASON_HEADERS = ("Alasan Pembatalan",)
 SHOPEE_RETURN_STATUS_HEADERS = (
@@ -133,6 +133,65 @@ def _resolve_headers(headers, source):
         else:
             missing.append(" / ".join(aliases))
     return resolved, missing
+
+
+def _merge_same_sku_rows(source_rows, resolved, source):
+    merged_rows = []
+    merged_positions = {}
+    merged_count = 0
+
+    for row_number, raw in source_rows:
+        order_number = _text(raw.get(resolved["order_number"]))
+        seller_sku = _text(raw.get(resolved["sku"]))
+        marketplace_sku_id = _text(raw.get("SKU ID")) if source == SalesImportBatch.Source.TIKTOK else ""
+        if not order_number or not (seller_sku or marketplace_sku_id):
+            merged_rows.append((row_number, raw))
+            continue
+        try:
+            quantity = _integer(raw.get(resolved["quantity"]))
+            if quantity <= 0:
+                raise InvalidOperation
+            if source == SalesImportBatch.Source.TIKTOK:
+                original_price = _decimal(raw.get(resolved["original_unit_price"]))
+                seller_discount = _decimal(raw.get(resolved["seller_discount"])) or Decimal("0")
+                unit_financials = (original_price, seller_discount / quantity)
+            else:
+                seller_discount = None
+                unit_financials = (_decimal(raw.get(resolved["net_unit_price"])),)
+        except (InvalidOperation, ValueError, ZeroDivisionError):
+            merged_rows.append((row_number, raw))
+            continue
+
+        merge_key = (
+            order_number,
+            seller_sku,
+            marketplace_sku_id,
+            _text(raw.get(resolved["status"])),
+            _text(raw.get(resolved["created_time"])),
+            _text(raw.get(resolved["shipped_time"])),
+            _raw_text(raw, SHOPEE_CANCEL_REASON_HEADERS),
+            _raw_text(raw, SHOPEE_RETURN_STATUS_HEADERS + TIKTOK_RETURN_STATUS_HEADERS),
+            unit_financials,
+        )
+        existing_index = merged_positions.get(merge_key)
+        if existing_index is None:
+            merged_raw = dict(raw)
+            merged_raw["_source_row_numbers"] = [row_number]
+            merged_positions[merge_key] = len(merged_rows)
+            merged_rows.append((row_number, merged_raw))
+            continue
+
+        _, merged_raw = merged_rows[existing_index]
+        merged_raw[resolved["quantity"]] = _integer(merged_raw.get(resolved["quantity"])) + quantity
+        if source == SalesImportBatch.Source.TIKTOK:
+            merged_raw[resolved["seller_discount"]] = (
+                (_decimal(merged_raw.get(resolved["seller_discount"])) or Decimal("0"))
+                + seller_discount
+            )
+        merged_raw["_source_row_numbers"].append(row_number)
+        merged_count += 1
+
+    return merged_rows, merged_count
 
 
 def _read_csv(path):
@@ -271,6 +330,7 @@ def parse_sales_batch(batch):
         batch.save(update_fields=["status", "blocking_issue_count", "previewed_at"])
         return batch
 
+    source_row_count = len(source_rows)
     resolved, missing_headers = _resolve_headers(headers, batch.source)
     if missing_headers:
         SalesImportIssue.objects.create(
@@ -302,6 +362,8 @@ def parse_sales_batch(batch):
         batch.previewed_at = timezone.now()
         batch.save()
         return batch
+
+    source_rows, merged_same_sku_rows = _merge_same_sku_rows(source_rows, resolved, batch.source)
 
     marketplace_sku_mappings = {}
     if batch.source == SalesImportBatch.Source.TIKTOK:
@@ -580,6 +642,7 @@ def parse_sales_batch(batch):
             "financial_snapshot_locked": historical_status_audit,
             "retail_price_rule": "transaction_special_case" if retail_price_special_case else "master_snapshot",
             "master_retail_price": str(master_retail_snapshot) if master_retail_snapshot is not None else "",
+            "source_row_numbers": raw.get("_source_row_numbers", [row_number]),
         }
         staged = StagedSalesRow.objects.create(
             batch=batch,
@@ -691,7 +754,7 @@ def parse_sales_batch(batch):
     warning_count = sum(1 for issue in issue_models if issue.severity == "WARNING")
     batch.status = SalesImportBatch.Status.BLOCKED if blocking_count else SalesImportBatch.Status.READY
     batch.parser_version = PARSER_VERSION
-    batch.total_rows = len(staged_rows)
+    batch.total_rows = source_row_count
     batch.new_rows = action_counts[StagedSalesRow.ProposedAction.NEW]
     batch.status_update_rows = action_counts[StagedSalesRow.ProposedAction.STATUS_UPDATE]
     batch.unchanged_rows = action_counts[StagedSalesRow.ProposedAction.UNCHANGED]
@@ -706,6 +769,7 @@ def parse_sales_batch(batch):
         **quality,
         "headers": headers,
         "duplicate_business_key_count": len(duplicate_keys),
+        "merged_same_sku_rows": merged_same_sku_rows,
         "sales_cutover_date": str(SALES_CUTOVER_DATE),
         "historical_status_audit_orders": len(historical_audit_order_numbers),
         "historical_backfill_orders": len(historical_backfill_order_numbers),

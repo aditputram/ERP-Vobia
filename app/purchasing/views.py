@@ -341,7 +341,7 @@ def requirements(request):
     )
 
 
-def _production_plan_materials(source, requirements, *, require_supplier=False):
+def _production_plan_materials(source, requirements):
     rows = []
     products = {
         str(row.sku.product_variant.product_id): row.sku.product_variant.product
@@ -366,8 +366,6 @@ def _production_plan_materials(source, requirements, *, require_supplier=False):
             raise ValidationError(f"Material {name}: pilih Product/Parent SKU tujuan.")
         supplier_id = supplier_ids[index] if index < len(supplier_ids) else ""
         supplier = suppliers.get(supplier_id) if supplier_id else None
-        if require_supplier and not supplier:
-            raise ValidationError(f"Material {name}: supplier wajib dipilih sebelum Generate PPO & PO.")
         if supplier_id and not supplier:
             raise ValidationError(f"Material {name}: supplier tidak valid atau sudah nonaktif.")
         material_type = material_types[index] if index < len(material_types) else "MAIN"
@@ -705,16 +703,18 @@ def production_plan_detail(request, plan_id):
             process_costs = []
             unit_cogs = {str(row.id): request.POST.get(f"unit_cogs_{row.id}") for row in requirements}
             try:
-                materials = _production_plan_materials(
-                    request.POST,
-                    requirements,
-                    require_supplier=action == "generate",
-                )
+                materials = _production_plan_materials(request.POST, requirements)
                 process_costs = _production_plan_costs(
                     request.POST,
                     requirements,
                     additional_process_controlled=request.POST.get("control_additional_process") == "on",
                 )
+                if action == "generate":
+                    missing_supplier = next((row for row in materials if row["supplier"] is None), None)
+                    if missing_supplier:
+                        raise ValidationError(
+                            f"Material {missing_supplier['material_name']}: supplier wajib dipilih sebelum Generate PPO & PO."
+                        )
             except ValidationError as exc:
                 form.add_error(None, exc)
             if submitted_requirements and form.is_valid():

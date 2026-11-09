@@ -956,6 +956,7 @@ class PurchasingWorkflowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Material Fabric: supplier wajib dipilih sebelum Generate PPO &amp; PO.")
+        self.assertContains(response, 'value="Fabric"')
         self.assertEqual(
             AuditEvent.objects.filter(action="ppic_production_plan_saved").count(),
             saved_audit_count,

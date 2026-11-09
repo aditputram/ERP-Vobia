@@ -890,6 +890,78 @@ class PurchasingWorkflowTests(TestCase):
         self.assertEqual(plan.target_inbound_date, date(2026, 9, 1))
         self.assertIsNone(plan.purchase_order_id)
 
+    def test_cmt_generate_without_material_supplier_returns_validation(self):
+        incoming = self._approved_incoming(100)
+        requirement = PPICRequirement.objects.get(incoming_plan=incoming)
+        product = requirement.sku.product_variant.product
+        plan = save_ppic_production_plan(
+            actor=self.user,
+            requirements=[requirement],
+            quantities={str(requirement.id): "100"},
+            values={
+                "production_method": PPICProductionPlan.ProductionMethod.CMT,
+                "control_material_purchase": True,
+                "control_trial": False,
+                "control_cut": False,
+                "control_additional_process": False,
+                "control_make": False,
+                "control_trim": False,
+                "control_qc": False,
+                "control_inbound": True,
+                "target_material_purchase_date": date(2026, 8, 10),
+                "target_inbound_date": date(2026, 9, 1),
+            },
+            materials=[{
+                "product": product,
+                "supplier": None,
+                "material_name": "Fabric",
+                "quantity": Decimal("100"),
+                "unit": "yard",
+                "unit_price": Decimal("5000"),
+            }],
+            process_costs=[{
+                "product": product,
+                "cmt_supplier": self.supplier,
+                "cmt_unit_cost": Decimal("40000"),
+                "additional_process_unit_cost": Decimal("0"),
+            }],
+        )
+        self.client.force_login(self.user)
+        saved_audit_count = AuditEvent.objects.filter(action="ppic_production_plan_saved").count()
+
+        response = self.client.post(
+            reverse("purchasing:production_plan_detail", args=[plan.id]),
+            {
+                "action": "generate",
+                "requirement": [str(requirement.id)],
+                "production_method": PPICProductionPlan.ProductionMethod.CMT,
+                "control_material_purchase": "on",
+                "control_inbound": "on",
+                "target_material_purchase_date": "2026-08-10",
+                "target_inbound_date": "2026-09-01",
+                f"quantity_{requirement.id}": "100",
+                f"unit_cogs_{requirement.id}": "45000",
+                "material_product": [str(product.id)],
+                "material_name": ["Fabric"],
+                "material_type": ["MAIN"],
+                "material_supplier": [""],
+                "material_quantity": ["100"],
+                "material_unit": ["yard"],
+                "material_unit_price": ["5000"],
+                "cmt_cost_product": [str(product.id)],
+                "cmt_supplier": [str(self.supplier.id)],
+                "cmt_unit_cost": ["40000"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Material Fabric: supplier wajib dipilih sebelum Generate PPO &amp; PO.")
+        self.assertEqual(
+            AuditEvent.objects.filter(action="ppic_production_plan_saved").count(),
+            saved_audit_count,
+        )
+        self.assertEqual(PurchaseOrder.objects.count(), 0)
+
     def test_po_generator_lists_saved_draft_plans_and_honors_month_filter(self):
         first_plan = self._approved_incoming(100)
         first = PPICRequirement.objects.get(incoming_plan=first_plan)

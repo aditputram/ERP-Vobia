@@ -540,7 +540,7 @@ def save_ppic_production_plan(
 @transaction.atomic
 def generate_po_from_production_plan(plan_id, actor):
     plan = (
-        PPICProductionPlan.objects.select_for_update()
+        PPICProductionPlan.objects.select_for_update(of=("self",))
         .select_related("supplier")
         .prefetch_related("lines__requirement__sku", "materials", "process_costs")
         .get(pk=plan_id)
@@ -627,7 +627,7 @@ def generate_po_from_production_plan(plan_id, actor):
 @transaction.atomic
 def release_po(po_id, actor):
     po = (
-        PurchaseOrder.objects.select_for_update()
+        PurchaseOrder.objects.select_for_update(of=("self",))
         .select_related("parent_plan")
         .prefetch_related("lines__sku", "lines__requirement")
         .get(pk=po_id)
@@ -722,7 +722,7 @@ def release_po(po_id, actor):
 
 @transaction.atomic
 def cancel_po(po_id, actor, reason):
-    po = PurchaseOrder.objects.select_for_update().select_related("parent_plan").get(pk=po_id)
+    po = PurchaseOrder.objects.select_for_update(of=("self",)).select_related("parent_plan").get(pk=po_id)
     if po.status != PurchaseOrder.Status.RELEASED:
         raise ValidationError("Hanya PO Released yang boleh dibatalkan.")
     if not reason.strip():
@@ -843,7 +843,7 @@ def delete_unused_supplier(supplier_id, actor, reason):
 @transaction.atomic
 def delete_draft_po(po_id, actor):
     po = (
-        PurchaseOrder.objects.select_for_update()
+        PurchaseOrder.objects.select_for_update(of=("self",))
         .select_related("ppic_production_plan", "parent_plan")
         .prefetch_related("lines__requirement", "lines__sku", "items")
         .get(pk=po_id)

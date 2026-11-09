@@ -115,6 +115,11 @@
       const freshFppVendor = form.querySelector('[data-fpp-vendor-field]');
       const restoredFppVendor = restored.querySelector('[name="supplier"]')?.closest('.production-plan-field');
       if (freshFppVendor && restoredFppVendor) restoredFppVendor.replaceWith(freshFppVendor.cloneNode(true));
+      ['material_supplier', 'cmt_supplier', 'additional_process_supplier'].forEach(name => {
+        const freshOptions = form.querySelector(`[name="${name}"]`)?.innerHTML;
+        if (!freshOptions) return;
+        restored.querySelectorAll(`[name="${name}"]`).forEach(select => { select.innerHTML = freshOptions; });
+      });
       if (!restored.querySelector('[name="control_additional_process"]')) {
         const additionalProcess = form.querySelector('[data-process="additional"]');
         if (additionalProcess) restored.querySelector('[data-process="cut"]')?.after(additionalProcess.cloneNode(true));

@@ -704,6 +704,7 @@ class PurchasingWorkflowTests(TestCase):
         self.assertContains(response, "Biaya Additional Process per Product")
         self.assertContains(response, "Vendor CMT")
         self.assertContains(response, "Supplier")
+        self.assertContains(response, "'material_supplier', 'cmt_supplier', 'additional_process_supplier'")
         self.assertContains(response, "Material Type")
         self.assertContains(response, "Supporting Material")
         self.assertContains(response, "Bordir / Sablon")

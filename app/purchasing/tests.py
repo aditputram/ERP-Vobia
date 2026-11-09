@@ -385,17 +385,33 @@ class PurchasingWorkflowTests(TestCase):
                     "unit_price": Decimal("19000"),
                 },
             ],
+            process_costs=[
+                {
+                    "product": self.sku.product_variant.product,
+                    "cmt_supplier": self.supplier,
+                    "cmt_unit_cost": Decimal("25000"),
+                    "additional_process_unit_cost": Decimal("0"),
+                },
+                {
+                    "product": second_product,
+                    "cmt_supplier": self.supplier,
+                    "cmt_unit_cost": Decimal("25000"),
+                    "additional_process_unit_cost": Decimal("0"),
+                },
+            ],
         )
 
         po = generate_po_from_production_plan(plan.id, self.user)
-        item = po.items.get()
+        self.assertEqual(po.order_type, PurchaseOrder.OrderType.CMT)
+        material_po = plan.child_purchase_orders.get(order_type=PurchaseOrder.OrderType.MAIN_MATERIAL)
+        item = material_po.items.get()
         self.assertEqual(item.description, "Stripe Blue")
         self.assertEqual(item.quantity, Decimal("380"))
         self.assertIsNone(item.product)
         self.assertEqual(item.total_cost, Decimal("7220000"))
         self.client.force_login(self.user)
-        detail = self.client.get(reverse("purchasing:po_detail", args=[po.id]))
-        printed = self.client.get(reverse("purchasing:po_print", args=[po.id]))
+        detail = self.client.get(reverse("purchasing:po_detail", args=[material_po.id]))
+        printed = self.client.get(reverse("purchasing:po_print", args=[material_po.id]))
         self.assertContains(detail, "Product, Second Product")
         self.assertContains(printed, "Product, Second Product")
         self.assertNotContains(detail, "Multiple Products")

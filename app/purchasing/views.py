@@ -733,11 +733,13 @@ def production_plan_detail(request, plan_id):
                             messages.error(request, message)
                         return redirect("purchasing:production_plan_detail", plan_id=plan.id)
                     form.add_error(None, exc)
-                except Exception:
+                except Exception as exc:
                     if action != "generate":
                         raise
                     logger.exception("Failed to save Production Plan before PPO generation", extra={"plan_id": str(plan.id)})
                     messages.error(request, "Draft PPO & PO belum dapat dibuat. Production Plan tetap aman; coba lagi.")
+                    if request.user.is_superuser:
+                        messages.error(request, f"Diagnosis admin: save · {type(exc).__name__}: {exc}")
                     return redirect("purchasing:production_plan_detail", plan_id=plan.id)
                 else:
                     if action == "generate":
@@ -747,9 +749,11 @@ def production_plan_detail(request, plan_id):
                             for message in exc.messages:
                                 messages.error(request, message)
                             return redirect("purchasing:production_plan_detail", plan_id=plan.id)
-                        except Exception:
+                        except Exception as exc:
                             logger.exception("Failed to generate PPO & PO", extra={"plan_id": str(plan.id)})
                             messages.error(request, "Draft PPO & PO belum dapat dibuat. Production Plan tetap aman; coba lagi.")
+                            if request.user.is_superuser:
+                                messages.error(request, f"Diagnosis admin: generate · {type(exc).__name__}: {exc}")
                             return redirect("purchasing:production_plan_detail", plan_id=plan.id)
                         else:
                             messages.success(request, "Draft PO berhasil dibuat dari Production Plan.")

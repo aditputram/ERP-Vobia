@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from django.contrib import messages
@@ -39,6 +40,9 @@ from .services.workflows import (
     revise_legacy_wip_supplier,
     save_ppic_production_plan,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _requirements_with_ui_state(selected_requirement_ids=None, selected_quantities=None, need_month=None):
@@ -724,7 +728,17 @@ def production_plan_detail(request, plan_id):
                         unit_cogs=unit_cogs,
                     )
                 except ValidationError as exc:
+                    if action == "generate":
+                        for message in exc.messages:
+                            messages.error(request, message)
+                        return redirect("purchasing:production_plan_detail", plan_id=plan.id)
                     form.add_error(None, exc)
+                except Exception:
+                    if action != "generate":
+                        raise
+                    logger.exception("Failed to save Production Plan before PPO generation", extra={"plan_id": str(plan.id)})
+                    messages.error(request, "Draft PPO & PO belum dapat dibuat. Production Plan tetap aman; coba lagi.")
+                    return redirect("purchasing:production_plan_detail", plan_id=plan.id)
                 else:
                     if action == "generate":
                         try:
@@ -732,6 +746,10 @@ def production_plan_detail(request, plan_id):
                         except ValidationError as exc:
                             for message in exc.messages:
                                 messages.error(request, message)
+                            return redirect("purchasing:production_plan_detail", plan_id=plan.id)
+                        except Exception:
+                            logger.exception("Failed to generate PPO & PO", extra={"plan_id": str(plan.id)})
+                            messages.error(request, "Draft PPO & PO belum dapat dibuat. Production Plan tetap aman; coba lagi.")
                             return redirect("purchasing:production_plan_detail", plan_id=plan.id)
                         else:
                             messages.success(request, "Draft PO berhasil dibuat dari Production Plan.")

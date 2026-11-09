@@ -877,6 +877,7 @@ class PurchasingWorkflowTests(TestCase):
                 f"quantity_{requirement.id}": "100",
                 f"unit_cogs_{requirement.id}": "125000",
             },
+            follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -894,10 +895,32 @@ class PurchasingWorkflowTests(TestCase):
         incoming = self._approved_incoming(100)
         requirement = PPICRequirement.objects.get(incoming_plan=incoming)
         product = requirement.sku.product_variant.product
+        second_product = Product.objects.create(
+            code="P-2",
+            name="Second Product",
+            status=product.status,
+            category=product.category,
+        )
+        second_sku = SKU.objects.create(
+            sku="SKU-2",
+            product_variant=ProductVariant.objects.create(product=second_product, name="Blue"),
+            current_retail_price=Decimal("200000"),
+            current_master_cogs=Decimal("100000"),
+        )
+        second_projection = SalesProjection.objects.create(
+            scenario=self.scenario,
+            month=date(2026, 9, 1),
+            sku=second_sku,
+            system_recommendation=Decimal("50"),
+        )
+        approve_sales_projection(second_projection.id, 50, self.user)
+        second_incoming = create_incoming_plan(second_projection.id, 0)
+        approve_incoming_plan(second_incoming.id, 50, self.user)
+        second_requirement = PPICRequirement.objects.get(incoming_plan=second_incoming)
         plan = save_ppic_production_plan(
             actor=self.user,
-            requirements=[requirement],
-            quantities={str(requirement.id): "100"},
+            requirements=[requirement, second_requirement],
+            quantities={str(requirement.id): "100", str(second_requirement.id): "50"},
             values={
                 "production_method": PPICProductionPlan.ProductionMethod.CMT,
                 "control_material_purchase": True,
@@ -911,20 +934,38 @@ class PurchasingWorkflowTests(TestCase):
                 "target_material_purchase_date": date(2026, 8, 10),
                 "target_inbound_date": date(2026, 9, 1),
             },
-            materials=[{
-                "product": product,
-                "supplier": None,
-                "material_name": "Fabric",
-                "quantity": Decimal("100"),
-                "unit": "yard",
-                "unit_price": Decimal("5000"),
-            }],
-            process_costs=[{
-                "product": product,
-                "cmt_supplier": self.supplier,
-                "cmt_unit_cost": Decimal("40000"),
-                "additional_process_unit_cost": Decimal("0"),
-            }],
+            materials=[
+                {
+                    "product": product,
+                    "supplier": None,
+                    "material_name": "Fabric",
+                    "quantity": Decimal("100"),
+                    "unit": "yard",
+                    "unit_price": Decimal("5000"),
+                },
+                {
+                    "product": second_product,
+                    "supplier": None,
+                    "material_name": "Fabric",
+                    "quantity": Decimal("50"),
+                    "unit": "yard",
+                    "unit_price": Decimal("5000"),
+                },
+            ],
+            process_costs=[
+                {
+                    "product": product,
+                    "cmt_supplier": self.supplier,
+                    "cmt_unit_cost": Decimal("40000"),
+                    "additional_process_unit_cost": Decimal("0"),
+                },
+                {
+                    "product": second_product,
+                    "cmt_supplier": self.supplier,
+                    "cmt_unit_cost": Decimal("40000"),
+                    "additional_process_unit_cost": Decimal("0"),
+                },
+            ],
         )
         self.client.force_login(self.user)
         saved_audit_count = AuditEvent.objects.filter(action="ppic_production_plan_saved").count()
@@ -933,7 +974,7 @@ class PurchasingWorkflowTests(TestCase):
             reverse("purchasing:production_plan_detail", args=[plan.id]),
             {
                 "action": "generate",
-                "requirement": [str(requirement.id)],
+                "requirement": [str(requirement.id), str(second_requirement.id)],
                 "production_method": PPICProductionPlan.ProductionMethod.CMT,
                 "control_material_purchase": "on",
                 "control_inbound": "on",
@@ -941,26 +982,32 @@ class PurchasingWorkflowTests(TestCase):
                 "target_inbound_date": "2026-09-01",
                 f"quantity_{requirement.id}": "100",
                 f"unit_cogs_{requirement.id}": "45000",
-                "material_product": [str(product.id)],
-                "material_name": ["Fabric"],
-                "material_type": ["MAIN"],
-                "material_supplier": [""],
-                "material_quantity": ["100"],
-                "material_unit": ["yard"],
-                "material_unit_price": ["5000"],
-                "cmt_cost_product": [str(product.id)],
-                "cmt_supplier": [str(self.supplier.id)],
-                "cmt_unit_cost": ["40000"],
+                f"quantity_{second_requirement.id}": "50",
+                f"unit_cogs_{second_requirement.id}": "45000",
+                "material_product": [str(product.id), str(second_product.id)],
+                "material_name": ["Fabric", "Fabric"],
+                "material_type": ["MAIN", "MAIN"],
+                "material_supplier": ["", ""],
+                "material_quantity": ["100", "50"],
+                "material_unit": ["yard", "yard"],
+                "material_unit_price": ["5000", "5000"],
+                "cmt_cost_product": [str(product.id), str(second_product.id)],
+                "cmt_supplier": [str(self.supplier.id), str(self.supplier.id)],
+                "cmt_unit_cost": ["40000", "40000"],
             },
+            follow=True,
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Material Fabric: supplier wajib dipilih sebelum Generate PPO &amp; PO.")
+        self.assertContains(response, "Setiap material CMT wajib memiliki supplier.")
         self.assertContains(response, 'value="Fabric"')
         self.assertEqual(
             AuditEvent.objects.filter(action="ppic_production_plan_saved").count(),
-            saved_audit_count,
+            saved_audit_count + 1,
         )
+        plan.refresh_from_db()
+        self.assertEqual(plan.materials.count(), 2)
+        self.assertEqual(plan.process_costs.count(), 2)
         self.assertEqual(PurchaseOrder.objects.count(), 0)
 
     def test_po_generator_lists_saved_draft_plans_and_honors_month_filter(self):

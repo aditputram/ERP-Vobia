@@ -709,12 +709,6 @@ def production_plan_detail(request, plan_id):
                     requirements,
                     additional_process_controlled=request.POST.get("control_additional_process") == "on",
                 )
-                if action == "generate":
-                    missing_supplier = next((row for row in materials if row["supplier"] is None), None)
-                    if missing_supplier:
-                        raise ValidationError(
-                            f"Material {missing_supplier['material_name']}: supplier wajib dipilih sebelum Generate PPO & PO."
-                        )
             except ValidationError as exc:
                 form.add_error(None, exc)
             if submitted_requirements and form.is_valid():
@@ -738,6 +732,7 @@ def production_plan_detail(request, plan_id):
                         except ValidationError as exc:
                             for message in exc.messages:
                                 messages.error(request, message)
+                            return redirect("purchasing:production_plan_detail", plan_id=plan.id)
                         else:
                             messages.success(request, "Draft PO berhasil dibuat dari Production Plan.")
                             return redirect("purchasing:po_detail", po_id=po.id)

@@ -814,6 +814,8 @@ def development_product_detail(request, product_id):
             "timeline": timeline,
             "can_edit_details": can_edit_module(request.user, "rnd")
             and product.development_stage != DevelopmentProduct.DevelopmentStage.NOT_STARTED,
+            "can_progress": can_edit_module(request.user, "rnd"),
+            "can_decide": can_approve_module(request.user, "rnd"),
             "can_request_mdr_revision": (
                 request.user.is_superuser
                 and product.document_status == DevelopmentProduct.DocumentStatus.APPROVED
@@ -907,6 +909,8 @@ def product_development_transition(request, product_id):
         return HttpResponseForbidden("Aksi ini tidak tersedia untuk permission akun Anda.")
     else:
         messages.success(request, "Tahap Development Product berhasil diperbarui.")
+    if request.POST.get("next") == "product":
+        return redirect("rnd:development_product_detail", product_id=product.id)
     return redirect("rnd:development_detail", collection_id=product.collection_id)
 
 

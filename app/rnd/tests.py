@@ -1828,12 +1828,40 @@ class RndWorkflowTests(TestCase):
         self.assertEqual(product.document_status, DevelopmentProduct.DocumentStatus.SUBMITTED)
 
         self.client.force_login(self.admin)
-        self.client.post(reverse("rnd:product_approve", args=[product.id]))
-        self.client.force_login(self.rnd_approver)
-        self.client.post(
-            reverse("rnd:product_development_transition", args=[product.id]),
-            {"action": "prototype_resampling"},
+        pending_timeline = self.client.get(
+            reverse("rnd:development_product_detail", args=[product.id])
         )
+        self.assertContains(pending_timeline, "Minta Resampling · Siapkan Prototype 2")
+        self.assertNotContains(pending_timeline, "Setujui Final Development")
+        start_resampling = self.client.post(
+            reverse("rnd:product_development_transition", args=[product.id]),
+            {"action": "prototype_resampling", "next": "product"},
+        )
+        self.assertRedirects(
+            start_resampling,
+            reverse("rnd:development_product_detail", args=[product.id]),
+        )
+        product.refresh_from_db()
+        self.assertEqual(product.development_stage, DevelopmentProduct.DevelopmentStage.RESAMPLING)
+        resampling_timeline = self.client.get(
+            reverse("rnd:development_product_detail", args=[product.id])
+        )
+        self.assertContains(resampling_timeline, "Resampling 1")
+        self.assertContains(resampling_timeline, "Prototype 2")
+        self.assertContains(resampling_timeline, "MDR aktif wajib Approved")
+
+        self.client.force_login(self.rnd_editor)
+        blocked_completion = self.client.post(
+            reverse("rnd:product_development_transition", args=[product.id]),
+            {"action": "resampling_completed", "next": "product"},
+            follow=True,
+        )
+        self.assertContains(blocked_completion, "MDR aktif wajib Approved")
+        product.refresh_from_db()
+        self.assertEqual(product.development_stage, DevelopmentProduct.DevelopmentStage.RESAMPLING)
+
+        self.client.force_login(self.admin)
+        self.client.post(reverse("rnd:product_approve", args=[product.id]))
         self.client.force_login(self.rnd_editor)
         self.client.post(
             reverse("rnd:product_development_transition", args=[product.id]),
@@ -1858,6 +1886,26 @@ class RndWorkflowTests(TestCase):
         timeline = self.client.get(reverse("rnd:development_product_detail", args=[product.id]))
         self.assertContains(timeline, "Prototype 1 menggunakan Dokumen MDR 000")
         self.assertContains(timeline, "Prototype 2 menggunakan Dokumen MDR 001")
+
+        self.client.force_login(self.rnd_approver)
+        self.client.post(
+            reverse("rnd:product_development_transition", args=[product.id]),
+            {"action": "prototype_resampling"},
+        )
+        self.client.force_login(self.rnd_editor)
+        self.client.post(
+            reverse("rnd:product_development_transition", args=[product.id]),
+            {"action": "resampling_completed"},
+        )
+        product.refresh_from_db()
+        self.assertEqual(product.prototype_number, 3)
+        self.assertEqual(
+            DevelopmentProductStageDate.objects.get(
+                product=product,
+                stage_key="prototype_3",
+            ).document_revision,
+            1,
+        )
 
     def test_development_attachment_can_be_deleted_and_reuploaded(self):
         collection = self._collection()

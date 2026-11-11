@@ -515,7 +515,12 @@ def transition_product_development(*, product, actor, action):
         raise ValidationError("Collection belum masuk ke tab Development.")
     if product.collection.status != Collection.Status.DEVELOPMENT:
         raise ValidationError("Collection sudah dikunci setelah handover ke Marketing.")
-    if product.document_status != DevelopmentProduct.DocumentStatus.APPROVED:
+    if (
+        action != "prototype_resampling"
+        and product.document_status != DevelopmentProduct.DocumentStatus.APPROVED
+    ):
+        if action == "resampling_completed":
+            raise ValidationError("MDR aktif wajib Approved sebelum Prototype berikutnya dibuat.")
         raise ValidationError("Dokumen Product wajib tetap Approved selama Development.")
 
     approval_actions = {"prototype_final", "prototype_resampling"}

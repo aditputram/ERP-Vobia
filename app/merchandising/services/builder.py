@@ -2,6 +2,7 @@ from calendar import monthrange
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Max, Sum
@@ -1055,7 +1056,15 @@ def recommendation_for(
     baseline_qty = None
     previous_ending_qty = None
     incoming_qty = None
-    if target_month == current_month:
+    historical_uat = target_month < current_month
+    if historical_uat:
+        if not settings.OPERATION_UAT_ALLOW_HISTORICAL_INCOMING:
+            raise ValidationError("Projection historis tidak boleh dibangun ulang dari halaman ini.")
+        previous_ending_qty = beginning
+        baseline_month = previous_month(target_month)
+        baseline_qty = actual_sales_qty_for_skus([sku], baseline_month)[sku.id]
+        recommendation = actual_sales_qty_for_skus([sku], target_month)[sku.id]
+    elif target_month == current_month:
         current_lines = SalesOrderLine.objects.filter(
             is_counted=True,
             order__order_date__gte=current_month,
@@ -1133,8 +1142,6 @@ def recommendation_for(
             beginning_qty=beginning,
             previous_ending_qty=previous_ending_qty,
         )
-    else:
-        raise ValidationError("Projection historis tidak boleh dibangun ulang dari halaman ini.")
     recommendation = apply_product_guardrail(
         recommendation,
         product.status.name,
@@ -1169,6 +1176,7 @@ def recommendation_for(
         "stock_ratio": stock_ratio,
         "incoming_gap": incoming_gap,
         "incoming_allowed": incoming_allowed,
+        "historical_uat": historical_uat,
     }
 
 
@@ -1243,6 +1251,11 @@ def apply_rule(*, scenario, target_month, scope_type, method, parameter, actor, 
         adjusted_qty = row["recommendation"]
         if adjustments and str(row["sku"].id) in adjustments:
             adjusted_qty = Decimal(adjustments[str(row["sku"].id)])
+        if row["historical_uat"] and adjusted_qty != row["recommendation"]:
+            raise ValidationError(
+                f"{row['sku'].sku}: Sales Projection historis dikunci mengikuti Actual Sales; "
+                "hanya Incoming yang dapat disesuaikan selama UAT."
+            )
         if adjusted_qty < 0 or adjusted_qty != adjusted_qty.to_integral_value():
             raise ValidationError(f"{row['sku'].sku}: Sales Projection harus bilangan bulat dan tidak boleh negatif.")
         adjustment = adjusted_qty - row["recommendation"]

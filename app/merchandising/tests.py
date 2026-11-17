@@ -4,7 +4,7 @@ from io import BytesIO
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from openpyxl import load_workbook
 
@@ -238,6 +238,49 @@ class MerchandisingWorkflowTests(TestCase):
             sku=self.sku,
             system_recommendation=Decimal("100"),
         )
+
+    def test_uat_historical_month_locks_sales_to_actual_and_keeps_incoming_editable(self):
+        with (
+            patch(
+                "merchandising.services.builder.projected_beginning",
+                return_value=Decimal("40"),
+            ),
+            patch(
+                "merchandising.services.builder.actual_sales_qty_for_skus",
+                side_effect=[
+                    {self.sku.id: Decimal("30")},
+                    {self.sku.id: Decimal("35")},
+                ],
+            ),
+            override_settings(OPERATION_UAT_ALLOW_HISTORICAL_INCOMING=True),
+        ):
+            row = recommendation_for(
+                sku=self.sku,
+                target_month=date(2026, 9, 1),
+                method=ProjectionRule.Method.SAME_AS_LAST_MONTH,
+                parameter=Decimal("0"),
+                today=date(2026, 11, 17),
+                scenario=self.scenario,
+            )
+
+        self.assertEqual(row["baseline_qty"], Decimal("30"))
+        self.assertEqual(row["recommendation"], Decimal("35"))
+        self.assertEqual(row["incoming_gap"], Decimal("13"))
+        self.assertTrue(row["historical_uat"])
+
+        with override_settings(OPERATION_UAT_ALLOW_HISTORICAL_INCOMING=False):
+            with self.assertRaisesMessage(
+                ValidationError,
+                "Projection historis tidak boleh dibangun ulang dari halaman ini.",
+            ):
+                recommendation_for(
+                    sku=self.sku,
+                    target_month=date(2026, 9, 1),
+                    method=ProjectionRule.Method.SAME_AS_LAST_MONTH,
+                    parameter=Decimal("0"),
+                    today=date(2026, 11, 17),
+                    scenario=self.scenario,
+                )
 
     def test_scenario_stock_chain_follows_prior_ending_and_monthly_incoming(self):
         post_opening(
